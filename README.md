@@ -17,8 +17,8 @@
   <a href="https://github.com/Forget-C/Jellyfish/actions/workflows/deploy-site.yml">
     <img src="https://github.com/Forget-C/Jellyfish/actions/workflows/deploy-site.yml/badge.svg" alt="Deploy Site" />
   </a>
-  <a href="https://github.com/Forget-C/Jellyfish/actions/workflows/ghcr-images.yml">
-    <img src="https://github.com/Forget-C/Jellyfish/actions/workflows/ghcr-images.yml/badge.svg" alt="Build and push images" />
+  <a href="https://github.com/Forget-C/Jellyfish/actions/workflows/deploy-prod.yml">
+    <img src="https://github.com/Forget-C/Jellyfish/actions/workflows/deploy-prod.yml/badge.svg" alt="Build and Deploy" />
   </a>
 </p>
 

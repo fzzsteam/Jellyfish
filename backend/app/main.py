@@ -1,11 +1,13 @@
 """FastAPI 应用入口。"""
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles as _StaticFiles
 
 from app.api.v1 import router as api_v1_router
 from app.bootstrap import bootstrap_all_registries
@@ -92,3 +94,8 @@ async def health():
     """健康检查。"""
     from app.schemas.common import success_response
     return success_response({"status": "ok"})
+
+
+_dist_dir = Path(__file__).resolve().parent.parent / "dist"
+if _dist_dir.exists():
+    app.mount("/", _StaticFiles(directory=str(_dist_dir), html=True), name="frontend")

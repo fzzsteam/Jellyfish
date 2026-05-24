@@ -1,0 +1,125 @@
+name: Build and Deploy (Production)
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "镜像 tag（如 v1.2.3，留空则使用触发此 workflow 的 tag）"
+        required: false
+        type: string
+
+concurrency:
+  group: deploy-prod-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    name: 构建并部署生产镜像
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 获取版本号
+        id: version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            RESOLVED_TAG="$INPUT_TAG"
+          else
+            RESOLVED_TAG="${GITHUB_REF_NAME}"
+          fi
+          if [[ ! "$RESOLVED_TAG" =~ ^v ]]; then
+            echo "错误：tag '$RESOLVED_TAG' 不符合 v* 格式，仅允许在 v* tag 上触发生产部署"
+            exit 1
+          fi
+          echo "tag=${RESOLVED_TAG}" >> $GITHUB_OUTPUT
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 ACR
+        uses: docker/login-action@v3
+        with:
+          registry: crpi-7ajeyduewy90avu4.cn-shenzhen.personal.cr.aliyuncs.com
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: 安装 aliyun CLI
+        run: |
+          curl -sLo /tmp/aliyun-cli.tgz https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz
+          tar -xzf /tmp/aliyun-cli.tgz -C /tmp
+          sudo mv /tmp/aliyun /usr/local/bin/aliyun
+
+      - name: 构建并推送镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/combined.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            crpi-7ajeyduewy90avu4.cn-shenzhen.personal.cr.aliyuncs.com/fzzs/jellyfish:${{ steps.version.outputs.tag }}
+            crpi-7ajeyduewy90avu4.cn-shenzhen.personal.cr.aliyuncs.com/fzzs/jellyfish:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 清理 ACR 旧版本 tag（保留最新 3 个 v* tag）
+        env:
+          ALIBABACLOUD_ACCESS_KEY_ID: ${{ secrets.ALIYUN_ACR_AK_ID }}
+          ALIBABACLOUD_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_ACR_AK_SECRET }}
+          ALIBABACLOUD_REGION_ID: ${{ vars.SAE_REGION_ID }}
+        run: |
+          if [ -z "$ALIBABACLOUD_ACCESS_KEY_ID" ]; then
+            echo "ALIYUN_ACR_AK_ID 未配置，跳过 ACR tag 清理"
+            exit 0
+          fi
+
+          TAGS_JSON=$(aliyun cr GetRepoTags \
+            --RepoNamespace fzzs \
+            --RepoName jellyfish 2>/dev/null || echo '{"data":{"tags":[]}}')
+
+          TAGS_TO_DELETE=$(echo "$TAGS_JSON" | \
+            jq -r '.data.tags[] | select(.tag | test("^v")) | [.imageCreate, .tag] | @tsv' 2>/dev/null | \
+            sort -t$'\t' -k1 -rn | \
+            awk 'NR>3 {print $2}')
+
+          if [ -z "$TAGS_TO_DELETE" ]; then
+            echo "无需清理（v* tag 数量 ≤ 3）"
+          else
+            for TAG in $TAGS_TO_DELETE; do
+              echo "删除旧 tag: $TAG"
+              aliyun cr DeleteRepoTag \
+                --RepoNamespace fzzs \
+                --RepoName jellyfish \
+                --Tag "$TAG" || echo "警告：删除 $TAG 失败，继续"
+            done
+            echo "清理完成"
+          fi
+
+      - name: 部署到 SAE 生产应用
+        env:
+          ALIBABACLOUD_ACCESS_KEY_ID: ${{ secrets.ALIYUN_SAE_AK_ID }}
+          ALIBABACLOUD_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_SAE_AK_SECRET }}
+          ALIBABACLOUD_REGION_ID: ${{ vars.SAE_REGION_ID }}
+          SAE_PROD_APP_ID: ${{ secrets.SAE_PROD_APP_ID }}
+        run: |
+          if [ -z "$SAE_PROD_APP_ID" ]; then
+            echo "SAE_PROD_APP_ID 未配置，跳过生产部署"
+            exit 0
+          fi
+
+          aliyun sae DeployApplication \
+            --AppId "$SAE_PROD_APP_ID" \
+            --ImageUrl "crpi-7ajeyduewy90avu4-vpc.cn-shenzhen.personal.cr.aliyuncs.com/fzzs/jellyfish:${{ steps.version.outputs.tag }}"
+
+          echo "SAE 生产环境部署已触发，请在控制台确认发布状态"
+          echo "镜像：crpi-7ajeyduewy90avu4-vpc.cn-shenzhen.personal.cr.aliyuncs.com/fzzs/jellyfish:${{ steps.version.outputs.tag }}"
