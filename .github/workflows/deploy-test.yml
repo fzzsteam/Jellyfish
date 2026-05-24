@@ -1,0 +1,64 @@
+name: Build and Deploy (Test)
+
+on:
+  push:
+    branches:
+      - test
+  workflow_dispatch:
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    name: 构建并部署测试镜像
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 设置 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登录 ACR
+        uses: docker/login-action@v3
+        with:
+          registry: crpi-7ajeyduewy90avu4.cn-shenzhen.personal.cr.aliyuncs.com
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: 安装 aliyun CLI
+        run: |
+          curl -sLo /tmp/aliyun-cli.tgz https://aliyuncli.alicdn.com/aliyun-cli-linux-latest-amd64.tgz
+          tar -xzf /tmp/aliyun-cli.tgz -C /tmp
+          sudo mv /tmp/aliyun /usr/local/bin/aliyun
+
+      - name: 构建并推送测试镜像
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/docker/combined.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: crpi-7ajeyduewy90avu4.cn-shenzhen.personal.cr.aliyuncs.com/fzzs/jellyfish:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 部署到 SAE 测试应用
+        env:
+          ALIBABACLOUD_ACCESS_KEY_ID: ${{ secrets.ALIYUN_SAE_AK_ID }}
+          ALIBABACLOUD_ACCESS_KEY_SECRET: ${{ secrets.ALIYUN_SAE_AK_SECRET }}
+          ALIBABACLOUD_REGION_ID: ${{ vars.SAE_REGION_ID }}
+          SAE_TEST_APP_ID: ${{ secrets.SAE_TEST_APP_ID }}
+        run: |
+          if [ -z "$SAE_TEST_APP_ID" ]; then
+            echo "SAE_TEST_APP_ID 未配置，跳过测试部署"
+            exit 0
+          fi
+
+          aliyun sae DeployApplication \
+            --AppId "$SAE_TEST_APP_ID" \
+            --ImageUrl "crpi-7ajeyduewy90avu4-vpc.cn-shenzhen.personal.cr.aliyuncs.com/fzzs/jellyfish:test"
+
+          echo "SAE 测试环境部署已触发，请在控制台确认发布状态"
