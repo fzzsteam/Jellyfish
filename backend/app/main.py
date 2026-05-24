@@ -96,6 +96,17 @@ async def health():
     return success_response({"status": "ok"})
 
 
+class _SPAStaticFiles(_StaticFiles):
+    async def get_response(self, path: str, scope):
+        try:
+            return await super().get_response(path, scope)
+        except Exception as exc:
+            from starlette.exceptions import HTTPException as _HTTPException
+            if isinstance(exc, _HTTPException) and exc.status_code == 404:
+                return await super().get_response("index.html", scope)
+            raise
+
+
 _dist_dir = Path(__file__).resolve().parent.parent / "dist"
 if _dist_dir.exists():
-    app.mount("/", _StaticFiles(directory=str(_dist_dir), html=True), name="frontend")
+    app.mount("/", _SPAStaticFiles(directory=str(_dist_dir), html=True), name="frontend")
