@@ -22,3 +22,7 @@ htmlcov/
 .jellyfish.db
 jellyfish.db
 .env
+
+# SAE 环境变量配置（包含真实凭据，仅本地使用）
+deploy/sae/env-test.json
+deploy/sae/env-prod.json

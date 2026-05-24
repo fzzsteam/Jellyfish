@@ -14,6 +14,8 @@ COPY front/ ./
 # 构建参数：前端 API baseURL，默认走相对路径 /api/v1（与后端同源）
 ARG VITE_API_BASE_URL=/api/v1
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+# 不设 BACKEND_URL，让 openapi.ts 的 BASE 为空串，走同源请求
+ENV VITE_BACKEND_URL=""
 
 RUN pnpm run build
 

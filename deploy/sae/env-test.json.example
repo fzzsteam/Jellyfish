@@ -1,0 +1,14 @@
+{
+  "DATABASE_URL":         "mysql+aiomysql://jellyfish:<password>@<rds-host>:3306/jellyfish_test",
+  "REDIS_HOST":           "<redis-host>",
+  "REDIS_PORT":           "6379",
+  "REDIS_DB":             "1",
+  "REDIS_PASSWORD":       "",
+  "S3_ENDPOINT_URL":      "https://oss-cn-shenzhen-internal.aliyuncs.com",
+  "S3_ACCESS_KEY_ID":     "<oss-ak-id>",
+  "S3_SECRET_ACCESS_KEY": "<oss-ak-secret>",
+  "S3_BUCKET_NAME":       "fzzs-jellyfish",
+  "S3_BASE_PATH":         "jellyfish/test",
+  "S3_PUBLIC_BASE_URL":   "https://fzzs-jellyfish.oss-cn-shenzhen.aliyuncs.com",
+  "DEBUG":                "false"
+}
