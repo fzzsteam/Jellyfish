@@ -18,6 +18,8 @@ ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 ENV VITE_BACKEND_URL=""
 
 RUN pnpm run build
+# 覆盖 public/env.js 的本地开发默认值，生产走同源相对路径
+RUN printf 'window.__ENV=window.__ENV||{};window.__ENV.BACKEND_URL="";\n' > ./dist/env.js
 
 
 # ── Stage 2: 后端 + 前端产物 + supervisord ────────────────────────
