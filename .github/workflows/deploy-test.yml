@@ -6,6 +6,10 @@ on:
       - test
   workflow_dispatch:
 
+concurrency:
+  group: deploy-test-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   docker:
     runs-on: ubuntu-latest
