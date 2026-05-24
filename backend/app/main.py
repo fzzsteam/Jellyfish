@@ -92,3 +92,13 @@ async def health():
     """健康检查。"""
     from app.schemas.common import success_response
     return success_response({"status": "ok"})
+
+
+# 生产环境：serve 前端静态文件（dist/ 存在时自动挂载）
+# 本地纯后端开发时 dist/ 不存在，条件跳过，不影响开发体验
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles as _StaticFiles
+
+_dist_dir = Path(__file__).resolve().parent.parent / "dist"
+if _dist_dir.exists():
+    app.mount("/", _StaticFiles(directory=str(_dist_dir), html=True), name="frontend")
