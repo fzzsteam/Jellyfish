@@ -39,6 +39,7 @@ import { useRelationTaskNotification } from '../components/taskNotificationHelpe
 import { useTaskPageContext } from '../components/taskPageContext'
 import { createTaskSettledReloader } from '../components/taskResultHelpers'
 import { TASK_COPY } from '../components/taskCopy'
+import { generateUUID } from '../../../utils'
 
 const { Header, Content } = Layout
 type ShotListFilter = 'all' | 'pending' | 'generating' | 'ready'
@@ -256,7 +257,7 @@ export function ChapterShotsPage() {
       const nextIndex = shots.reduce((m, s) => Math.max(m, s.index), 0) + 1
       const res = await StudioShotsService.createShotApiV1StudioShotsPost({
         requestBody: {
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           chapter_id: chapterId,
           index: nextIndex,
           title: v.title.trim(),

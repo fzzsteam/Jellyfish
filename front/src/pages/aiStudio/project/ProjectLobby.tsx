@@ -39,6 +39,7 @@ import { getChapterPreparationState } from './ProjectWorkbench/chapterPreparatio
 import { ensureHasShotsBeforeShooting } from './ProjectWorkbench/ensureHasShotsBeforeShooting'
 import { getChapterShotsPath, getChapterStudioPath } from './ProjectWorkbench/routes'
 import { loadProjectFlowStatsForChapters, type ProjectFlowStats } from './ProjectWorkbench/projectFlowStats'
+import { generateUUID } from '../../../utils'
 
 type ViewMode = 'grid' | 'compact' | 'large'
 type FilterTab = 'all' | 'editRaw' | 'extractShots' | 'prepareShots' | 'generating' | 'ready'
@@ -118,12 +119,7 @@ const ProjectLobby: React.FC = () => {
     }
   }
 
-  const newProjectId = () => {
-    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-      return crypto.randomUUID()
-    }
-    return `p_${Date.now()}_${Math.random().toString(16).slice(2)}`
-  }
+  const newProjectId = generateUUID
 
   const load = async () => {
     setLoading(true)

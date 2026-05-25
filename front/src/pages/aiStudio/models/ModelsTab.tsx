@@ -48,6 +48,7 @@ import {
   categoryColorMap,
   SORT_OPTIONS,
 } from './constants'
+import { generateUUID } from '../../../utils'
 
 export default function ModelsTab() {
   const [providers, setProviders] = useState<ProviderRead[]>([])
@@ -206,10 +207,7 @@ export default function ModelsTab() {
           message.warning('请先添加供应商后再添加模型')
           return
         }
-        const modelId =
-          typeof crypto !== 'undefined' && crypto.randomUUID
-            ? crypto.randomUUID()
-            : `model_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+        const modelId = generateUUID()
         await LlmService.createModelApiV1LlmModelsPost({
           requestBody: {
             id: modelId,

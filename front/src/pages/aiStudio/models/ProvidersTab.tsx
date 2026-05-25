@@ -42,6 +42,7 @@ import {
   TABLE_ACTION_BTN_TEST_CLASS,
   maskUrl,
 } from './constants'
+import { generateUUID } from '../../../utils'
 
 export default function ProvidersTab() {
   const [providers, setProviders] = useState<ProviderRead[]>([])
@@ -171,10 +172,7 @@ export default function ProvidersTab() {
         })
         message.success('供应商已更新')
       } else {
-        const id =
-          typeof crypto !== 'undefined' && crypto.randomUUID
-            ? crypto.randomUUID()
-            : `prov_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`
+        const id = generateUUID()
         await LlmService.createProviderApiV1LlmProvidersPost({
           requestBody: {
             id,
