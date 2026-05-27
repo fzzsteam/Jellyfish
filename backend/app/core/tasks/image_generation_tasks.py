@@ -1,4 +1,4 @@
-"""图片生成任务（Task）：对接 OpenAI Images API 与火山引擎（方舟） ImageGenerations。
+"""图片生成任务（Task）：对接 OpenAI Images API、火山引擎（方舟）与阿里百炼（DashScope）。
 
 供应商 HTTP 实现在 `app.core.integrations`；本模块保留 BaseTask 编排与 registry 分派。
 """
@@ -8,8 +8,10 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
 
+
 from app.core.integrations.openai.images import OpenAIImageApiAdapter
 from app.core.integrations.volcengine.images import VolcengineImageApiAdapter
+from app.core.integrations.aliyun_bailian.images import AliyunBailianImageApiAdapter
 from app.core.contracts.image_generation import (
     ImageGenerationInput,
     ImageGenerationResult,
@@ -31,6 +33,7 @@ __all__ = [
     "AbstractImageGenerationTask",
     "OpenAIImageGenerationTask",
     "VolcengineImageGenerationTask",
+    "AliyunBailianImageGenerationTask",
     "ImageGenerationTask",
 ]
 
@@ -143,6 +146,33 @@ class VolcengineImageGenerationTask(AbstractImageGenerationTask):
         return self._deferred
 
 
+class AliyunBailianImageGenerationTask(AbstractImageGenerationTask):
+    """阿里百炼 DashScope 图片生成：委托 `AliyunBailianImageApiAdapter`。"""
+
+    def __init__(
+        self,
+        *,
+        adapter: AliyunBailianImageApiAdapter | None = None,
+        provider_config: ProviderConfig,
+        input_: ImageGenerationInput,
+        timeout_s: float = 60.0,
+    ) -> None:
+        super().__init__(provider_config=provider_config, input_=input_, timeout_s=timeout_s)
+        self._adapter = adapter or AliyunBailianImageApiAdapter()
+        self._deferred: ImageGenerationResult | None = None
+
+    async def _create_task(self) -> None:
+        self._deferred = await self._adapter.generate(
+            cfg=self._cfg,
+            inp=self._input,
+            timeout_s=self._timeout_s,
+        )
+
+    async def _poll_and_get_result(self) -> ImageGenerationResult:
+        assert self._deferred is not None
+        return self._deferred
+
+
 class ImageGenerationTask(BaseTask):
     """按 provider 分派到 OpenAI / 火山实现；对外构造函数与原先一致。"""
 
@@ -184,6 +214,19 @@ class ImageGenerationTask(BaseTask):
         timeout_s: float = 60.0,
     ) -> AbstractImageGenerationTask:
         return VolcengineImageGenerationTask(
+            provider_config=provider_config,
+            input_=input_,
+            timeout_s=timeout_s,
+        )
+
+    @staticmethod
+    def _build_aliyun_bailian_impl(
+        *,
+        provider_config: ProviderConfig,
+        input_: ImageGenerationInput,
+        timeout_s: float = 60.0,
+    ) -> AbstractImageGenerationTask:
+        return AliyunBailianImageGenerationTask(
             provider_config=provider_config,
             input_=input_,
             timeout_s=timeout_s,

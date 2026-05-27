@@ -42,25 +42,35 @@ def register_video_model_capability(
         from app.core.integrations.openai.video_capabilities import register_openai_video_capability
 
         register_openai_video_capability(model_prefix=model_prefix, capability=capability)
-        return
-    from app.core.integrations.volcengine.video_capabilities import register_volcengine_video_capability
+    elif provider == "volcengine":
+        from app.core.integrations.volcengine.video_capabilities import register_volcengine_video_capability
 
-    register_volcengine_video_capability(model_prefix=model_prefix, capability=capability)
+        register_volcengine_video_capability(model_prefix=model_prefix, capability=capability)
+    elif provider == "aliyun_bailian":
+        from app.core.integrations.aliyun_bailian.video_capabilities import register_aliyun_bailian_video_capability
 
+        register_aliyun_bailian_video_capability(model_prefix=model_prefix, capability=capability)
 
 def clear_video_model_capability_overrides(*, provider: ProviderKey | None = None) -> None:
     """兼容入口：清空能力覆盖；供测试或重置场景使用。"""
     from app.core.integrations.openai.video_capabilities import clear_openai_video_capability_overrides
     from app.core.integrations.volcengine.video_capabilities import clear_volcengine_video_capability_overrides
+    from app.core.integrations.aliyun_bailian.video_capabilities import clear_aliyun_bailian_video_capability_overrides
 
     if provider is None:
         clear_openai_video_capability_overrides()
         clear_volcengine_video_capability_overrides()
-        return
-    if provider == "openai":
+        clear_aliyun_bailian_video_capability_overrides()
+
+    elif provider == "openai":
         clear_openai_video_capability_overrides()
-        return
-    clear_volcengine_video_capability_overrides()
+
+    elif provider == "volcengine":
+        clear_volcengine_video_capability_overrides()
+
+    elif provider == "aliyun_bailian":
+        clear_aliyun_bailian_video_capability_overrides()
+
 
 
 def resolve_video_capability(*, provider: ProviderKey, model: str | None) -> VideoModelCapability:
@@ -68,9 +78,14 @@ def resolve_video_capability(*, provider: ProviderKey, model: str | None) -> Vid
         from app.core.integrations.openai.video_capabilities import resolve_openai_video_capability
 
         return resolve_openai_video_capability(model)
-    from app.core.integrations.volcengine.video_capabilities import resolve_volcengine_video_capability
+    elif provider == "volcengine":   
+        from app.core.integrations.volcengine.video_capabilities import resolve_volcengine_video_capability
 
-    return resolve_volcengine_video_capability(model)
+        return resolve_volcengine_video_capability(model)
+    elif provider == "aliyun_bailian":
+        from app.core.integrations.aliyun_bailian.video_capabilities import resolve_aliyun_bailian_video_capability
+
+        return resolve_aliyun_bailian_video_capability(model)
 
 
 def resolve_effective_ratio(input_: VideoGenerationInput) -> str | None:

@@ -69,6 +69,22 @@ def safe_body_for_log_volcengine_image(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def safe_body_for_log_aliyun_bailian_image(body: dict[str, Any]) -> dict[str, Any]:
+    """阿里百炼 DashScope 图片生成：日志中截断 prompt。"""
+    return {
+        **(
+            {
+                "prompt": (
+                    (body.get("prompt", "")[:300] + "...(truncated)")
+                    if isinstance(body.get("prompt"), str) and len(body.get("prompt", "")) > 300
+                    else body.get("prompt")
+                )
+            }
+        ),
+        **{k: v for k, v in body.items() if k != "prompt"},
+    }
+
+
 def log_image_http_request(*, provider: str, method: str, url: str, headers: dict[str, str], body_log: str) -> None:
     logger.warning(
         "image_generation_http_request provider=%s method=%s url=%s headers=%s body=%s",

@@ -1,4 +1,4 @@
-"""视频生成任务（Task）：对接 OpenAI Videos API 与火山方舟内容生成。
+"""视频生成任务（Task）：对接 OpenAI Videos API、火山方舟内容生成与阿里百炼 DashScope 视频。
 
 HTTP 细节在 `app.core.integrations`；本模块保留轮询节奏与 BaseTask 契约。
 """
@@ -11,6 +11,7 @@ from typing import Any, AsyncIterator
 
 from app.core.integrations.openai.video import OpenAIVideoApiAdapter
 from app.core.integrations.volcengine.video import VolcengineVideoApiAdapter
+from app.core.integrations.aliyun_bailian.video import AliyunBailianVideoApiAdapter
 from app.core.contracts.provider import ProviderConfig
 from app.core.tasks.registry import resolve_task_adapter
 from app.core.contracts.video_generation import VideoGenerationInput, VideoGenerationResult
@@ -22,6 +23,7 @@ __all__ = [
     "AbstractVideoGenerationTask",
     "OpenAIVideoGenerationTask",
     "VolcengineVideoGenerationTask",
+    "AliyunBailianVideoGenerationTask",
     "VideoGenerationTask",
 ]
 
@@ -206,6 +208,79 @@ class VolcengineVideoGenerationTask(AbstractVideoGenerationTask):
         )
 
 
+class AliyunBailianVideoGenerationTask(AbstractVideoGenerationTask):
+    """阿里百炼 DashScope 视频任务：adapter 负责 HTTP，Task 负责轮询间隔。
+
+    DashScope 视频为异步任务模式，终态为 SUCCEEDED / FAILED。
+    """
+
+    def __init__(
+        self,
+        *,
+        adapter: AliyunBailianVideoApiAdapter | None = None,
+        provider_config: ProviderConfig,
+        input_: VideoGenerationInput,
+        poll_interval_s: float = 2.0,
+        timeout_s: float = 120.0,
+    ) -> None:
+        super().__init__(
+            provider_config=provider_config,
+            input_=input_,
+            poll_interval_s=poll_interval_s,
+            timeout_s=timeout_s,
+        )
+        self._adapter = adapter or AliyunBailianVideoApiAdapter()
+
+    async def _create_task(self) -> None:
+        self._provider_task_id = await self._adapter.create_video_task(
+            cfg=self._cfg,
+            input_=self._input,
+            timeout_s=self._timeout_s,
+        )
+
+    async def _poll_and_get_result(self) -> VideoGenerationResult:
+        task_id = self._provider_task_id or ""
+        if not task_id:
+            raise RuntimeError("Aliyun Bailian poll missing provider task id")
+
+        base_url = (
+            self._cfg.base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        ).rstrip("/")
+        status_val = ""
+        video_url: str | None = None
+        while True:
+            meta = await self._adapter.get_video_task(
+                cfg=self._cfg,
+                task_id=task_id,
+                timeout_s=self._timeout_s,
+            )
+            status_val = str(meta.get("output", {}).get("task_status") or meta.get("status") or "")
+            # 从 output 中提取视频 URL
+            output = meta.get("output") or {}
+            if isinstance(output, dict):
+                result_video_url = output.get("video_url")
+                if isinstance(result_video_url, str) and result_video_url:
+                    video_url = result_video_url
+            if status_val.upper() in ("SUCCEEDED", "FAILED"):
+                if status_val.upper() != "SUCCEEDED":
+                    raise RuntimeError(
+                        f"Aliyun Bailian task not succeeded: status={status_val!r} meta={meta!r}"
+                    )
+                break
+            await self._sleep_poll()
+
+        if not video_url:
+            video_url = f"{base_url}/videos/tasks/{task_id}"
+
+        return VideoGenerationResult(
+            url=video_url,
+            file_id=None,
+            provider_task_id=task_id,
+            provider="aliyun_bailian",
+            status=status_val or "SUCCEEDED",
+        )
+
+
 class VideoGenerationTask(BaseTask):
     """按 provider 分派到 OpenAI / 火山实现；对外构造函数签名保持不变。"""
 
@@ -252,6 +327,21 @@ class VideoGenerationTask(BaseTask):
         timeout_s: float = 120.0,
     ) -> AbstractVideoGenerationTask:
         return VolcengineVideoGenerationTask(
+            provider_config=provider_config,
+            input_=input_,
+            poll_interval_s=poll_interval_s,
+            timeout_s=timeout_s,
+        )
+
+    @staticmethod
+    def _build_aliyun_bailian_impl(
+        *,
+        provider_config: ProviderConfig,
+        input_: VideoGenerationInput,
+        poll_interval_s: float = 2.0,
+        timeout_s: float = 120.0,
+    ) -> AbstractVideoGenerationTask:
+        return AliyunBailianVideoGenerationTask(
             provider_config=provider_config,
             input_=input_,
             poll_interval_s=poll_interval_s,
