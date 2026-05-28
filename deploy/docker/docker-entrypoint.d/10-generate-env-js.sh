@@ -17,4 +17,3 @@ cat > "${ENV_JS_PATH}" <<EOF
 window.__ENV = window.__ENV || {};
 window.__ENV.BACKEND_URL = ${BACKEND_URL_JS};
 EOF
-

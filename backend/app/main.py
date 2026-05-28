@@ -13,6 +13,7 @@ from app.api.v1 import router as api_v1_router
 from app.bootstrap import bootstrap_all_registries
 from app.config import settings
 from app.core.db import close_db, init_db
+from app.core.storage import init_storage
 from app.schemas.common import ApiResponse
 
 
@@ -60,6 +61,7 @@ async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化，关闭时清理。"""
     await init_db()
     bootstrap_all_registries()
+    init_storage()
     yield
     await close_db()
 
@@ -102,7 +104,7 @@ class _SPAStaticFiles(_StaticFiles):
             return await super().get_response(path, scope)
         except Exception as exc:
             from starlette.exceptions import HTTPException as _HTTPException
-            if isinstance(exc, _HTTPException) and exc.status_code == 404:
+            if isinstance(exc, _HTTPException) and getattr(exc, "status_code", None) == 404:  # noqa: E1101
                 return await super().get_response("index.html", scope)
             raise
 

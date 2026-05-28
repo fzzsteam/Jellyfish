@@ -61,15 +61,19 @@ def clear_video_model_capability_overrides(*, provider: ProviderKey | None = Non
         clear_openai_video_capability_overrides()
         clear_volcengine_video_capability_overrides()
         clear_aliyun_bailian_video_capability_overrides()
+        return
 
-    elif provider == "openai":
+    if provider == "openai":
         clear_openai_video_capability_overrides()
+        return
 
-    elif provider == "volcengine":
+    if provider == "volcengine":
         clear_volcengine_video_capability_overrides()
+        return
 
-    elif provider == "aliyun_bailian":
+    if provider == "aliyun_bailian":
         clear_aliyun_bailian_video_capability_overrides()
+        return
 
 
 
@@ -78,14 +82,16 @@ def resolve_video_capability(*, provider: ProviderKey, model: str | None) -> Vid
         from app.core.integrations.openai.video_capabilities import resolve_openai_video_capability
 
         return resolve_openai_video_capability(model)
-    elif provider == "volcengine":   
+    if provider == "volcengine":
         from app.core.integrations.volcengine.video_capabilities import resolve_volcengine_video_capability
 
         return resolve_volcengine_video_capability(model)
-    elif provider == "aliyun_bailian":
+    if provider == "aliyun_bailian":
         from app.core.integrations.aliyun_bailian.video_capabilities import resolve_aliyun_bailian_video_capability
 
         return resolve_aliyun_bailian_video_capability(model)
+
+    raise ValueError(f"Unsupported video capability provider: {provider}")
 
 
 def resolve_effective_ratio(input_: VideoGenerationInput) -> str | None:

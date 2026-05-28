@@ -73,6 +73,25 @@ async def file_id_to_data_url(db: AsyncSession, *, file_id: str) -> str:
     return f"data:image/{image_format};base64,{encoded}"
 
 
+async def file_id_to_public_url(db: AsyncSession, *, file_id: str) -> str:
+    """将 file_id 解析为 RustFS/S3 可公开访问的 URL（用于 DashScope 等不接受 Data URL 的 API）。
+
+    与 :func:`file_id_to_data_url` 不同，本函数不下载数据、不做 base64 编码，
+    直接返回对象存储生成的公开 URL。
+    """
+    file_obj = await db.get(FileItem, file_id)
+    if file_obj is None:
+        raise HTTPException(status_code=400, detail=f"Invalid image file_id: {file_id}")
+    if file_obj.storage_key:
+        url = storage._build_public_url(file_obj.storage_key)
+        if url and not url.startswith("data:"):
+            return url
+    raise HTTPException(
+        status_code=400,
+        detail=f"Cannot build public URL for file_id={file_id}; storage_key may be missing",
+    )
+
+
 async def preview_prompt_and_images(
     db: AsyncSession,
     *,
@@ -81,7 +100,7 @@ async def preview_prompt_and_images(
     prompt: str | None,
     images: list[str] | None = None,
 ) -> tuple[str, list[str], dict | None]:
-    shot_detail = await validate_shot_and_duration(db, shot_id)
+    await validate_shot_and_duration(db, shot_id)  # pylint: disable=unused-variable
     base = build_video_base_draft(shot_id=shot_id, prompt=prompt)
     context = await build_video_context(
         db,
@@ -154,7 +173,7 @@ async def build_run_args(
 ) -> dict:
     model = await resolve_default_video_model(db)
     provider_cfg = await load_provider_config_by_model(db, model)
-    shot_detail = await validate_shot_and_duration(db, shot_id)
+    shot_detail = await validate_shot_and_duration(db, shot_id)  # noqa: F841
     resolved_ratio = await resolve_effective_video_options(requested_ratio=ratio)
     base = build_video_base_draft(shot_id=shot_id, prompt=prompt)
     context = await build_video_context(
@@ -171,7 +190,28 @@ async def build_run_args(
         raise HTTPException(status_code=400, detail="prompt is required")
 
     required_frames = tuple(ShotFrameType(item) for item in REQUIRED_FRAMES_BY_MODE[reference_mode])
-    frame_data_urls = [await file_id_to_data_url(db, file_id=file_id) for file_id in submission.images]
+
+    # 诊断日志：记录供应商和参考帧信息
+    import logging as _logging
+    _vid_logger = _logging.getLogger(__name__)
+    _vid_logger.info(
+        "[video-gen] provider=%s submission.images=%s required_frames=%s",
+        provider_cfg.provider,
+        submission.images,
+        list(required_frames),
+    )
+
+    # 根据供应商类型选择参考帧格式：
+    # - DashScope（阿里百炼）需要可公开访问的 HTTP URL，不接受 Data URL
+    # - 其他供应商（OpenAI / 火山引擎）使用 Data URL
+    if provider_cfg.provider == "aliyun_bailian":
+        frame_data_urls = [await file_id_to_public_url(db, file_id=file_id) for file_id in submission.images]
+        _vid_logger.info(
+            "[video-gen] aliyun_bailian mode — public URLs: %s",
+            [u[:80] for u in frame_data_urls],
+        )
+    else:
+        frame_data_urls = [await file_id_to_data_url(db, file_id=file_id) for file_id in submission.images]
     frame_map = {ft: frame_data_urls[i] for i, ft in enumerate(required_frames)}
 
     run_args = {

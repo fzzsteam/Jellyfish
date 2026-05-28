@@ -81,6 +81,38 @@ async def resolve_reference_image_refs_by_file_ids(
     return out
 
 
+async def resolve_reference_image_urls_by_file_ids(
+    db: AsyncSession,
+    *,
+    file_ids: list[str],
+) -> list[dict[str, str]]:
+    """将 file_id 列表解析为可公开访问的图片 URL（用于 DashScope 等不接受 Data URL 的外部 API）。
+
+    与 :func:`resolve_reference_image_refs_by_file_ids` 不同，本函数不下载数据，
+    直接返回对象存储的公开 URL。
+    """
+    out: list[dict[str, str]] = []
+    for fid in file_ids or []:
+        file_id = (fid or "").strip()
+        if not file_id:
+            continue
+        file_obj = await db.get(FileItem, file_id)
+        if file_obj is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"FileItem not found for file_id={file_id}",
+            )
+        if file_obj.storage_key:
+            url = storage._build_public_url(file_obj.storage_key)
+            if url:
+                out.append({"image_url": url})
+                continue
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot build public URL for file_id={file_id}",
+        )
+
+
 async def pick_front_ref_file_id(
     db: AsyncSession,
     *,

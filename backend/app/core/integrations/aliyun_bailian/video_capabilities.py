@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from app.core.integrations.video_capabilities import ALLOWED_RATIOS, VideoModelCapability
+from app.core.integrations.video_capabilities import VideoModelCapability
 
 if TYPE_CHECKING:
     from app.core.contracts.video_generation import VideoGenerationInput

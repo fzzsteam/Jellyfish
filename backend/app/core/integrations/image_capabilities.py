@@ -66,12 +66,19 @@ def clear_image_model_capability_overrides(*, provider: ProviderKey | None = Non
         clear_openai_image_capability_overrides()
         clear_volcengine_image_capability_overrides()
         clear_aliyun_bailian_image_capability_overrides()
-    elif provider == "openai":
+        return
+
+    if provider == "openai":
         clear_openai_image_capability_overrides()
-    elif provider == "volcengine":
+        return
+
+    if provider == "volcengine":
         clear_volcengine_image_capability_overrides()
-    elif provider == "aliyun_bailian":
+        return
+
+    if provider == "aliyun_bailian":
         clear_aliyun_bailian_image_capability_overrides()
+        return
 
 
 def resolve_image_capability(*, provider: ProviderKey, model: str | None) -> ImageModelCapability:
@@ -79,14 +86,16 @@ def resolve_image_capability(*, provider: ProviderKey, model: str | None) -> Ima
         from app.core.integrations.openai.image_capabilities import resolve_openai_image_capability
 
         return resolve_openai_image_capability(model)
-    elif provider == "volcengine":
+    if provider == "volcengine":
         from app.core.integrations.volcengine.image_capabilities import resolve_volcengine_image_capability
 
         return resolve_volcengine_image_capability(model)
-    elif provider == "aliyun_bailian":
+    if provider == "aliyun_bailian":
         from app.core.integrations.aliyun_bailian.image_capabilities import resolve_aliyun_bailian_image_capability
 
         return resolve_aliyun_bailian_image_capability(model)
+
+    raise ValueError(f"Unsupported image capability provider: {provider}")
 
 
 def resolve_image_size(

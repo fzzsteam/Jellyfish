@@ -23,6 +23,7 @@ from app.schemas.studio.shots import RenderedShotFramePromptRead, ShotLinkedAsse
 from app.api.v1.routes.film.common import TaskCreated
 from app.services.studio.image_task_references import (
     resolve_reference_image_refs_by_file_ids as _resolve_reference_image_refs_by_file_ids_service,
+    resolve_reference_image_urls_by_file_ids as _resolve_reference_image_urls_by_file_ids_service,
 )
 from app.services.studio.generation.asset_image import (
     build_actor_image_base_draft as _build_actor_image_base_draft_service,
@@ -45,9 +46,33 @@ from app.services.studio.generation.frame.derive_preview import (
     to_rendered_shot_frame_prompt_read as _to_rendered_shot_frame_prompt_read_service,
 )
 from app.services.studio.image_task_runner import create_image_task_and_link as _create_image_task_and_link_service
+from app.services.studio.image_tasks import load_provider_config, resolve_image_model
 
 
 router = APIRouter()
+
+
+async def _resolve_ref_images_for_provider(
+    db: AsyncSession,
+    *,
+    model_id: str | None,
+    file_ids: list[str],
+) -> list[dict[str, str]]:
+    """根据模型所属供应商，选择合适的参考图解析方式。
+
+    DashScope（阿里百炼）不接受 Data URL，需要使用对象存储的公开访问 URL；
+    其他供应商使用 Data URL（内联 base64）。
+    """
+    if not model_id:
+        return await _resolve_reference_image_refs_by_file_ids_service(db, file_ids=file_ids)
+    try:
+        model = await resolve_image_model(db, model_id)
+        cfg = await load_provider_config(db, model.provider_id)
+        if cfg.provider_key == "aliyun_bailian":
+            return await _resolve_reference_image_urls_by_file_ids_service(db, file_ids=file_ids)
+    except Exception:  # noqa: BLE001
+        pass
+    return await _resolve_reference_image_refs_by_file_ids_service(db, file_ids=file_ids)
 
 
 class StudioImageTaskRequest(BaseModel):
@@ -194,7 +219,7 @@ async def create_actor_image_generation_task(
         prompt=prompt,
         images=body.images,
     )
-    ref_images = await _resolve_reference_image_refs_by_file_ids_service(db, file_ids=submission.images)
+    ref_images = await _resolve_ref_images_for_provider(db, model_id=body.model_id, file_ids=submission.images)
     task_id = await _create_image_task_and_link_service(
         db=db,
         model_id=body.model_id,
@@ -259,7 +284,7 @@ async def create_asset_image_generation_task(
         prompt=prompt,
         images=body.images,
     )
-    ref_images = await _resolve_reference_image_refs_by_file_ids_service(db, file_ids=submission.images)
+    ref_images = await _resolve_ref_images_for_provider(db, model_id=body.model_id, file_ids=submission.images)
 
     task_id = await _create_image_task_and_link_service(
         db=db,
@@ -324,7 +349,7 @@ async def create_character_image_generation_task(
         prompt=prompt,
         images=body.images,
     )
-    ref_images = await _resolve_reference_image_refs_by_file_ids_service(db, file_ids=submission.images)
+    ref_images = await _resolve_ref_images_for_provider(db, model_id=body.model_id, file_ids=submission.images)
     task_id = await _create_image_task_and_link_service(
         db=db,
         model_id=body.model_id,
@@ -402,7 +427,7 @@ async def create_shot_frame_image_generation_task(
         base=base,
         context=context,
     )
-    ref_images = await _resolve_reference_image_refs_by_file_ids_service(db, file_ids=submission.images)
+    ref_images = await _resolve_ref_images_for_provider(db, model_id=body.model_id, file_ids=submission.images)
 
     # 通过 shot_id 与 frame_type 定位 ShotFrameImage，作为落库目标；若不存在则创建占位记录。
     shot_frame_image_stmt = (
