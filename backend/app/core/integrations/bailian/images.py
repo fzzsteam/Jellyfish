@@ -248,7 +248,7 @@ class BailianImageApiAdapter:
         if input_.size:
             return input_.size
 
-        return "1024x1024"
+        return "1024*1024"
 
     @staticmethod
     def _parse_sdk_response(
