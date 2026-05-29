@@ -70,6 +70,10 @@ def resolve_image_capability(*, provider: ProviderKey, model: str | None) -> Ima
         from app.core.integrations.openai.image_capabilities import resolve_openai_image_capability
 
         return resolve_openai_image_capability(model)
+    if provider == "aliyun_bailian":
+        from app.core.integrations.bailian.image_capabilities import resolve_bailian_image_capability
+
+        return resolve_bailian_image_capability(model)
     from app.core.integrations.volcengine.image_capabilities import resolve_volcengine_image_capability
 
     return resolve_volcengine_image_capability(model)

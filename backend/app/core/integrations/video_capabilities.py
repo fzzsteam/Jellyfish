@@ -68,6 +68,10 @@ def resolve_video_capability(*, provider: ProviderKey, model: str | None) -> Vid
         from app.core.integrations.openai.video_capabilities import resolve_openai_video_capability
 
         return resolve_openai_video_capability(model)
+    if provider == "aliyun_bailian":
+        from app.core.integrations.bailian.video_capabilities import resolve_bailian_video_capability
+
+        return resolve_bailian_video_capability(model)
     from app.core.integrations.volcengine.video_capabilities import resolve_volcengine_video_capability
 
     return resolve_volcengine_video_capability(model)
