@@ -1,23 +1,41 @@
-"""阿里百炼 (DashScope) 图片生成适配器（原生 API）。
+"""阿里百炼 (DashScope) 图片生成适配器（Wan2.7 官方 SDK 模式）。
 
-使用 DashScope 图像合成原生 API（非 OpenAI 兼容模式），
-完整支持 wanx/wan2.x/wan2.7 系列模型的全部参数。
+仅支持：
+- wan2.7-image-pro
 
-官方文档参考：
-- https://help.aliyun.com/zh/model-studio/wanxiang-image-generation
-- API: POST /api/v1/services/aigc/text2image/image-synthesis
+使用 DashScope 官方 Python SDK (dashscope)
+确保与阿里百炼官方调用方式完全一致。
 
-对应 Python SDK 调用方式：
+官方示例：
+
+    import dashscope
     from dashscope.aigc.image_generation import ImageGeneration
-    ImageGeneration.call(model='wan2.7-image-pro', messages=[...], n=4, size='2K')
+
+    dashscope.base_http_api_url = (
+        "https://dashscope.aliyuncs.com/api/v1"
+    )
+
+    rsp = ImageGeneration.call(
+        model="wan2.7-image-pro",
+        api_key=api_key,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"text": "图片描述"}
+                ]
+            }
+        ],
+        n=1,
+        size="1024x1024"
+    )
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
-
-import httpx
 
 from app.core.contracts.image_generation import (
     ImageGenerationInput,
@@ -28,208 +46,317 @@ from app.core.contracts.provider import ProviderConfig
 
 logger = logging.getLogger(__name__)
 
-#: DashScope 图像合成原生 API 端点
-IMAGE_SYNTHESIS_URL = "https://dashscope.aliyuncs.com/api/v1/services/aigc/text2image/image-synthesis"
-
-#: 支持的 size 映射（DashScope 特有格式 → 实际像素值）
-SIZE_MAPPING: dict[str, str] = {
-    # 标准尺寸
-    "1024*1024": "1024x1024",
-    "1536*1536": "1536x1536",
-    "768*1344": "768x1344",
-    "864*1152": "864x1152",
-    "1152*864": "1152x864",
-    "1344*768": "1344x768",
-    "1440*960": "1440x960",
-    "960*1440": "960x1440",
-    # 高清规格
-    "2K": "2048x2048",  # 2K 正方形
-    "1:1": "1024x1024",
-}
-
 
 class BailianImageApiAdapter:
-    """阿里百炼图片生成适配器（DashScope 原生 API 模式）。
+    """阿里百炼图片生成适配器（Wan2.7 SDK 模式）。"""
 
-    与 OpenAI 兼容模式不同，这里直接调用 DashScope 的
-    text2image/image-synthesis 原生端点，以获得完整的
-    百炼模型能力支持（如 2K、enable_sequential 等）。
-    """
+    DEFAULT_MODEL = "wan2.7-image-pro"
 
-    def __init__(self, *, provider_config: ProviderConfig, timeout_s: float = 120.0):
+    def __init__(
+        self,
+        *,
+        provider_config: ProviderConfig,
+        timeout_s: float = 120.0,
+    ):
         self._cfg = provider_config
         self._timeout = timeout_s
-        # 从 provider_config.base_url 或默认值获取基础地址
-        base = (provider_config.base_url or "").rstrip("/")
-        if not base or "compatible-mode" in base:
-            # 图片生成使用原生 API，不用兼容模式
-            self._endpoint = IMAGE_SYNTHESIS_URL
-        else:
-            # 如果配置了自定义 base_url（如内网地址），拼接路径
-            self._endpoint = f"{base}/services/aigc/text2image/image-synthesis"
-        self._headers = {
-            "Authorization": f"Bearer {provider_config.api_key}",
-            "Content-Type": "application/json",
-        }
+        self._api_key = provider_config.api_key or ""
 
-    async def generate(self, input_: ImageGenerationInput) -> ImageGenerationResult:
-        """调用 DashScope 原生图像合成 API 生成图片。"""
-        payload = self._build_native_payload(input_)
+    async def generate(
+        self,
+        input_: ImageGenerationInput,
+    ) -> ImageGenerationResult:
+        """异步生成图片（在线程池执行同步 SDK）。"""
 
         logger.info(
-            "[BailianImage] Generating via native API: model=%s n=%d size=%s",
-            input_.model or self._cfg.provider or "wan2.7-image-pro",
+            "[BailianImage] Generating via SDK: "
+            "model=%s n=%d size=%s",
+            input_.model or self.DEFAULT_MODEL,
             input_.n,
             input_.size or "default",
         )
 
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.post(self._endpoint, json=payload, headers=self._headers)
+        loop = asyncio.get_running_loop()
 
-            # 调试日志: 记录完整响应（特别是 400 错误时的具体原因）
-            if resp.status_code != 200:
-                logger.error(
-                    "[BailianImage] API Error! status=%d url=%s\n"
-                    "Request payload: %s\n"
-                    "Response body: %s",
-                    resp.status_code,
-                    self._endpoint,
-                    __import__("json").dumps(payload, ensure_ascii=False, indent=2),
-                    resp.text,
-                )
+        return await loop.run_in_executor(
+            None,
+            self._sync_generate,
+            input_,
+        )
 
-            resp.raise_for_status()
-            data = resp.json()
+    def _sync_generate(
+        self,
+        input_: ImageGenerationInput,
+    ) -> ImageGenerationResult:
+        """同步调用 DashScope SDK。"""
 
-        return self._parse_native_response(data)
+        try:
+            import dashscope
+            from dashscope.aigc.image_generation import (
+                ImageGeneration,
+            )
+        except ImportError as e:
+            raise RuntimeError(
+                "dashscope SDK not installed. "
+                "Run: uv add dashscope"
+            ) from e
 
-    def _build_native_payload(self, input_: ImageGenerationInput) -> dict[str, Any]:
-        """构建 DashScope 原生图像合成 API 请求体。
+        # 强制使用官方 API 地址
+        # 避免 SAE 环境变量残留错误 endpoint
+        dashscope.base_http_api_url = (
+            "https://dashscope.aliyuncs.com/api/v1"
+        )
 
-        DashScope 图片生成 REST API 使用扁平化的 prompt 字段，
-        而非 SDK 的 messages 多模态结构。
+        # -------- 构建 message content --------
 
-        错误证据（2026-05-29 SAE 实测）:
-            Response: {"code":"InvalidParameter","message":"url error, please check url!"}
-            原因: input.messages 结构被误解析为多模态 URL 引用
+        message_content: list[dict[str, str]] = []
 
-        正确的 REST API 请求体结构:
-            {
-                "model": "wan2.7-image-pro",
-                "input": {
-                    "prompt": "图片描述文本..."   // 纯字符串！非 messages 数组
-                },
-                "parameters": {
-                    "size": "1024*1024",      // * 分隔符
-                    "n": 1,
-                    "enable_sequential": true // 多图时启用
-                }
-            }
-        """
-        # 构建 prompt 文本（DashScope REST API 使用纯文本字段）
-        prompt_text = input_.prompt or ""
+        # prompt
+        message_content.append({
+            "text": input_.prompt or ""
+        })
 
-        # 可选：如果有参考图，追加到 prompt 中提示（REST API 不支持 image ref）
-        if input_.images:
-            ref_urls = [img.image_url for img in input_.images if img.image_url]
-            if ref_urls:
-                prompt_text += f"\n[参考图片: {', '.join(ref_urls)}]"
+        # 参考图（可选）
+        for img_ref in input_.images:
+            if img_ref.image_url:
+                message_content.append({
+                    "image": img_ref.image_url
+                })
 
-        parameters: dict[str, Any] = {
-            "size": self._resolve_size(input_),
-            "n": min(input_.n, 4),  # DashScope 通常最多 4 张
+        message = {
+            "role": "user",
+            "content": message_content,
         }
 
-        # 随机种子
+        # -------- SDK 参数 --------
+
+        sdk_kwargs: dict[str, Any] = {
+            "model": input_.model
+            or self.DEFAULT_MODEL,
+
+            "api_key": self._api_key,
+
+            "messages": [message],
+
+            # 最大 4 张
+            "n": min(input_.n, 4),
+
+            "size": self._resolve_size(
+                input_
+            ),
+        }
+
+        # seed
         if input_.seed is not None:
-            parameters["seed"] = input_.seed
-
-        # 启用顺序一致性模式（多图时保持角色一致）
-        if input_.n > 1:
-            parameters["enable_sequential"] = True
-
-        payload: dict[str, Any] = {
-            "model": input_.model or "wan2.7-image-pro",
-            "input": {
-                # 使用 prompt 纯文本字段（非 messages 数组结构）
-                # messages 结构会导致 "url error" 因为 REST API 会尝试解析为多模态引用
-                "prompt": prompt_text,
-            },
-            "parameters": parameters,
-        }
-
-        return payload
-
-    def _resolve_size(self, input_: ImageGenerationInput) -> str:
-        """解析目标尺寸为 DashScope 格式。
-
-        DashScope 原生 API 支持的 size 格式：
-        - 标准像素: "1024*1024", "1536*1536", "768*1344" 等（用 * 分隔）
-        - 规格别名: "1:1", "2K" 等
-        - 注意与 OpenAI 格式 "1024x1024"（用 x 分隔）不同！
-        """
-        if input_.size:
-            # 如果传入的是 OpenAI 格式 (xxxxxyyyy)，转换为 DashScope 格式 (xxxx*yyyy)
-            if "x" in input_.size and "*" not in input_.size:
-                return input_.size.replace("x", "*")
-            # 已经是 DashScope 格式或别名，直接返回
-            return input_.size
-
-        # 默认返回标准正方形
-        return "1024*1024"
-
-    def _parse_native_response(self, data: dict) -> ImageGenerationResult:
-        """解析 DashScope 原生响应为统一的 ImageGenerationResult。"""
-
-        items: list[ImageItem] = []
-
-        # DashScope 响应结构参考 SDK 返回值：
-        # {
-        #   "status_code": "200",
-        #   "request_id": "xxx",
-        #   "code": "",
-        #   "message": "",
-        #   "output": {
-        #       "results": [
-        #           {"url": "https://...", "url_b64": null},
-        #           ...
-        #       ]
-        #   },
-        #   "usage": {...}
-        # }
-        output = data.get("output", {})
-        results = output.get("results", [])
-
-        if isinstance(results, list):
-            for r in results:
-                url = r.get("url") or ""
-                b64 = r.get("url_b64") or r.get("b64_json") or ""
-                if url:
-                    items.append(ImageItem(url=url))  # type: ignore[call-arg]
-                elif b64:
-                    items.append(ImageItem(url=f"data:image/png;base64,{b64}"))  # type: ignore[call-arg]
-
-        # 提取任务信息（用于调试和追踪）
-        request_id = data.get("request_id") or ""
-
-        # 如果没有解析到任何图片但状态码正常，记录警告
-        status_code = data.get("status_code", "")
-        if not items and str(status_code).startswith("2"):
-            logger.warning(
-                "[BailianImage] API returned success but no images parsed: %s",
-                data,
+            sdk_kwargs["seed"] = (
+                input_.seed
             )
 
-        # 判定最终状态
-        status = "completed" if items else ("failed" if not str(status_code).startswith("2") else "unknown")
+        # 多图一致性
+        if input_.n > 1:
+            sdk_kwargs[
+                "enable_sequential"
+            ] = True
 
-        # provider 字段需要是 ProviderKey 类型或兼容值
-        from app.core.contracts.provider import ProviderKey as PK
-        provider_value: str | PK = "aliyun_bailian"
+        logger.info(
+            "[BailianImage] SDK request: "
+            "model=%s n=%s size=%s "
+            "sequential=%s",
+            sdk_kwargs["model"],
+            sdk_kwargs["n"],
+            sdk_kwargs["size"],
+            sdk_kwargs.get(
+                "enable_sequential",
+                False,
+            ),
+        )
+
+        # -------- 调用 SDK --------
+
+        rsp = ImageGeneration.call(
+            **sdk_kwargs
+        )
+
+        status_code = str(
+            getattr(
+                rsp,
+                "status_code",
+                "",
+            )
+        )
+
+        request_id = getattr(
+            rsp,
+            "request_id",
+            "",
+        )
+
+        logger.info(
+            "[BailianImage] SDK response: "
+            "status_code=%s "
+            "request_id=%s",
+            status_code,
+            request_id,
+        )
+
+        # -------- 错误透传 --------
+
+        if not status_code.startswith("2"):
+            code = getattr(
+                rsp,
+                "code",
+                "",
+            )
+
+            message = getattr(
+                rsp,
+                "message",
+                "",
+            )
+
+            logger.error(
+                "[BailianImage] "
+                "SDK failed: "
+                "status=%s "
+                "code=%s "
+                "message=%s "
+                "request_id=%s",
+                status_code,
+                code,
+                message,
+                request_id,
+            )
+
+            raise RuntimeError(
+                "[BailianImage] "
+                f"SDK failed: "
+                f"status={status_code}, "
+                f"code={code}, "
+                f"message={message}"
+            )
+
+        return self._parse_sdk_response(
+            rsp
+        )
+
+    def _resolve_size(
+        self,
+        input_: ImageGenerationInput,
+    ) -> str:
+        """Wan2.7 size 解析。"""
+
+        if input_.size:
+            return input_.size
+
+        return "1024x1024"
+
+    @staticmethod
+    def _parse_sdk_response(
+        rsp,
+    ) -> ImageGenerationResult:
+        """解析 SDK 响应。"""
+
+        items: list[
+            ImageItem
+        ] = []
+
+        status_code = str(
+            getattr(
+                rsp,
+                "status_code",
+                "",
+            )
+        )
+
+        request_id = getattr(
+            rsp,
+            "request_id",
+            "",
+        )
+
+        output = getattr(
+            rsp,
+            "output",
+            None,
+        )
+
+        if output:
+            results = getattr(
+                output,
+                "results",
+                [],
+            )
+
+            if isinstance(
+                results,
+                list,
+            ):
+                for r in results:
+                    url = (
+                        getattr(
+                            r,
+                            "url",
+                            "",
+                        )
+                        or ""
+                    )
+
+                    b64 = getattr(
+                        r,
+                        "url_b64",
+                        None,
+                    )
+
+                    if b64:
+                        items.append(
+                            ImageItem(
+                                url=(
+                                    "data:image/png;"
+                                    "base64,"
+                                    f"{b64}"
+                                ),
+                                b64_json=b64,
+                            )
+                        )
+
+                    elif url:
+                        items.append(
+                            ImageItem(
+                                url=url,
+                                b64_json=None,
+                            )
+                        )
+
+        if (
+            str(status_code)
+            .startswith("2")
+            and not items
+        ):
+            logger.warning(
+                "[BailianImage] "
+                "Success but "
+                "no images returned. "
+                "response=%s",
+                repr(rsp),
+            )
+
+        status = (
+            "completed"
+            if items
+            else "failed"
+        )
+
+        from app.core.contracts.provider import (
+            ProviderKey as PK,
+        )
+
+        provider_value: str | PK = (
+            "aliyun_bailian"
+        )
 
         return ImageGenerationResult(
             images=items,
-            provider=provider_value,  # type: ignore[assignment]
+            provider=provider_value,
             provider_task_id=request_id,
             status=status,
         )
