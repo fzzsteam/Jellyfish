@@ -114,7 +114,6 @@ async def create_file_from_url_or_b64(
         key=key,
         data=content,
         content_type=content_type,
-        extra_args={"ACL": "public-read"},
     )
 
     file_id = str(uuid.uuid4())
