@@ -85,6 +85,19 @@ class BailianImageApiAdapter:
 
         async with httpx.AsyncClient(timeout=self._timeout) as client:
             resp = await client.post(self._endpoint, json=payload, headers=self._headers)
+
+            # 调试日志: 记录完整响应（特别是 400 错误时的具体原因）
+            if resp.status_code != 200:
+                logger.error(
+                    "[BailianImage] API Error! status=%d url=%s\n"
+                    "Request payload: %s\n"
+                    "Response body: %s",
+                    resp.status_code,
+                    self._endpoint,
+                    __import__("json").dumps(payload, ensure_ascii=False, indent=2),
+                    resp.text,
+                )
+
             resp.raise_for_status()
             data = resp.json()
 
