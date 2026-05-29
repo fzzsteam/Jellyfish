@@ -106,25 +106,34 @@ class BailianImageApiAdapter:
     def _build_native_payload(self, input_: ImageGenerationInput) -> dict[str, Any]:
         """构建 DashScope 原生图像合成 API 请求体。
 
-        参考官方 SDK 调用签名：
-            ImageGeneration.call(
-                model='wan2.7-image-pro',
-                api_key=api_key,
-                messages=[message],
-                enable_sequential=True,
-                n=4,
-                size="2K"
-            )
-        """
-        # 构建 messages（DashScope 多模态消息格式）
-        message_content: list[dict[str, str]] = [{"text": input_.prompt}]
+        DashScope 图片生成 REST API 使用扁平化的 prompt 字段，
+        而非 SDK 的 messages 多模态结构。
 
-        # 可选：添加参考图片（如果有）
-        for img_ref in input_.images:
-            if img_ref.image_url:
-                message_content.append({
-                    "image": img_ref.image_url,
-                })
+        错误证据（2026-05-29 SAE 实测）:
+            Response: {"code":"InvalidParameter","message":"url error, please check url!"}
+            原因: input.messages 结构被误解析为多模态 URL 引用
+
+        正确的 REST API 请求体结构:
+            {
+                "model": "wan2.7-image-pro",
+                "input": {
+                    "prompt": "图片描述文本..."   // 纯字符串！非 messages 数组
+                },
+                "parameters": {
+                    "size": "1024*1024",      // * 分隔符
+                    "n": 1,
+                    "enable_sequential": true // 多图时启用
+                }
+            }
+        """
+        # 构建 prompt 文本（DashScope REST API 使用纯文本字段）
+        prompt_text = input_.prompt or ""
+
+        # 可选：如果有参考图，追加到 prompt 中提示（REST API 不支持 image ref）
+        if input_.images:
+            ref_urls = [img.image_url for img in input_.images if img.image_url]
+            if ref_urls:
+                prompt_text += f"\n[参考图片: {', '.join(ref_urls)}]"
 
         parameters: dict[str, Any] = {
             "size": self._resolve_size(input_),
@@ -136,19 +145,15 @@ class BailianImageApiAdapter:
             parameters["seed"] = input_.seed
 
         # 启用顺序一致性模式（多图时保持角色一致）
-        # 当 n > 1 时建议启用
         if input_.n > 1:
             parameters["enable_sequential"] = True
 
         payload: dict[str, Any] = {
             "model": input_.model or "wan2.7-image-pro",
             "input": {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": message_content,
-                    }
-                ],
+                # 使用 prompt 纯文本字段（非 messages 数组结构）
+                # messages 结构会导致 "url error" 因为 REST API 会尝试解析为多模态引用
+                "prompt": prompt_text,
             },
             "parameters": parameters,
         }
