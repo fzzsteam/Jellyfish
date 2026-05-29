@@ -256,6 +256,24 @@ class BailianImageApiAdapter:
     ) -> ImageGenerationResult:
         """解析 SDK 响应。"""
 
+        # ====== 调试日志：记录完整的 SDK 响应结构 ======
+        logger.info(
+            "[BailianImage] Parse response: type=%s",
+            type(rsp).__name__,
+        )
+
+        # 记录 rsp 的所有属性（如果是对象）
+        if hasattr(rsp, "__dict__"):
+            logger.info(
+                "[BailianImage] Response keys: %s",
+                list(rsp.__dict__.keys()),
+            )
+        elif isinstance(rsp, dict):
+            logger.info(
+                "[BailianImage] Response is dict with keys: %s",
+                list(rsp.keys()),
+            )
+
         items: list[
             ImageItem
         ] = []
@@ -280,6 +298,24 @@ class BailianImageApiAdapter:
             None,
         )
 
+        # ====== 调试：记录 output 结构 ======
+        logger.info(
+            "[BailianImage] output type=%s value=%s",
+            type(output).__name__ if output else "None",
+            repr(output)[:500] if output else "None",
+        )
+
+        if output and hasattr(output, "__dict__"):
+            logger.info(
+                "[BailianImage] Output attributes: %s",
+                list(output.__dict__.keys()),
+            )
+        elif isinstance(output, dict):
+            logger.info(
+                "[BailianImage] Output is dict: %s",
+                str(list(output.keys()))[:200],
+            )
+
         if output:
             results = getattr(
                 output,
@@ -287,11 +323,30 @@ class BailianImageApiAdapter:
                 [],
             )
 
+            # ====== 调试：记录 results 结构 ======
+            logger.info(
+                "[BailianImage] results type=%s len=%s",
+                type(results).__name__,
+                len(results) if hasattr(results, "__len__") else "N/A",
+            )
+
             if isinstance(
                 results,
                 list,
             ):
-                for r in results:
+                for idx, r in enumerate(results):
+                    # 记录每个结果项的结构
+                    logger.info(
+                        "[BailianImage] result[%d] type=%s attrs=%s",
+                        idx,
+                        type(r).__name__,
+                        (
+                            list(r.__dict__.keys())
+                            if hasattr(r, "__dict__")
+                            else (list(r.keys()) if isinstance(r, dict) else "unknown")
+                        ),
+                    )
+
                     url = (
                         getattr(
                             r,
@@ -305,6 +360,13 @@ class BailianImageApiAdapter:
                         r,
                         "url_b64",
                         None,
+                    )
+
+                    logger.info(
+                        "[BailianImage] result[%d] url=%s has_b64=%s",
+                        idx,
+                        url[:80] if url else "(empty)",
+                        bool(b64),
                     )
 
                     if b64:
@@ -327,6 +389,14 @@ class BailianImageApiAdapter:
                             )
                         )
 
+        # ====== 最终汇总日志 ======
+        logger.info(
+            "[BailianImage] Parsed: status_code=%s items_count=%d request_id=%s",
+            status_code,
+            len(items),
+            request_id[:20],
+        )
+
         if (
             str(status_code)
             .startswith("2")
@@ -337,7 +407,7 @@ class BailianImageApiAdapter:
                 "Success but "
                 "no images returned. "
                 "response=%s",
-                repr(rsp),
+                repr(rsp)[:1000],
             )
 
         status = (
