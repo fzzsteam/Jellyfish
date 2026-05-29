@@ -254,179 +254,117 @@ class BailianImageApiAdapter:
     def _parse_sdk_response(
         rsp,
     ) -> ImageGenerationResult:
-        """解析 SDK 响应。"""
+        """解析 DashScope SDK 图片生成响应。
 
-        # ====== 调试日志：记录完整的 SDK 响应结构 ======
-        logger.info(
-            "[BailianImage] Parse response: type=%s",
-            type(rsp).__name__,
-        )
+        DashScope wan2.7-image-pro 实际返回的响应结构（2026-05-29 SAE 实测）::
 
-        # 记录 rsp 的所有属性（如果是对象）
-        if hasattr(rsp, "__dict__"):
-            logger.info(
-                "[BailianImage] Response keys: %s",
-                list(rsp.__dict__.keys()),
-            )
-        elif isinstance(rsp, dict):
-            logger.info(
-                "[BailianImage] Response is dict with keys: %s",
-                list(rsp.keys()),
-            )
+            rsp: ImageGenerationResponse
+            ├─ status_code: "200"
+            ├─ request_id: "xxx"
+            └─ output: ImageGenerationOutput
+                └─ choices: [Choice]
+                    └─ message: Message({'role': 'assistant', 'content': [
+                          {'image': 'https://...oss-accelerate.aliyuncs.com/...png', 'type': 'image'}
+                      ]})
+                    └─ finish_reason: 'stop'
 
-        items: list[
-            ImageItem
-        ] = []
+        注意：SDK 返回的是 Pydantic 模型对象，使用属性访问而非 __dict__。
+        """
+
+        items: list[ImageItem] = []
 
         status_code = str(
-            getattr(
-                rsp,
-                "status_code",
-                "",
-            )
+            getattr(rsp, "status_code", "")
         )
 
         request_id = getattr(
-            rsp,
-            "request_id",
-            "",
+            rsp, "request_id", ""
         )
 
-        output = getattr(
-            rsp,
-            "output",
-            None,
-        )
+        # ====== 提取 output.choices 结构 ======
+        output = getattr(rsp, "output", None)
 
-        # ====== 调试：记录 output 结构 ======
-        logger.info(
-            "[BailianImage] output type=%s value=%s",
-            type(output).__name__ if output else "None",
-            repr(output)[:500] if output else "None",
-        )
-
-        if output and hasattr(output, "__dict__"):
-            logger.info(
-                "[BailianImage] Output attributes: %s",
-                list(output.__dict__.keys()),
+        if not output:
+            logger.warning(
+                "[BailianImage] Response has no output field"
             )
-        elif isinstance(output, dict):
-            logger.info(
-                "[BailianImage] Output is dict: %s",
-                str(list(output.keys()))[:200],
+            return ImageGenerationResult(
+                images=[],
+                provider="aliyun_bailian",
+                provider_task_id=request_id,
+                status="failed",
             )
 
-        if output:
-            results = getattr(
-                output,
-                "results",
-                [],
+        # DashScope SDK 返回: output.choices[].message.content[]
+        choices = getattr(output, "choices", None)
+
+        if not choices:
+            logger.warning(
+                "[BailianImage] Output has no choices, output=%s",
+                repr(output)[:500],
+            )
+            return ImageGenerationResult(
+                images=[],
+                provider="aliyun_bailian",
+                provider_task_id=request_id,
+                status="failed",
             )
 
-            # ====== 调试：记录 results 结构 ======
-            logger.info(
-                "[BailianImage] results type=%s len=%s",
-                type(results).__name__,
-                len(results) if hasattr(results, "__len__") else "N/A",
+        for choice_idx, choice in enumerate(choices):
+            # choice.message 可能是 Message 对象或 dict
+            message = getattr(choice, "message", None)
+            if message is None:
+                continue
+
+            # message.content 是列表: [{"image": url, "type": "image"}, ...]
+            content_list = (
+                getattr(message, "content", None)
+                or (message.get("content") if isinstance(message, dict) else None)
             )
 
-            if isinstance(
-                results,
-                list,
-            ):
-                for idx, r in enumerate(results):
-                    # 记录每个结果项的结构
+            if not content_list or not isinstance(content_list, list):
+                continue
+
+            for part in content_list:
+                if isinstance(part, dict):
+                    img_url = part.get("image") or ""
+                    part_type = part.get("type", "")
+                elif hasattr(part, "image"):
+                    img_url = getattr(part, "image", "") or ""
+                    part_type = getattr(part, "type", "")
+                else:
+                    continue
+
+                if img_url and part_type == "image":
+                    items.append(ImageItem(url=img_url, b64_json=None))  # type: ignore[call-arg]
                     logger.info(
-                        "[BailianImage] result[%d] type=%s attrs=%s",
-                        idx,
-                        type(r).__name__,
-                        (
-                            list(r.__dict__.keys())
-                            if hasattr(r, "__dict__")
-                            else (list(r.keys()) if isinstance(r, dict) else "unknown")
-                        ),
+                        "[BailianImage] Found image: choice=%d url=%s",
+                        choice_idx,
+                        img_url[:80],
                     )
 
-                    url = (
-                        getattr(
-                            r,
-                            "url",
-                            "",
-                        )
-                        or ""
-                    )
-
-                    b64 = getattr(
-                        r,
-                        "url_b64",
-                        None,
-                    )
-
-                    logger.info(
-                        "[BailianImage] result[%d] url=%s has_b64=%s",
-                        idx,
-                        url[:80] if url else "(empty)",
-                        bool(b64),
-                    )
-
-                    if b64:
-                        items.append(
-                            ImageItem(
-                                url=(
-                                    "data:image/png;"
-                                    "base64,"
-                                    f"{b64}"
-                                ),
-                                b64_json=b64,
-                            )
-                        )
-
-                    elif url:
-                        items.append(
-                            ImageItem(
-                                url=url,
-                                b64_json=None,
-                            )
-                        )
-
-        # ====== 最终汇总日志 ======
+        # ====== 最终汇总 ======
         logger.info(
-            "[BailianImage] Parsed: status_code=%s items_count=%d request_id=%s",
+            "[BailianImage] Parsed: status_code=%s items_count=%d",
             status_code,
             len(items),
-            request_id[:20],
         )
 
-        if (
-            str(status_code)
-            .startswith("2")
-            and not items
-        ):
+        if str(status_code).startswith("2") and not items:
             logger.warning(
-                "[BailianImage] "
-                "Success but "
-                "no images returned. "
+                "[BailianImage] Success but no images extracted. "
                 "response=%s",
                 repr(rsp)[:1000],
             )
 
-        status = (
-            "completed"
-            if items
-            else "failed"
-        )
+        status = "completed" if items else "failed"
 
-        from app.core.contracts.provider import (
-            ProviderKey as PK,
-        )
-
-        provider_value: str | PK = (
-            "aliyun_bailian"
-        )
+        from app.core.contracts.provider import ProviderKey as PK
+        _provider_val: str | PK = "aliyun_bailian"  # type: ignore[assignment]
 
         return ImageGenerationResult(
             images=items,
-            provider=provider_value,
+            provider=_provider_val,  # type: ignore[assignment]
             provider_task_id=request_id,
             status=status,
         )
