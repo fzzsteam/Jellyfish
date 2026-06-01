@@ -335,7 +335,11 @@ class BailianImageApiAdapter:
                 else:
                     continue
 
-                if img_url and part_type == "image":
+                # 提取图片 URL
+                # 兼容两种模型响应格式:
+                # - wan2.7-image-pro: [{"image": url, "type": "image"}]
+                # - qwen-image-2.0-pro: [{"image": url}] (无 type 字段)
+                if img_url and (not part_type or part_type == "image"):
                     items.append(ImageItem(url=img_url, b64_json=None))  # type: ignore[call-arg]
                     logger.info(
                         "[BailianImage] Found image: choice=%d url=%s",
