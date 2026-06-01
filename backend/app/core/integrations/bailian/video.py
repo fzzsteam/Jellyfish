@@ -1,7 +1,7 @@
 """阿里百炼 (DashScope) 视频生成适配器（原生 API）。
 
 使用 DashScope 视频合成原生 API（异步任务模式），
-完整支持三种视频生成模型。
+完整支持四种视频生成模型。
 
 API 模式：
 1. 提交视频生成任务 → 获得 task_id
@@ -25,15 +25,24 @@ r2v (Reference-to-Video): happyhorse-1.0-r2v — prompt + 多张参考图 + rati
     curl ... -d '{"model":"happyhorse-1.0-r2v",
       "input":{"prompt":"...","media":[
         {"type":"reference_image","url":"https://..."},
-        {"type":"reference_image","url":"https://..."},
         {"type":"reference_image","url":"https://..."}
       ]},
       "parameters":{"resolution":"720P","ratio":"16:9","duration":5}}'
 
+video-edit (视频编辑): happyhorse-1.0-video-edit — prompt + 源视频 + 可选参考图
+  官方示例:
+    curl ... -d '{"model":"happyhorse-1.0-video-edit",
+      "input":{"prompt":"...","media":[
+        {"type":"video","url":"https://...mp4"},
+        {"type":"reference_image","url":"https://..."}
+      ]},
+      "parameters":{"resolution":"720P"}}'
+
 关键差异:
-- t2v: 无 media 字段，有 ratio
-- i2v: media type = first_frame / last_frame / key_frame，无 ratio
-- r2v: media type = reference_image（可多张），有 ratio
+- t2v:    无 media 字段，有 ratio, duration
+- i2v:    media type = first_frame / last_frame / key_frame，无 ratio
+- r2v:    media type = reference_image（可多张），有 ratio, duration
+- edit:   media type = video(必需) + reference_image(可选)，仅 resolution
 """
 
 from __future__ import annotations
@@ -66,14 +75,18 @@ _I2V_MODEL_PREFIXES = ("happyhorse-1.0-i2v", "i2v")
 #: r2v 模型名称标识
 _R2V_MODEL_PREFIXES = ("happyhorse-1.0-r2v", "r2v")
 
+#: video-edit 模型名称标识
+_VIDEO_EDIT_PREFIXES = ("happyhorse-1.0-video-edit", "video-edit")
+
 
 class BailianVideoApiAdapter:
     """阿里百炼视频生成适配器（DashScope 原生异步任务模式）。
 
     支持:
-    - HappyHorse-1.0-t2v  (文本→视频)
-    - HappyHorse-1.0-i2v  (首帧图→视频)
-    - HappyHorse-1.0-r2v  (参考图→视频)
+    - HappyHorse-1.0-t2v       (文本→视频)
+    - HappyHorse-1.0-i2v       (首帧图→视频)
+    - HappyHorse-1.0-r2v       (参考图→视频)
+    - HappyHorse-1.0-video-edit (视频编辑)
 
     Attributes:
         POLL_INTERVAL_S: 轮询间隔秒数（默认5秒）
@@ -108,7 +121,7 @@ class BailianVideoApiAdapter:
 
         logger.info(
             "[BailianVideo] Submitting video: model=%s mode=%s prompt_len=%d "
-            "duration=%s ratio=%s resolution=%s has_media=%s",
+            "duration=%s ratio=%s resolution=%s has_media=%s has_video=%s",
             model_name,
             mode,
             len(input_.prompt or ""),
@@ -116,6 +129,7 @@ class BailianVideoApiAdapter:
             input_.ratio or "default",
             self._resolve_resolution(input_),
             bool(mode != "t2v"),
+            bool(mode == "edit" and bool(input_.source_video_base64)),
         )
 
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -135,35 +149,52 @@ class BailianVideoApiAdapter:
     def _detect_mode(model_name: str, input_: VideoGenerationInput) -> str:
         """检测当前请求应使用的视频生成模式。
 
-        返回值: 't2v' | 'i2v' | 'r2v'
+        返回值: 't2v' | 'i2v' | 'r2v' | 'edit'
         """
         name_lower = (model_name or "").lower().strip()
-        has_media_input = any(
-            getattr(input_, attr, None)
-            for attr in ("first_frame_base64", "last_frame_base64", "key_frame_base64")
-        )
 
+        # 优先按模型名判断
+        if any(name_lower.startswith(p) for p in _VIDEO_EDIT_PREFIXES):
+            return "edit"
         if any(name_lower.startswith(p) for p in _R2V_MODEL_PREFIXES):
             return "r2v"
         if any(name_lower.startswith(p) for p in _I2V_MODEL_PREFIXES):
             return "i2v"
-        if has_media_input:
+
+        # 无明确模型名时，根据输入内容推断
+        if getattr(input_, "source_video_base64", None):
+            return "edit"
+
+        has_img_input = any(
+            getattr(input_, attr, None)
+            for attr in ("first_frame_base64", "last_frame_base64", "key_frame_base64")
+        )
+        if has_img_input:
             return "i2v"
+
         return "t2v"
 
     def _build_payload(self, input_: VideoGenerationInput) -> dict[str, Any]:
         """构建 DashScope 原生视频合成请求体。
 
-        三种模式的请求体结构:
+        四种模式的请求体结构:
 
         t2v (纯文本):
-          {"model": "...", "input": {"prompt": "..."}, "parameters": {"resolution":"720P","ratio":"16:9","duration":5}}
+          {"model":"...", "input":{"prompt":"..."}, "parameters":{"resolution":"720P","ratio":"16:9","duration":5}}
 
         i2v (首帧图→视频):
-          {"model": "...", "input": {"prompt":"...", "media":[{"type":"first_frame","url":"..."}]}, "parameters":{"resolution":"720P","duration":5}}
+          {"model":"...", "input":{"prompt":"...", "media":[{"type":"first_frame","url":"..."}]}, "parameters":{"resolution":"720P","duration":5}}
 
         r2v (参考图→视频):
-          {"model": "...", "input": {"prompt":"...", "media":[{"type":"reference_image","url":"..."}]}, "parameters":{"resolution":"720P","ratio":"16:9","duration":5}}
+          {"model":"...", "input":{"prompt":"...", "media":[{"type":"reference_image","url":"..."}]}, "parameters":{"resolution":"720P","ratio":"16:9","duration":5}}
+
+        edit (视频编辑):
+          {"model":"...", "input":{"prompt":"...",
+             "media":[
+               {"type":"video","url":"https://...mp4"},
+               {"type":"reference_image","url":"https://..."}
+             ]},
+           "parameters":{"resolution":"720P"}}
         """
         prompt_text = input_.prompt or ""
 
@@ -171,28 +202,47 @@ class BailianVideoApiAdapter:
             "resolution": self._resolve_resolution(input_),
         }
 
-        # 时长（秒）
-        if input_.seconds is not None:
-            valid_durations = [2, 3, 5, 10]
-            duration = int(input_.seconds)
-            if duration not in valid_durations:
-                duration = min(valid_durations, key=lambda x: abs(x - duration))
-                logger.warning(
-                    "[BailianVideo] Duration %s not in %s, using closest value: %d",
-                    input_.seconds,
-                    valid_durations,
-                    duration,
-                )
-            parameters["duration"] = duration
-
         model_name = input_.model or "happyhorse-1.0-t2v"
         mode = self._detect_mode(model_name, input_)
 
-        if mode == "r2v":
-            # ====== r2v (Reference-to-Video) ======
+        # ====== edit (视频编辑模式) ======
+        if mode == "edit":
             payload_input: dict[str, Any] = {"prompt": prompt_text}
-
             media_list: list[dict[str, str]] = []
+
+            # 必填：源视频 → type="video"
+            src_video = getattr(input_, "source_video_base64", None)
+            if src_video:
+                media_list.append({
+                    "type": "video",
+                    "url": self._ensure_url(src_video),
+                })
+
+            # 可选：参考图 → type="reference_image"
+            for img_field in ("first_frame_base64", "key_frame_base64"):
+                val = getattr(input_, img_field, None)
+                if val:
+                    media_list.append({
+                        "type": "reference_image",
+                        "url": self._ensure_url(val),
+                    })
+                    break  # video-edit 只需要一张参考图即可
+
+            if media_list:
+                payload_input["media"] = media_list
+
+            # video-edit 只传 resolution，不传 ratio 和 duration
+            payload: dict[str, Any] = {
+                "model": model_name,
+                "input": payload_input,
+                "parameters": parameters,
+            }
+            return payload
+
+        # ====== r2v (Reference-to-Video) ======
+        if mode == "r2v":
+            payload_input = {"prompt": prompt_text}
+            media_list = []
             for img_field in ("first_frame_base64", "last_frame_base64", "key_frame_base64"):
                 val = getattr(input_, img_field, None)
                 if val:
@@ -204,7 +254,7 @@ class BailianVideoApiAdapter:
             if media_list:
                 payload_input["media"] = media_list
 
-            payload: dict[str, Any] = {
+            payload = {
                 "model": model_name,
                 "input": payload_input,
                 "parameters": {
@@ -213,10 +263,26 @@ class BailianVideoApiAdapter:
                 },
             }
 
-        elif mode == "i2v":
-            # ====== i2v (Image-to-Video) ======
-            payload_input: dict[str, Any] = {"prompt": prompt_text}
-            media_list: list[dict[str, str]] = []
+            # r2v 支持 duration
+            if input_.seconds is not None:
+                valid_durations = [2, 3, 5, 10]
+                duration = int(input_.seconds)
+                if duration not in valid_durations:
+                    duration = min(valid_durations, key=lambda x: abs(x - duration))
+                    logger.warning(
+                        "[BailianVideo] Duration %s not in %s, using closest value: %d",
+                        input_.seconds,
+                        valid_durations,
+                        duration,
+                    )
+                payload["parameters"]["duration"] = duration
+
+            return payload
+
+        # ====== i2v (Image-to-Video) ======
+        if mode == "i2v":
+            payload_input = {"prompt": prompt_text}
+            media_list = []
 
             if input_.first_frame_base64:
                 media_list.append({
@@ -237,34 +303,63 @@ class BailianVideoApiAdapter:
             if media_list:
                 payload_input["media"] = media_list
 
-            payload: dict[str, Any] = {
+            payload = {
                 "model": model_name,
                 "input": payload_input,
                 "parameters": parameters,
             }
 
-        else:
-            # ====== t2v (Text-to-Video) ======
-            payload: dict[str, Any] = {
-                "model": model_name,
-                "input": {"prompt": prompt_text},
-                "parameters": {
-                    **parameters,
-                    "ratio": self._resolve_ratio(input_),
-                },
-            }
+            # i2v 支持 duration
+            if input_.seconds is not None:
+                valid_durations = [2, 3, 5, 10]
+                duration = int(input_.seconds)
+                if duration not in valid_durations:
+                    duration = min(valid_durations, key=lambda x: abs(x - duration))
+                    logger.warning(
+                        "[BailianVideo] Duration %s not in %s, using closest value: %d",
+                        input_.seconds,
+                        valid_durations,
+                        duration,
+                    )
+                payload["parameters"]["duration"] = duration
+
+            return payload
+
+        # ====== t2v (Text-to-Video) ======
+        payload = {
+            "model": model_name,
+            "input": {"prompt": prompt_text},
+            "parameters": {
+                **parameters,
+                "ratio": self._resolve_ratio(input_),
+            },
+        }
+
+        # t2v 支持 duration
+        if input_.seconds is not None:
+            valid_durations = [2, 3, 5, 10]
+            duration = int(input_.seconds)
+            if duration not in valid_durations:
+                duration = min(valid_durations, key=lambda x: abs(x - duration))
+                logger.warning(
+                    "[BailianVideo] Duration %s not in %s, using closest value: %d",
+                    input_.seconds,
+                    valid_durations,
+                    duration,
+                )
+            payload["parameters"]["duration"] = duration
 
         return payload
 
     @staticmethod
     def _is_i2v_model(model_name: str | None) -> bool:
-        """判断模型是否为 i2v 或 r2v 类型（两者都需要 input.media）。"""
+        """判断模型是否为非 t2v 类型（i2v / r2v / edit 都需要 input.media）。"""
         if not model_name:
             return False
         name_lower = model_name.lower().strip()
         return any(
             name_lower.startswith(p)
-            for p in _I2V_MODEL_PREFIXES + _R2V_MODEL_PREFIXES
+            for p in _I2V_MODEL_PREFIXES + _R2V_MODEL_PREFIXES + _VIDEO_EDIT_PREFIXES
         )
 
     @staticmethod
