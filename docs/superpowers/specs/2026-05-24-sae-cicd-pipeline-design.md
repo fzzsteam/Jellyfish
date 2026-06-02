@@ -92,7 +92,7 @@ crpi-7ajeyduewy90avu4.cn-shenzhen.personal.cr.aliyuncs.com/fzzs/jellyfish
 
 ### 保留不动
 
-`backend-pylint.yml`、`commit-messages.yml`、`deploy-site.yml`、`issues-stale.yml`、`tag-release.yml`、`backend.Dockerfile`、`front.Dockerfile`
+`backend-pylint.yml`、`commit-messages.yml`、`tag-release.yml`、`backend.Dockerfile`、`front.Dockerfile`
 
 ---
 
@@ -266,6 +266,4 @@ DEBUG=false
 |---|---|
 | `backend-pylint.yml` | PR 代码质量检查 |
 | `commit-messages.yml` | PR 提交格式校验 |
-| `deploy-site.yml` | Hugo 文档站部署到 GitHub Pages |
-| `issues-stale.yml` | 过期 Issue 自动关闭 |
 | `tag-release.yml` | `v*` tag 自动生成 GitHub Release 和 changelog |

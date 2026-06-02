@@ -14,9 +14,6 @@
   <a href="https://img.shields.io/badge/backend-FastAPI-009688">
     <img src="https://img.shields.io/badge/backend-FastAPI-009688" alt="Backend" />
   </a>
-  <a href="https://github.com/Forget-C/Jellyfish/actions/workflows/deploy-site.yml">
-    <img src="https://github.com/Forget-C/Jellyfish/actions/workflows/deploy-site.yml/badge.svg" alt="Deploy Site" />
-  </a>
   <a href="https://github.com/Forget-C/Jellyfish/actions/workflows/deploy-prod.yml">
     <img src="https://github.com/Forget-C/Jellyfish/actions/workflows/deploy-prod.yml/badge.svg" alt="Build and Deploy" />
   </a>
@@ -248,4 +245,3 @@ This project is licensed under [Apache-2.0](./LICENSE).
 ## 💬 Community & Feedback
 
 - [GitHub Issues](https://github.com/Forget-C/Jellyfish/issues)
-
