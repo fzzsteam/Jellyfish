@@ -13,7 +13,15 @@ from app.schemas.studio.entity_existence import (
     EntityNameExistenceCheckRequest,
     EntityNameExistenceCheckResponse,
 )
+from app.schemas.studio.asset_image_candidates import AssetImageCandidateAttachRequest, AssetImageCandidateRead
 from app.services.studio import StudioEntitiesService
+from app.services.studio.asset_image_candidates import (
+    adopt_asset_image_candidate,
+    attach_asset_image_candidate,
+    delete_asset_image_candidate,
+    list_asset_image_candidates,
+    load_asset_image_target,
+)
 
 router = APIRouter()
 
@@ -165,6 +173,95 @@ async def update_entity_image(
         body=body,
     )
     return success_response(payload)
+
+
+@router.get(
+    "/{entity_type}/{entity_id}/images/{image_id}/candidates",
+    response_model=ApiResponse[list[AssetImageCandidateRead]],
+    summary="列出实体图片候选",
+)
+async def list_entity_image_candidates(
+    entity_type: str,
+    entity_id: str,
+    image_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[list[AssetImageCandidateRead]]:
+    target_type = f"{entity_type}_image"
+    target = await load_asset_image_target(db, target_type=target_type, target_id=image_id)
+    rows = await list_asset_image_candidates(db, target_type=target_type, target_id=image_id)
+    current_file_id = getattr(target, "file_id", None)
+    return success_response(
+        [AssetImageCandidateRead.from_candidate(row, current_file_id=current_file_id) for row in rows]
+    )
+
+
+@router.post(
+    "/{entity_type}/{entity_id}/images/{image_id}/candidates",
+    response_model=ApiResponse[list[AssetImageCandidateRead]],
+    status_code=status.HTTP_201_CREATED,
+    summary="添加实体图片候选",
+)
+async def attach_entity_image_candidates(
+    entity_type: str,
+    entity_id: str,
+    image_id: int,
+    body: AssetImageCandidateAttachRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[list[AssetImageCandidateRead]]:
+    target_type = f"{entity_type}_image"
+    rows = []
+    for file_id in body.file_ids:
+        rows.append(
+            await attach_asset_image_candidate(
+                db,
+                target_type=target_type,
+                target_id=image_id,
+                file_id=file_id,
+                source_type=body.source_type,
+                source_ref=body.source_ref,
+                auto_adopt_if_empty=body.auto_adopt_if_empty,
+            )
+        )
+    await db.commit()
+    target = await load_asset_image_target(db, target_type=target_type, target_id=image_id)
+    current_file_id = getattr(target, "file_id", None)
+    return created_response(
+        [AssetImageCandidateRead.from_candidate(row, current_file_id=current_file_id) for row in rows]
+    )
+
+
+@router.post(
+    "/{entity_type}/{entity_id}/images/{image_id}/candidates/{candidate_id}/adopt",
+    response_model=ApiResponse[AssetImageCandidateRead],
+    summary="采用实体图片候选为当前图",
+)
+async def adopt_entity_image_candidate(
+    entity_type: str,
+    entity_id: str,
+    image_id: int,
+    candidate_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[AssetImageCandidateRead]:
+    row = await adopt_asset_image_candidate(db, candidate_id=candidate_id)
+    await db.commit()
+    return success_response(AssetImageCandidateRead.from_candidate(row, current_file_id=row.file_id))
+
+
+@router.delete(
+    "/{entity_type}/{entity_id}/images/{image_id}/candidates/{candidate_id}",
+    response_model=ApiResponse[None],
+    summary="删除实体图片候选关系",
+)
+async def delete_entity_image_candidate(
+    entity_type: str,
+    entity_id: str,
+    image_id: int,
+    candidate_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[None]:
+    await delete_asset_image_candidate(db, candidate_id=candidate_id)
+    await db.commit()
+    return empty_response()
 
 
 @router.delete(

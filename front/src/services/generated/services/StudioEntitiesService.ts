@@ -2,10 +2,13 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ApiResponse_AssetImageCandidateRead_ } from '../models/ApiResponse_AssetImageCandidateRead_';
 import type { ApiResponse_dict_str__Any__ } from '../models/ApiResponse_dict_str__Any__';
 import type { ApiResponse_EntityNameExistenceCheckResponse_ } from '../models/ApiResponse_EntityNameExistenceCheckResponse_';
+import type { ApiResponse_list_AssetImageCandidateRead__ } from '../models/ApiResponse_list_AssetImageCandidateRead__';
 import type { ApiResponse_NoneType_ } from '../models/ApiResponse_NoneType_';
 import type { ApiResponse_PaginatedData_dict_str__Any___ } from '../models/ApiResponse_PaginatedData_dict_str__Any___';
+import type { AssetImageCandidateAttachRequest } from '../models/AssetImageCandidateAttachRequest';
 import type { EntityNameExistenceCheckRequest } from '../models/EntityNameExistenceCheckRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -303,6 +306,124 @@ export class StudioEntitiesService {
                 'entity_type': entityType,
                 'entity_id': entityId,
                 'image_id': imageId,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 列出实体图片候选
+     * @returns ApiResponse_list_AssetImageCandidateRead__ Successful Response
+     * @throws ApiError
+     */
+    public static listEntityImageCandidatesApiV1StudioEntitiesEntityTypeEntityIdImagesImageIdCandidatesGet({
+        entityType,
+        entityId,
+        imageId,
+    }: {
+        entityType: string,
+        entityId: string,
+        imageId: number,
+    }): CancelablePromise<ApiResponse_list_AssetImageCandidateRead__> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/studio/entities/{entity_type}/{entity_id}/images/{image_id}/candidates',
+            path: {
+                'entity_type': entityType,
+                'entity_id': entityId,
+                'image_id': imageId,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 添加实体图片候选
+     * @returns ApiResponse_list_AssetImageCandidateRead__ Successful Response
+     * @throws ApiError
+     */
+    public static attachEntityImageCandidatesApiV1StudioEntitiesEntityTypeEntityIdImagesImageIdCandidatesPost({
+        entityType,
+        entityId,
+        imageId,
+        requestBody,
+    }: {
+        entityType: string,
+        entityId: string,
+        imageId: number,
+        requestBody: AssetImageCandidateAttachRequest,
+    }): CancelablePromise<ApiResponse_list_AssetImageCandidateRead__> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/studio/entities/{entity_type}/{entity_id}/images/{image_id}/candidates',
+            path: {
+                'entity_type': entityType,
+                'entity_id': entityId,
+                'image_id': imageId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 采用实体图片候选为当前图
+     * @returns ApiResponse_AssetImageCandidateRead_ Successful Response
+     * @throws ApiError
+     */
+    public static adoptEntityImageCandidateApiV1StudioEntitiesEntityTypeEntityIdImagesImageIdCandidatesCandidateIdAdoptPost({
+        entityType,
+        entityId,
+        imageId,
+        candidateId,
+    }: {
+        entityType: string,
+        entityId: string,
+        imageId: number,
+        candidateId: number,
+    }): CancelablePromise<ApiResponse_AssetImageCandidateRead_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/studio/entities/{entity_type}/{entity_id}/images/{image_id}/candidates/{candidate_id}/adopt',
+            path: {
+                'entity_type': entityType,
+                'entity_id': entityId,
+                'image_id': imageId,
+                'candidate_id': candidateId,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 删除实体图片候选关系
+     * @returns ApiResponse_NoneType_ Successful Response
+     * @throws ApiError
+     */
+    public static deleteEntityImageCandidateApiV1StudioEntitiesEntityTypeEntityIdImagesImageIdCandidatesCandidateIdDelete({
+        entityType,
+        entityId,
+        imageId,
+        candidateId,
+    }: {
+        entityType: string,
+        entityId: string,
+        imageId: number,
+        candidateId: number,
+    }): CancelablePromise<ApiResponse_NoneType_> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/studio/entities/{entity_type}/{entity_id}/images/{image_id}/candidates/{candidate_id}',
+            path: {
+                'entity_type': entityType,
+                'entity_id': entityId,
+                'image_id': imageId,
+                'candidate_id': candidateId,
             },
             errors: {
                 422: `Validation Error`,

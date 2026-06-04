@@ -45,16 +45,15 @@ export const assetAdapters = {
     updateImage: async (id: string, imageId: number, payload) => {
       await StudioEntitiesApi.updateImage('character', id, imageId, normalizeUpdateImagePayload(payload))
     },
-    renderPrompt: async (id: string, imageId: number) => {
-      const res = await StudioImageTasksService.renderCharacterImagePromptApiV1StudioImageTasksCharactersCharacterIdRenderPromptPost({
-        characterId: id,
-        requestBody: { image_id: imageId, model_id: null } as any,
-      })
-      const data = res.data
-      return {
-        prompt: (data?.prompt ?? '') as string,
-        images: (data?.images ?? []) as string[],
-      }
+    listImageCandidates: async (id: string, imageId: number) => {
+      const res = await StudioEntitiesApi.listImageCandidates('character', id, imageId)
+      return res.data ?? []
+    },
+    adoptImageCandidate: async (id: string, imageId: number, candidateId: number) => {
+      await StudioEntitiesApi.adoptImageCandidate('character', id, imageId, candidateId)
+    },
+    deleteImageCandidate: async (id: string, imageId: number, candidateId: number) => {
+      await StudioEntitiesApi.deleteImageCandidate('character', id, imageId, candidateId)
     },
     createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
       const res = await StudioImageTasksService.createCharacterImageGenerationTaskApiV1StudioImageTasksCharactersCharacterIdImageTasksPost({
@@ -87,16 +86,15 @@ export const assetAdapters = {
     updateImage: async (id: string, imageId: number, payload) => {
       await StudioEntitiesApi.updateImage('actor', id, imageId, normalizeUpdateImagePayload(payload))
     },
-    renderPrompt: async (id: string, imageId: number) => {
-      const res = await StudioImageTasksService.renderActorImagePromptApiV1StudioImageTasksActorsActorIdRenderPromptPost({
-        actorId: id,
-        requestBody: { image_id: imageId, model_id: null } as any,
-      })
-      const data = res.data
-      return {
-        prompt: (data?.prompt ?? '') as string,
-        images: (data?.images ?? []) as string[],
-      }
+    listImageCandidates: async (id: string, imageId: number) => {
+      const res = await StudioEntitiesApi.listImageCandidates('actor', id, imageId)
+      return res.data ?? []
+    },
+    adoptImageCandidate: async (id: string, imageId: number, candidateId: number) => {
+      await StudioEntitiesApi.adoptImageCandidate('actor', id, imageId, candidateId)
+    },
+    deleteImageCandidate: async (id: string, imageId: number, candidateId: number) => {
+      await StudioEntitiesApi.deleteImageCandidate('actor', id, imageId, candidateId)
     },
     createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
       const res = await StudioImageTasksService.createActorImageGenerationTaskApiV1StudioImageTasksActorsActorIdImageTasksPost({
@@ -129,17 +127,15 @@ export const assetAdapters = {
     updateImage: async (id: string, imageId: number, payload) => {
       await StudioEntitiesApi.updateImage('scene', id, imageId, normalizeUpdateImagePayload(payload))
     },
-    renderPrompt: async (id: string, imageId: number) => {
-      const res = await StudioImageTasksService.renderAssetImagePromptApiV1StudioImageTasksAssetsAssetTypeAssetIdRenderPromptPost({
-        assetType: 'scene',
-        assetId: id,
-        requestBody: { image_id: imageId, model_id: null } as any,
-      })
-      const data = res.data
-      return {
-        prompt: (data?.prompt ?? '') as string,
-        images: (data?.images ?? []) as string[],
-      }
+    listImageCandidates: async (id: string, imageId: number) => {
+      const res = await StudioEntitiesApi.listImageCandidates('scene', id, imageId)
+      return res.data ?? []
+    },
+    adoptImageCandidate: async (id: string, imageId: number, candidateId: number) => {
+      await StudioEntitiesApi.adoptImageCandidate('scene', id, imageId, candidateId)
+    },
+    deleteImageCandidate: async (id: string, imageId: number, candidateId: number) => {
+      await StudioEntitiesApi.deleteImageCandidate('scene', id, imageId, candidateId)
     },
     createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
       const res = await StudioImageTasksService.createAssetImageGenerationTaskApiV1StudioImageTasksAssetsAssetTypeAssetIdImageTasksPost({
@@ -173,17 +169,15 @@ export const assetAdapters = {
     updateImage: async (id: string, imageId: number, payload) => {
       await StudioEntitiesApi.updateImage('prop', id, imageId, normalizeUpdateImagePayload(payload))
     },
-    renderPrompt: async (id: string, imageId: number) => {
-      const res = await StudioImageTasksService.renderAssetImagePromptApiV1StudioImageTasksAssetsAssetTypeAssetIdRenderPromptPost({
-        assetType: 'prop',
-        assetId: id,
-        requestBody: { image_id: imageId, model_id: null } as any,
-      })
-      const data = res.data
-      return {
-        prompt: (data?.prompt ?? '') as string,
-        images: (data?.images ?? []) as string[],
-      }
+    listImageCandidates: async (id: string, imageId: number) => {
+      const res = await StudioEntitiesApi.listImageCandidates('prop', id, imageId)
+      return res.data ?? []
+    },
+    adoptImageCandidate: async (id: string, imageId: number, candidateId: number) => {
+      await StudioEntitiesApi.adoptImageCandidate('prop', id, imageId, candidateId)
+    },
+    deleteImageCandidate: async (id: string, imageId: number, candidateId: number) => {
+      await StudioEntitiesApi.deleteImageCandidate('prop', id, imageId, candidateId)
     },
     createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
       const res = await StudioImageTasksService.createAssetImageGenerationTaskApiV1StudioImageTasksAssetsAssetTypeAssetIdImageTasksPost({
@@ -217,17 +211,15 @@ export const assetAdapters = {
     updateImage: async (id: string, imageId: number, payload) => {
       await StudioEntitiesApi.updateImage('costume', id, imageId, normalizeUpdateImagePayload(payload))
     },
-    renderPrompt: async (id: string, imageId: number) => {
-      const res = await StudioImageTasksService.renderAssetImagePromptApiV1StudioImageTasksAssetsAssetTypeAssetIdRenderPromptPost({
-        assetType: 'costume',
-        assetId: id,
-        requestBody: { image_id: imageId, model_id: null } as any,
-      })
-      const data = res.data
-      return {
-        prompt: (data?.prompt ?? '') as string,
-        images: (data?.images ?? []) as string[],
-      }
+    listImageCandidates: async (id: string, imageId: number) => {
+      const res = await StudioEntitiesApi.listImageCandidates('costume', id, imageId)
+      return res.data ?? []
+    },
+    adoptImageCandidate: async (id: string, imageId: number, candidateId: number) => {
+      await StudioEntitiesApi.adoptImageCandidate('costume', id, imageId, candidateId)
+    },
+    deleteImageCandidate: async (id: string, imageId: number, candidateId: number) => {
+      await StudioEntitiesApi.deleteImageCandidate('costume', id, imageId, candidateId)
     },
     createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
       const res = await StudioImageTasksService.createAssetImageGenerationTaskApiV1StudioImageTasksAssetsAssetTypeAssetIdImageTasksPost({

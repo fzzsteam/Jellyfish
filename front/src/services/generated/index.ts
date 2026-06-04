@@ -8,6 +8,7 @@ export { OpenAPI } from './core/OpenAPI';
 export type { OpenAPIConfig } from './core/OpenAPI';
 
 export type { ActionBeatPhaseRead } from './models/ActionBeatPhaseRead';
+export type { ApiResponse_AssetImageCandidateRead_ } from './models/ApiResponse_AssetImageCandidateRead_';
 export type { ApiResponse_AsyncTaskCreateRead_ } from './models/ApiResponse_AsyncTaskCreateRead_';
 export type { ApiResponse_ChapterRead_ } from './models/ApiResponse_ChapterRead_';
 export type { ApiResponse_CharacterPortraitAnalysisResult_ } from './models/ApiResponse_CharacterPortraitAnalysisResult_';
@@ -20,6 +21,7 @@ export type { ApiResponse_FileDetailRead_ } from './models/ApiResponse_FileDetai
 export type { ApiResponse_FileRead_ } from './models/ApiResponse_FileRead_';
 export type { ApiResponse_GenerationTaskLinkRead_ } from './models/ApiResponse_GenerationTaskLinkRead_';
 export type { ApiResponse_ImageGenerationOptionsRead_ } from './models/ApiResponse_ImageGenerationOptionsRead_';
+export type { ApiResponse_list_AssetImageCandidateRead__ } from './models/ApiResponse_list_AssetImageCandidateRead__';
 export type { ApiResponse_list_PromptCategoryOptionRead__ } from './models/ApiResponse_list_PromptCategoryOptionRead__';
 export type { ApiResponse_list_ProviderSupportedRead__ } from './models/ApiResponse_list_ProviderSupportedRead__';
 export type { ApiResponse_list_ShotCharacterLinkRead__ } from './models/ApiResponse_list_ShotCharacterLinkRead__';
@@ -79,6 +81,8 @@ export type { ApiResponse_TaskStatusRead_ } from './models/ApiResponse_TaskStatu
 export type { ApiResponse_VariantAnalysisResult_ } from './models/ApiResponse_VariantAnalysisResult_';
 export type { ApiResponse_VideoGenerationOptionsRead_ } from './models/ApiResponse_VideoGenerationOptionsRead_';
 export type { ApiResponse_VideoPromptPreviewResponse_ } from './models/ApiResponse_VideoPromptPreviewResponse_';
+export type { AssetImageCandidateAttachRequest } from './models/AssetImageCandidateAttachRequest';
+export type { AssetImageCandidateRead } from './models/AssetImageCandidateRead';
 export type { AsyncTaskCreateRead } from './models/AsyncTaskCreateRead';
 export type { Body_upload_file_api_api_v1_studio_files_upload_post } from './models/Body_upload_file_api_api_v1_studio_files_upload_post';
 export type { CameraAngle } from './models/CameraAngle';

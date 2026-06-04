@@ -5,9 +5,7 @@ import {
   Col,
   Collapse,
   Empty,
-  Image,
   Input,
-  InputNumber,
   Modal,
   Row,
   Space,
@@ -18,19 +16,16 @@ import {
 } from 'antd'
 import { ArrowLeftOutlined, CloseCircleOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
 import { FilmService, ScriptProcessingService } from '../../../../services/generated'
-import type { TaskStatus } from '../../../../services/generated'
-import { listTaskLinksNormalized } from '../../../../services/filmTaskLinks'
+import type { AssetImageCandidateRead, TaskStatus } from '../../../../services/generated'
 import { buildFileDownloadUrl } from '../utils'
+import { AssetImageCandidateGallery } from './AssetImageCandidateGallery'
 import { DisplayImageCard } from './DisplayImageCard'
-import { ProjectVisualStyleAndStyleFields } from '../../project/ProjectVisualStyleAndStyleFields'
-import { useProjectStyleOptions } from '../../project/useProjectStyleOptions'
 import { defaultTaskActionErrorMessage, executeAsyncTaskCreate, executeTaskCancel, notifyExistingTask } from '../../components/taskActionHelpers'
 import { handleTaskResultSafely } from '../../components/taskResultHelpers'
 import { useRelationTaskNotification } from '../../components/taskNotificationHelpers'
 import { useTaskPageContext } from '../../components/taskPageContext'
 import { TASK_COPY } from '../../components/taskCopy'
 import { useLocation } from 'react-router-dom'
-import { useGenerationDraft } from '../../hooks/useGenerationDraft'
 import {
   CHARACTER_PORTRAIT_ANALYSIS_RELATION_TYPE,
   COSTUME_INFO_ANALYSIS_RELATION_TYPE,
@@ -63,16 +58,6 @@ export type AssetUpdate = {
 
 const DEFAULT_ANGLES: AssetViewAngle[] = ['FRONT', 'LEFT', 'RIGHT', 'BACK']
 
-const ANGLE_LABEL_MAP: Record<AssetViewAngle, string> = {
-  FRONT: '正面',
-  LEFT: '左侧',
-  RIGHT: '右侧',
-  BACK: '背面',
-  THREE_QUARTER: '3/4 侧面',
-  TOP: '俯视',
-  DETAIL: '细节',
-}
-
 export type BaseAsset = {
   id: string
   name: string
@@ -103,20 +88,11 @@ export type AssetEditPageBaseProps<TAsset extends BaseAsset, TImage extends Base
   listImages: (assetId: string) => Promise<TImage[]>
   createImageSlot: (assetId: string, angle: AssetViewAngle) => Promise<void>
   updateImage: (assetId: string, imageId: number, payload: { file_id: string; width?: number | null; height?: number | null; format?: string | null }) => Promise<void>
-  renderPrompt: (assetId: string, imageId: number) => Promise<{ prompt: string; images: string[] }>
+  listImageCandidates: (assetId: string, imageId: number) => Promise<AssetImageCandidateRead[]>
+  adoptImageCandidate: (assetId: string, imageId: number, candidateId: number) => Promise<void>
+  deleteImageCandidate: (assetId: string, imageId: number, candidateId: number) => Promise<void>
   createGenerationTask: (assetId: string, imageId: number, payload: { prompt: string; images: string[] }) => Promise<string | null>
   onNavigate: (to: string, replace?: boolean) => void
-}
-
-type HistoryCandidate<TImage extends BaseAssetImage> = {
-  id: string
-  file_id: string
-  view_angle?: AssetViewAngle
-  width?: number | null
-  height?: number | null
-  format?: string | null
-  source: 'task-link' | 'image'
-  originalImage?: TImage
 }
 
 function normalizeTags(input: string): string[] {
@@ -166,12 +142,12 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   updateAsset,
   listImages,
   createImageSlot,
-  updateImage,
-  renderPrompt,
+  listImageCandidates,
+  adoptImageCandidate,
+  deleteImageCandidate,
   createGenerationTask,
   onNavigate,
 }: AssetEditPageBaseProps<TAsset, TImage>) {
-  const { options: projectStyleOptions, defaultVisualStyle, getDefaultStyle } = useProjectStyleOptions()
   const taskCopy = TASK_COPY.smartDetect
   const location = useLocation()
   const [loading, setLoading] = useState(true)
@@ -181,9 +157,6 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   const [formName, setFormName] = useState('')
   const [formDesc, setFormDesc] = useState('')
   const [formTags, setFormTags] = useState('')
-  const [formViewCount, setFormViewCount] = useState(1)
-  const [formVisualStyle, setFormVisualStyle] = useState<'现实' | '动漫'>(defaultVisualStyle as '现实' | '动漫')
-  const [formStyle, setFormStyle] = useState<string>(getDefaultStyle(defaultVisualStyle))
   const [savingBase, setSavingBase] = useState(false)
 
   const [smartDetectLoading, setSmartDetectLoading] = useState(false)
@@ -195,46 +168,12 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   const [generationTask, setGenerationTask] = useState<RelationTaskState | null>(null)
   const [generationSettledTask, setGenerationSettledTask] = useState<RelationTaskState | null>(null)
 
-  const [promptPreviewOpen, setPromptPreviewOpen] = useState(false)
-  const [promptPreviewLoading, setPromptPreviewLoading] = useState(false)
-  const [promptPreviewImage, setPromptPreviewImage] = useState<TImage | null>(null)
-  const promptDraft = useGenerationDraft<
-    { prompt: string },
-    { imageId: number | null; images: string[] },
-    { prompt: string; images: string[] },
-    { taskId: string | null }
-  >({
-    initialBase: { prompt: '' },
-    initialContext: { imageId: null, images: [] },
-    derive: async ({ base, context }) => {
-      if (!assetId || !context.imageId) {
-        throw new Error('asset image slot is required')
-      }
-      const result = await renderPrompt(assetId, context.imageId)
-      return {
-        prompt: (base.prompt || '').trim() || (result.prompt ?? ''),
-        images: Array.isArray(result.images) ? result.images.filter(Boolean) : [],
-      }
-    },
-    submit: async ({ context, derived }) => {
-      if (!assetId || !context.imageId) {
-        throw new Error('asset image slot is required')
-      }
-      const taskId = await createGenerationTask(assetId, context.imageId, {
-        prompt: (derived.prompt || '').trim(),
-        images: derived.images,
-      })
-      return { taskId }
-    },
-  })
-  const promptPreviewDraft = promptDraft.base.prompt
-  const promptPreviewRefFileIds = promptDraft.context.images
-
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(false)
-  const [historyCandidates, setHistoryCandidates] = useState<HistoryCandidate<TImage>[]>([])
+  const [historyCandidates, setHistoryCandidates] = useState<AssetImageCandidateRead[]>([])
   const [editingSlotImage, setEditingSlotImage] = useState<TImage | null>(null)
-  const [adoptingImageId, setAdoptingImageId] = useState<string | null>(null)
+  const [adoptingImageId, setAdoptingImageId] = useState<number | null>(null)
+  const [deletingCandidateId, setDeletingCandidateId] = useState<number | null>(null)
   const smartDetectRelationType = useMemo(() => getSmartDetectRelationType(relationType), [relationType])
   const smartDetectRelationEntityId = useMemo(
     () => (assetId && smartDetectRelationType ? `${relationType}:${assetId}` : null),
@@ -337,15 +276,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       setFormName(nextAsset.name)
       setFormDesc(nextAsset.description ?? '')
       setFormTags((nextAsset.tags ?? []).join(', '))
-      {
-        const nextVisual = (nextAsset.visual_style ?? defaultVisualStyle) as '现实' | '动漫'
-        setFormVisualStyle(nextVisual)
-        setFormStyle((nextAsset.style as string | undefined) ?? getDefaultStyle(nextVisual))
-      }
-
       const targetCount = clampViewCount(nextAsset.view_count)
-      setFormViewCount(targetCount)
-
       const imageRows = await ensureImageSlots(targetCount)
       setImages(imageRows)
     } catch {
@@ -353,14 +284,14 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     } finally {
       setLoading(false)
     }
-  }, [assetId, assetDisplayName, backTo, defaultVisualStyle, ensureImageSlots, getAsset, getDefaultStyle, onNavigate])
+  }, [assetId, assetDisplayName, backTo, ensureImageSlots, getAsset, onNavigate])
 
   useEffect(() => {
     void loadData()
   }, [loadData])
 
   const slotItems = useMemo(() => {
-    const count = clampViewCount(formViewCount)
+    const count = clampViewCount(asset?.view_count)
     const byAngle = new Map<AssetViewAngle, TImage>()
     images.forEach((img) => {
       if (img.view_angle) byAngle.set(img.view_angle, img)
@@ -374,38 +305,24 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
         imageUrl: buildFileDownloadUrl(image?.file_id),
       }
     })
-  }, [formViewCount, images])
+  }, [asset?.view_count, images])
 
-  const minViewCount = useMemo(() => clampViewCount(asset?.view_count), [asset?.view_count])
-
-  const handleSaveBaseInfo = async () => {
-    if (!assetId || !asset) return
+  // Builds the asset update payload from the current form so generation can use unsaved edits.
+  const buildBasePayload = useCallback((): AssetUpdate | null => {
     if (!formName.trim()) {
       message.warning('请输入名称')
-      return
+      return null
     }
 
-    setSavingBase(true)
-    try {
-      const nextViewCount = Math.max(minViewCount, clampViewCount(formViewCount))
-      const payload: AssetUpdate = {
-        name: formName.trim(),
-        description: formDesc.trim(),
-        tags: normalizeTags(formTags),
-        view_count: nextViewCount,
-        visual_style: formVisualStyle,
-        style: formStyle,
-      }
-      const nextAsset = await updateAsset(assetId, payload)
-      if (nextAsset) setAsset(nextAsset)
-      message.success('基础信息已保存')
-      await loadData()
-    } catch {
-      message.error('保存失败')
-    } finally {
-      setSavingBase(false)
+    return {
+      name: formName.trim(),
+      description: formDesc.trim(),
+      tags: normalizeTags(formTags),
+      view_count: clampViewCount(asset?.view_count),
+      visual_style: (asset?.visual_style ?? '现实') as '现实' | '动漫',
+      style: asset?.style,
     }
-  }
+  }, [asset?.style, asset?.view_count, asset?.visual_style, formDesc, formName, formTags])
 
   const handleSmartDetectMissing = async () => {
     if (!assetId) return
@@ -558,48 +475,27 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     onNavigate: () => onNavigate(location.pathname),
   })
 
-  const openPromptPreview = async (image: TImage) => {
-    if (!assetId) return
-
-    try {
-      setPromptPreviewOpen(true)
-      setPromptPreviewLoading(true)
-      setPromptPreviewImage(image)
-      const nextContext = { imageId: image.id, images: [] }
-      promptDraft.hydrate({
-        base: { prompt: '' },
-        context: nextContext,
-      })
-      const derived = await promptDraft.deriveNow({
-        base: { prompt: '' },
-        context: nextContext,
-      })
-      if (derived) {
-        promptDraft.hydrate({
-          base: { prompt: derived.prompt },
-          context: { imageId: image.id, images: derived.images },
-          derived,
-        })
-      }
-    } catch {
-      message.error('获取提示词失败')
-    } finally {
-      setPromptPreviewLoading(false)
-    }
-  }
-
-  const confirmGenerateWithPrompt = async () => {
-    if (!assetId || !promptPreviewImage) return
-    const prompt = (promptPreviewDraft || '').trim()
+  // Saves current form edits and starts generation directly from the description field.
+  const handleGenerateImage = async (image: TImage) => {
+    if (!assetId || !asset) return
+    const prompt = formDesc.trim()
     if (!prompt) {
-      message.warning('请输入提示词')
+      message.warning('请先填写描述')
       return
     }
+    const payload = buildBasePayload()
+    if (!payload) return
 
-    setGeneratingByImageId((prev) => ({ ...prev, [promptPreviewImage.id]: true }))
+    setGeneratingByImageId((prev) => ({ ...prev, [image.id]: true }))
+    setSavingBase(true)
     try {
-      const submitted = await promptDraft.submitNow()
-      const taskId = submitted?.taskId
+      const nextAsset = await updateAsset(assetId, payload)
+      if (nextAsset) setAsset(nextAsset)
+
+      const taskId = await createGenerationTask(assetId, image.id, {
+        prompt,
+        images: [],
+      })
       if (!taskId) {
         message.error('生成任务创建失败：缺少任务 ID')
         return
@@ -632,8 +528,6 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       }
 
       if (finalStatus === 'succeeded') {
-        setPromptPreviewOpen(false)
-        setPromptPreviewImage(null)
         await loadData()
       } else if (finalStatus !== 'failed' && finalStatus !== 'cancelled') {
         message.warning('生成任务仍在执行，请稍后刷新')
@@ -641,84 +535,34 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     } catch {
       message.error('发起生成失败')
     } finally {
-      setGeneratingByImageId((prev) => ({ ...prev, [promptPreviewImage.id]: false }))
+      setSavingBase(false)
+      setGeneratingByImageId((prev) => ({ ...prev, [image.id]: false }))
     }
   }
 
   const openHistoryModal = async (targetImage: TImage) => {
+    if (!assetId) return
     setEditingSlotImage(targetImage)
     setHistoryOpen(true)
     setHistoryLoading(true)
 
     try {
-      const links = await listTaskLinksNormalized({
-        resourceType: 'image',
-        relationType,
-        relationEntityId: String(targetImage.id),
-      })
-      const imagesByFileId = new Map<string, TImage>()
-      images.forEach((img) => {
-        if (img.file_id) {
-          imagesByFileId.set(img.file_id, img)
-        }
-      })
-
-      const seenFileIds = new Set<string>()
-      const taskLinkCandidates: HistoryCandidate<TImage>[] = links
-        .filter((link) => Boolean(link.file_id))
-        .map((link) => {
-          const fileId = String(link.file_id)
-          const matchedImage = imagesByFileId.get(fileId)
-          return {
-            id: `task-link-${link.id}`,
-            file_id: fileId,
-            view_angle: matchedImage?.view_angle ?? targetImage.view_angle,
-            width: matchedImage?.width ?? null,
-            height: matchedImage?.height ?? null,
-            format: matchedImage?.format ?? null,
-            source: 'task-link' as const,
-            originalImage: matchedImage,
-          }
-        })
-        .filter((candidate) => {
-          if (seenFileIds.has(candidate.file_id)) return false
-          seenFileIds.add(candidate.file_id)
-          return true
-        })
-
-      const fallbackCandidates: HistoryCandidate<TImage>[] = images
-        .filter((img) => img.file_id && img.id !== targetImage.id && !seenFileIds.has(String(img.file_id)))
-        .map((img) => ({
-          id: `image-${img.id}`,
-          file_id: String(img.file_id),
-          view_angle: img.view_angle,
-          width: img.width ?? null,
-          height: img.height ?? null,
-          format: img.format ?? null,
-          source: 'image' as const,
-          originalImage: img,
-        }))
-
-      setHistoryCandidates(taskLinkCandidates.length > 0 ? taskLinkCandidates : fallbackCandidates)
+      const candidates = await listImageCandidates(assetId, targetImage.id)
+      setHistoryCandidates(candidates)
     } catch {
-      message.error('加载历史生成图片失败')
+      message.error('加载候选图片失败')
       setHistoryCandidates([])
     } finally {
       setHistoryLoading(false)
     }
   }
 
-  const handleAdoptHistoryImage = async (candidate: HistoryCandidate<TImage>) => {
+  const handleAdoptHistoryImage = async (candidate: AssetImageCandidateRead) => {
     if (!assetId || !editingSlotImage || !candidate.file_id) return
 
     setAdoptingImageId(candidate.id)
     try {
-      await updateImage(assetId, editingSlotImage.id, {
-        file_id: candidate.file_id,
-        width: candidate.width ?? null,
-        height: candidate.height ?? null,
-        format: candidate.format ?? null,
-      })
+      await adoptImageCandidate(assetId, editingSlotImage.id, candidate.id)
       message.success('角度图片已更新')
       setHistoryOpen(false)
       setEditingSlotImage(null)
@@ -727,6 +571,22 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       message.error('更新角度图片失败')
     } finally {
       setAdoptingImageId(null)
+    }
+  }
+
+  const handleDeleteCandidate = async (candidate: AssetImageCandidateRead) => {
+    if (!assetId || !editingSlotImage) return
+
+    setDeletingCandidateId(candidate.id)
+    try {
+      await deleteImageCandidate(assetId, editingSlotImage.id, candidate.id)
+      message.success('候选图片已移除')
+      const candidates = await listImageCandidates(assetId, editingSlotImage.id)
+      setHistoryCandidates(candidates)
+    } catch {
+      message.error('移除候选图片失败')
+    } finally {
+      setDeletingCandidateId(null)
     }
   }
 
@@ -815,51 +675,23 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                   <div className="text-gray-600 text-sm mb-1">标签（逗号分隔）</div>
                   <Input value={formTags} onChange={(e) => setFormTags(e.target.value)} disabled={smartDetectBusy || savingBase} />
                 </div>
-                <div>
-                  <div className="text-gray-600 text-sm mb-1">镜头数（仅可增加，最大 4）</div>
-                  <InputNumber
-                    min={minViewCount}
-                    max={4}
-                    precision={0}
-                    value={formViewCount}
-                    onChange={(v) => setFormViewCount(v ?? minViewCount)}
-                    disabled={smartDetectBusy || savingBase}
-                  />
-                </div>
-                <div>
-                  <div className="text-gray-600 text-sm mb-1">视觉风格</div>
-                  <ProjectVisualStyleAndStyleFields
-                    disabled={smartDetectBusy || savingBase}
-                    visual_style={formVisualStyle}
-                    style={formStyle}
-                    options={projectStyleOptions}
-                    onChange={(next) => {
-                      setFormVisualStyle(next.visual_style)
-                      setFormStyle(next.style)
-                    }}
-                  />
-                </div>
-                <Button type="primary" onClick={() => void handleSaveBaseInfo()} loading={savingBase || smartDetectLoading}>
-                  保存基础信息
-                </Button>
               </div>
             ),
           },
           {
             key: 'views',
-            label: '多镜头图片',
+            label: '图片',
             children: (
               <Row gutter={[16, 16]}>
                 {slotItems.map((slot) => (
                   <Col xs={24} sm={12} lg={8} xl={6} key={slot.angle}>
                     <DisplayImageCard
-                      title={`照片角度：${ANGLE_LABEL_MAP[slot.angle]}`}
+                      title={null}
                       imageUrl={slot.imageUrl}
                       imageAlt={slot.angle}
                       placeholder="暂无图片"
                       hoverable={false}
                       imageHeightClassName="h-44"
-                      extra={slot.image ? <Tag color="blue">ID {slot.image.id}</Tag> : null}
                       footer={
                         <div className="flex items-center gap-2">
                           <Button
@@ -867,7 +699,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                             size="small"
                             disabled={!slot.image}
                             loading={Boolean(slot.image && generatingByImageId[slot.image.id])}
-                            onClick={() => slot.image && void openPromptPreview(slot.image)}
+                            onClick={() => slot.image && void handleGenerateImage(slot.image)}
                           >
                             生成
                           </Button>
@@ -877,7 +709,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                             disabled={!slot.image}
                             onClick={() => slot.image && void openHistoryModal(slot.image)}
                           >
-                            编辑
+                            候选池
                           </Button>
                         </div>
                       }
@@ -891,7 +723,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       />
 
       <Modal
-        title="历史生成图片"
+        title="图片候选池"
         open={historyOpen}
         onCancel={() => {
           setHistoryOpen(false)
@@ -905,88 +737,16 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
             <Spin />
           </div>
         ) : historyCandidates.length === 0 ? (
-          <Empty description="暂无可用历史图片" />
+          <Empty description="暂无候选图片。生成图片后，所有结果会保留在这里供选择。" />
         ) : (
-          <Row gutter={[16, 16]}>
-            {historyCandidates.map((candidate) => (
-              <Col xs={24} sm={12} md={8} key={candidate.id}>
-                <DisplayImageCard
-                  title={candidate.view_angle ? `角度：${ANGLE_LABEL_MAP[candidate.view_angle] ?? candidate.view_angle}` : candidate.source === 'task-link' ? '任务产物' : `图片 ${candidate.id}`}
-                  imageUrl={buildFileDownloadUrl(candidate.file_id)}
-                  imageAlt={candidate.id}
-                  placeholder="无缩略图"
-                  hoverable={false}
-                  imageHeightClassName="h-44"
-                  footer={
-                    <Button
-                      className="mt-2"
-                      type="primary"
-                      size="small"
-                      block
-                      disabled={!candidate.file_id}
-                      loading={adoptingImageId === candidate.id}
-                      onClick={() => void handleAdoptHistoryImage(candidate)}
-                    >
-                      选中并更新当前角度
-                    </Button>
-                  }
-                />
-              </Col>
-            ))}
-          </Row>
-        )}
-      </Modal>
-
-      <Modal
-        title="提示词内容预览"
-        open={promptPreviewOpen}
-        onCancel={() => {
-          setPromptPreviewOpen(false)
-          setPromptPreviewImage(null)
-        }}
-        okText="生成"
-        cancelText="取消"
-        confirmLoading={Boolean(promptPreviewImage && generatingByImageId[promptPreviewImage.id])}
-        onOk={() => void confirmGenerateWithPrompt()}
-        destroyOnClose
-        width={900}
-      >
-        {promptPreviewLoading ? (
-          <div className="py-8 text-center">
-            <Spin />
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div>
-              <div className="text-xs text-gray-500 mb-2">关联图片（参考图）</div>
-              {promptPreviewRefFileIds.length === 0 ? (
-                <div className="text-xs text-gray-400">暂无关联图片</div>
-              ) : (
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                  <Image.PreviewGroup>
-                    {promptPreviewRefFileIds.map((fid) => (
-                      <Image
-                        key={fid}
-                        width={72}
-                        height={72}
-                        style={{ objectFit: 'cover', borderRadius: 8 }}
-                        src={buildFileDownloadUrl(fid)}
-                      />
-                    ))}
-                  </Image.PreviewGroup>
-                </div>
-              )}
-            </div>
-            <div>
-              <div className="text-xs text-gray-500 mb-2">提示词（可编辑）</div>
-              <Input.TextArea
-                rows={10}
-                value={promptPreviewDraft}
-                onChange={(e) => promptDraft.setBase({ prompt: e.target.value })}
-                placeholder="请输入提示词…"
-              />
-            </div>
-          </div>
+          <AssetImageCandidateGallery
+            candidates={historyCandidates}
+            adoptingId={adoptingImageId}
+            deletingId={deletingCandidateId}
+            resolveFileUrl={(fileId) => buildFileDownloadUrl(fileId) ?? ''}
+            onAdopt={handleAdoptHistoryImage}
+            onDelete={handleDeleteCandidate}
+          />
         )}
       </Modal>
 

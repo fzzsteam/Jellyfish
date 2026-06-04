@@ -1,4 +1,5 @@
 import { StudioEntitiesService } from './generated'
+import type { AssetImageCandidateAttachRequest } from './generated'
 
 type EntityType = 'actor' | 'character' | 'scene' | 'prop' | 'costume'
 
@@ -68,6 +69,37 @@ export const StudioEntitiesApi = {
       entityType,
       entityId,
       imageId,
+    })
+  },
+  listImageCandidates(entityType: EntityType, entityId: string, imageId: number) {
+    return StudioEntitiesService.listEntityImageCandidatesApiV1StudioEntitiesEntityTypeEntityIdImagesImageIdCandidatesGet({
+      entityType,
+      entityId,
+      imageId,
+    })
+  },
+  attachImageCandidates(entityType: EntityType, entityId: string, imageId: number, payload: AssetImageCandidateAttachRequest) {
+    return StudioEntitiesService.attachEntityImageCandidatesApiV1StudioEntitiesEntityTypeEntityIdImagesImageIdCandidatesPost({
+      entityType,
+      entityId,
+      imageId,
+      requestBody: payload,
+    })
+  },
+  adoptImageCandidate(entityType: EntityType, entityId: string, imageId: number, candidateId: number) {
+    return StudioEntitiesService.adoptEntityImageCandidateApiV1StudioEntitiesEntityTypeEntityIdImagesImageIdCandidatesCandidateIdAdoptPost({
+      entityType,
+      entityId,
+      imageId,
+      candidateId,
+    })
+  },
+  deleteImageCandidate(entityType: EntityType, entityId: string, imageId: number, candidateId: number) {
+    return StudioEntitiesService.deleteEntityImageCandidateApiV1StudioEntitiesEntityTypeEntityIdImagesImageIdCandidatesCandidateIdDelete({
+      entityType,
+      entityId,
+      imageId,
+      candidateId,
     })
   },
 }
