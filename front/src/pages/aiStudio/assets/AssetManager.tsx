@@ -46,21 +46,23 @@ const AssetManager = () => {
   }
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <Tabs
-          activeKey={activeTab}
-          onChange={(k) => {
-            if (isValidTab(k)) setTabInUrl(k)
-          }}
-          items={[
-            { key: 'actor', label: '演员', children: <ActorsTab /> },
-            { key: 'scene', label: '场景', children: <ScenesTab /> },
-            { key: 'prop', label: '道具', children: <PropsTab /> },
-            { key: 'costume', label: '服装', children: <CostumesTab /> },
-          ]}
-        />
-      </Card>
+    <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden pr-1">
+      <div className="space-y-4">
+        <Card>
+          <Tabs
+            activeKey={activeTab}
+            onChange={(k) => {
+              if (isValidTab(k)) setTabInUrl(k)
+            }}
+            items={[
+              { key: 'actor', label: '演员', children: <ActorsTab /> },
+              { key: 'scene', label: '场景', children: <ScenesTab /> },
+              { key: 'prop', label: '道具', children: <PropsTab /> },
+              { key: 'costume', label: '服装', children: <CostumesTab /> },
+            ]}
+          />
+        </Card>
+      </div>
     </div>
   )
 }

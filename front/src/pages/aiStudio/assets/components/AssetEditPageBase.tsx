@@ -115,6 +115,21 @@ function isTerminalStatus(status: TaskStatus): boolean {
   return status === 'succeeded' || status === 'failed' || status === 'cancelled'
 }
 
+// 从 generated client 或 fetch 包装错误中提取 HTTP 状态码，用于保存前冲突提示。
+function getHttpStatus(error: unknown): number | undefined {
+  const maybe = error as { status?: number; statusCode?: number; response?: { status?: number }; body?: { code?: number; status?: number } }
+  return maybe.response?.status ?? maybe.status ?? maybe.statusCode ?? maybe.body?.status ?? maybe.body?.code
+}
+
+// 识别资产名唯一约束冲突，兼容 generated client、响应体和通用错误文本的不同包装。
+function isAssetNameConflictError(error: unknown): boolean {
+  if (getHttpStatus(error) === 409) return true
+
+  const maybe = error as { message?: string; body?: { message?: string; detail?: string } }
+  const text = [maybe.body?.message, maybe.body?.detail, maybe.message].filter(Boolean).join('\n')
+  return /name already exists|Duplicate entry|uq_(actors|scenes|props|costumes)_name/i.test(text)
+}
+
 function getSmartDetectRelationType(relationType: string): string | null {
   if (relationType === 'actor_image' || relationType === 'character_image') return CHARACTER_PORTRAIT_ANALYSIS_RELATION_TYPE
   if (relationType === 'scene_image') return SCENE_INFO_ANALYSIS_RELATION_TYPE
@@ -532,8 +547,12 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       } else if (finalStatus !== 'failed' && finalStatus !== 'cancelled') {
         message.warning('生成任务仍在执行，请稍后刷新')
       }
-    } catch {
-      message.error('发起生成失败')
+    } catch (error) {
+      if (isAssetNameConflictError(error)) {
+        message.error(`${assetDisplayName}名称已存在，请修改名称或编辑已有资产后再生成`)
+      } else {
+        message.error('发起生成失败')
+      }
     } finally {
       setSavingBase(false)
       setGeneratingByImageId((prev) => ({ ...prev, [image.id]: false }))

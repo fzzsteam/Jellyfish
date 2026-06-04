@@ -1,5 +1,5 @@
 import { DeleteOutlined } from '@ant-design/icons'
-import { Button, Empty, Image, Popconfirm, Space, Tag, Typography } from 'antd'
+import { Button, Empty, Image, Popconfirm, Space } from 'antd'
 import type { AssetImageCandidateRead } from '../../../../services/generated'
 
 type Props = {
@@ -10,12 +10,6 @@ type Props = {
   resolveFileUrl: (fileId: string) => string
   onAdopt: (candidate: AssetImageCandidateRead) => Promise<void>
   onDelete?: (candidate: AssetImageCandidateRead) => Promise<void>
-}
-
-function sourceLabel(sourceType: string): string {
-  if (sourceType === 'upload') return '本地上传'
-  if (sourceType === 'generation') return '生成结果'
-  return sourceType || '候选图片'
 }
 
 export function AssetImageCandidateGallery({
@@ -46,12 +40,8 @@ export function AssetImageCandidateGallery({
                 style={{ objectFit: 'contain' }}
               />
             </div>
-            <Space direction="vertical" size={8} className="mt-3 w-full">
-              <Space wrap>
-                <Tag color={adopted ? 'green' : 'blue'}>{adopted ? '当前采用' : sourceLabel(candidate.source_type)}</Tag>
-                <Typography.Text type="secondary">ID {candidate.id}</Typography.Text>
-              </Space>
-              <Space>
+            <div className="mt-3 flex w-full justify-center">
+              <Space size={8} className="justify-center">
                 <Button
                   type={adopted ? 'default' : 'primary'}
                   size="small"
@@ -59,7 +49,7 @@ export function AssetImageCandidateGallery({
                   loading={adoptingId === candidate.id}
                   onClick={() => void onAdopt(candidate)}
                 >
-                  {adopted ? '已采用' : '设为当前图'}
+                  {adopted ? '已采用' : '设为当前参考图'}
                 </Button>
                 {onDelete ? (
                   <Popconfirm
@@ -80,7 +70,7 @@ export function AssetImageCandidateGallery({
                   </Popconfirm>
                 ) : null}
               </Space>
-            </Space>
+            </div>
           </div>
         )
       })}

@@ -18,6 +18,7 @@ from app.services.studio.shot_character_links import upsert as upsert_shot_chara
 from app.utils.project_links import upsert_project_link
 
 ENTITY_ORDER_FIELDS = {"name", "style", "visual_style", "created_at", "updated_at"}
+GLOBAL_NAME_UNIQUE_ENTITY_TYPES = {"actor", "scene", "prop", "costume"}
 
 
 def _asset_read_payload(obj: Any, thumbnail: str) -> dict[str, Any]:
@@ -32,6 +33,27 @@ def _asset_read_payload(obj: Any, thumbnail: str) -> dict[str, Any]:
         "visual_style": obj.visual_style,
         "thumbnail": thumbnail,
     }
+
+
+async def _ensure_global_name_available(
+    db: AsyncSession,
+    *,
+    entity_type: str,
+    model: type,
+    name: str | None,
+    exclude_id: str | None = None,
+) -> None:
+    """在写库前校验全局资产名称唯一性，避免数据库唯一约束异常泄漏到业务流程。"""
+    normalized_name = str(name or "").strip()
+    if entity_type not in GLOBAL_NAME_UNIQUE_ENTITY_TYPES or not normalized_name:
+        return
+
+    stmt = select(model.id).where(model.name == normalized_name)
+    if exclude_id:
+        stmt = stmt.where(model.id != exclude_id)
+    existing_id = (await db.execute(stmt.limit(1))).scalars().first()
+    if existing_id is not None:
+        raise HTTPException(status_code=409, detail=f"{model.__name__} name already exists: {normalized_name}")
 
 
 async def list_entities_paginated(
@@ -107,6 +129,12 @@ async def create_entity(
     exists = await db.get(spec.model, data["id"])
     if exists is not None:
         raise HTTPException(status_code=400, detail=entity_already_exists(spec.model.__name__))
+    await _ensure_global_name_available(
+        db,
+        entity_type=entity_type_norm,
+        model=spec.model,
+        name=data.get("name"),
+    )
 
     if entity_type_norm == "character":
         if await db.get(Project, data["project_id"]) is None:
@@ -225,6 +253,13 @@ async def update_entity(
         raise HTTPException(status_code=404, detail=entity_not_found(spec.model.__name__))
 
     update_data = spec.update_model.model_validate(body).model_dump(exclude_unset=True)
+    await _ensure_global_name_available(
+        db,
+        entity_type=entity_type_norm,
+        model=spec.model,
+        name=update_data.get("name"),
+        exclude_id=entity_id,
+    )
     if entity_type_norm == "character":
         if "project_id" in update_data and await db.get(Project, update_data["project_id"]) is None:
             raise HTTPException(status_code=400, detail=entity_not_found("Project"))
