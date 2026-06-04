@@ -34,8 +34,8 @@ export function getChapterPreparationState(chapter: Chapter): ChapterPreparation
       key: 'extract_shots',
       text: '待提取分镜',
       color: 'gold',
-      hint: '已有章节原文，下一步建议先提取分镜',
-      primaryAction: '提取分镜',
+      hint: '已有章节原文，下一步建议提取分镜并自动准备资产与对白',
+      primaryAction: '提取分镜并自动准备',
       primaryIcon: <ScissorOutlined />,
     }
   }

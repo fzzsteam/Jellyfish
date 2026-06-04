@@ -65,7 +65,7 @@ export function ChapterShotDialogueConfirmation({
     extraction.state === 'skipped'
       ? '当前镜头已标记为无需提取，对白候选已按完成处理'
       : extraction.state === 'not_extracted'
-        ? '当前还没有执行提取，先在上方点击“提取并刷新候选”'
+        ? '当前还没有自动准备结果，可使用上方“重新提取/刷新候选”修复'
         : extraction.state === 'extracted_empty'
           ? '已执行提取，但当前没有识别到对白候选'
           : '当前没有待确认对白；如果需要，也可以直接补录最终对白'
@@ -103,7 +103,7 @@ export function ChapterShotDialogueConfirmation({
               {dialogueStatus.text}
             </span>
           </div>
-          <div className="text-[11px] text-slate-500 mt-1">这里处理系统提取出的对白候选，并确认最终对白内容。</div>
+          <div className="text-[11px] text-slate-500 mt-1">系统会自动写入可用对白；这里只处理仍需补录、修正或忽略的对白。</div>
         </div>
         <div className="flex items-center gap-2">
           {extractedDialogLines.length > 0 ? (

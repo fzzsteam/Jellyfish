@@ -14,7 +14,7 @@ weight: 7
 
 ## 核心结论
 
-- `shots.status`：系统流程状态，只由后端更新
+- `shots.status`：信息提取确认状态，只由后端更新
 - `shots.skip_extraction`：用户明确声明“当前镜头无需提取”
 - `shot_extracted_candidates`：记录每一条资产提取候选项的处理状态
 - `shot_extracted_dialogue_candidates`：记录每一条对白提取候选项的处理状态
@@ -23,7 +23,7 @@ weight: 7
 
 ```text
 shots.status
-  = 系统流程状态
+  = 信息提取确认状态
 
 skip_extraction
   = 是否跳过提取
@@ -40,13 +40,15 @@ shot_extracted_dialogue_candidates
 当前只保留两种正式状态：
 
 - `pending`
-  - 当前镜头还没有完成视频生成前的确认流程
+  - 当前镜头还没有完成资产 / 对白等信息提取确认
 - `ready`
-  - 当前镜头已经具备进入视频生成的前置条件
+  - 当前镜头的信息提取确认已经完成
 
-这里的 `ready` 不再表示“看起来差不多了”，而是明确表示：
+这里的 `ready` 不再表示“看起来差不多了”，也不等于已经满足视频生成条件，而是明确表示：
 
-> 当前分镜已经完成信息提取确认，因此具备进入视频生成的条件。
+> 当前分镜已经完成信息提取确认，可以进入后续生成准备检查。
+
+视频生成条件由 `video-readiness` 单独判断，例如关键帧、参考图、视频参数等缺口不会写入 `shot.status`。
 
 需要特别注意：
 
@@ -133,17 +135,20 @@ shot_extracted_dialogue_candidates
 
 ## 典型流转
 
-### 路径 A：正常提取确认
+### 路径 A：分镜提取后的自动准备
 
 ```text
-extract
-→ shot_extracted_candidates 写入资产 pending
-→ shot_extracted_dialogue_candidates 写入对白 pending
-→ 用户处理资产候选：linked / ignored
-→ 用户处理对白候选：accepted / ignored
-→ 全部资产候选和对白候选已 resolved
+script_divide
+→ 写入章节分镜
+→ 自动执行资产 / 对白提取
+→ 有可用图片且高置信唯一匹配的资产候选自动 linked
+→ 对白候选自动写入 ShotDialogLine 并 accepted
+→ 缺图、低置信或多候选资产保留 pending
+→ 全部资产候选和对白候选已 resolved 时
 → shot.status = ready
 ```
+
+分镜编辑页负责处理自动准备后仍然 pending 的候选，或在需要修复时重新提取 / 刷新候选。
 
 ### 路径 B：明确无需提取
 
@@ -167,6 +172,9 @@ extract
 
 - 提取接口完成后，按镜头同步 `shot_extracted_candidates`
 - 提取接口完成后，按镜头同步 `shot_extracted_dialogue_candidates`
+- 章节分镜提取任务完成写库后，会串行执行资产 / 对白提取与自动准备
+- 自动准备会把已有可用图片且高置信唯一匹配的资产候选回写为 `linked`
+- 自动准备会把对白候选写入 `ShotDialogLine` 并回写为 `accepted`
 - 角色关联成功后，匹配角色候选回写为 `linked`
 - 场景 / 道具 / 服装关联成功后，匹配候选回写为 `linked`
 - `ShotDetail.scene_id` 设置成功后，场景候选回写为 `linked`

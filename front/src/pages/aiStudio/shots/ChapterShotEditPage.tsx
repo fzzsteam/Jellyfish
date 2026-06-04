@@ -93,7 +93,7 @@ function getExtractionStateMeta(
     return {
       tone: 'gold',
       title: '当前镜头还没有执行过信息提取',
-      description: '点击“提取并刷新候选”后，系统会同时提取资产和对白候选。',
+      description: '分镜提取主流程会自动准备资产和对白候选；如需修复单条镜头，可在这里重新提取。',
     }
   }
   if (state === 'extracted_empty') {
@@ -1359,7 +1359,7 @@ export function ChapterShotEditPage() {
             <div className="min-w-0">
               <div className="text-sm font-medium text-slate-900">提取确认工作区</div>
               <div className="text-[11px] text-slate-500 mt-1">
-                这里集中处理系统提取出的资产和对白候选，确认完成后当前镜头才能真正进入生成阶段。
+                分镜提取后系统会自动准备资产和对白；这里只处理缺失、低置信或需要人工修正的内容。
               </div>
               <div
                 className="mt-3 rounded-lg border px-3 py-2 text-xs"
@@ -1390,13 +1390,13 @@ export function ChapterShotEditPage() {
             </div>
             <div className="flex items-center gap-2">
               <Button
-                type="primary"
+                type="default"
                 size="small"
                 loading={extractingAssets || extractTaskActive}
                 disabled={extractTaskActive}
                 onClick={() => void extractAssets()}
               >
-                提取并刷新候选
+                重新提取/刷新候选
               </Button>
               {extractTask ? (
                 <Button

@@ -646,7 +646,7 @@ export function ChapterShotsPage() {
                     disabled={extracting || shots.length > 0 || !!chapterDivisionTask}
                     onClick={() => void handleOneClickExtract()}
                   >
-                    {chapterDivisionTask ? '分镜提取中' : shots.length === 0 ? '一键提取分镜' : '重新提取需先清空分镜'}
+                    {chapterDivisionTask ? '分镜自动准备中' : shots.length === 0 ? '一键提取分镜并自动准备' : '重新提取需先清空分镜'}
                   </Button>
                 </span>
               </Tooltip>

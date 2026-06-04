@@ -74,7 +74,7 @@ export function ChapterShotAssetConfirmation({
     extraction.state === 'skipped'
       ? '当前镜头已标记为无需提取，资产候选已按完成处理'
       : extraction.state === 'not_extracted'
-        ? '当前还没有执行提取，先在上方点击“提取并刷新候选”'
+        ? '当前还没有自动准备结果，可使用上方“重新提取/刷新候选”修复'
         : extraction.state === 'extracted_empty'
           ? '已执行提取，但当前没有识别到资产候选'
           : '当前没有待确认的资产候选'
@@ -228,7 +228,7 @@ export function ChapterShotAssetConfirmation({
               {assetStatus.text}
             </Tag>
           </div>
-          <div className="text-[11px] text-slate-500 mt-1">这里处理系统提取出的场景、角色、道具和服装候选。</div>
+          <div className="text-[11px] text-slate-500 mt-1">系统会优先自动关联已有图片资产；这里只处理缺图、低置信或需要新建的候选。</div>
         </div>
       </div>
       <div className="space-y-4">
