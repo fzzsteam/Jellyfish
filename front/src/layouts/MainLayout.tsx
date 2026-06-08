@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react'
-import { Layout, Menu, theme, Dropdown, Space, Avatar, Select, Breadcrumb } from 'antd'
+import { Layout, Menu, theme, Dropdown, Space, Avatar, Breadcrumb } from 'antd'
 import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -19,7 +19,7 @@ import { TaskRuntimeProvider } from '../pages/aiStudio/components/TaskRuntimePro
 const { Header, Sider, Content } = Layout
 
 const MainLayout: React.FC = () => {
-  const { t, i18n } = useTranslation('layout')
+  const { t } = useTranslation('layout')
   const location = useLocation()
   const navigate = useNavigate()
   const { token } = theme.useToken()
@@ -27,8 +27,6 @@ const MainLayout: React.FC = () => {
   const collapsed = useAppStore((state) => state.siderCollapsed)
   const toggleCollapsed = useAppStore((state) => state.toggleSider)
   const user = useAppStore((state) => state.user)
-  const language = useAppStore((state) => state.language)
-  const setLanguage = useAppStore((state) => state.setLanguage)
 
   const selectedKeys = useMemo(() => {
     if (location.pathname === '/projects' || location.pathname.startsWith('/projects/')) return ['projects']
@@ -222,22 +220,6 @@ const MainLayout: React.FC = () => {
           </Space>
 
           <Space size="middle">
-            <Select
-              size="small"
-              value={language}
-              style={{ width: 120 }}
-              onChange={(value) => {
-                setLanguage(value)
-                void i18n.changeLanguage(value)
-                window.localStorage.setItem('jellyfish_language', value)
-                document.documentElement.lang = value === 'en-US' ? 'en' : 'zh-CN'
-              }}
-              options={[
-                { label: t('lang.zh'), value: 'zh-CN' },
-                { label: t('lang.en'), value: 'en-US' },
-              ]}
-            />
-
             <Dropdown
               menu={{
                 items: userMenuItems,

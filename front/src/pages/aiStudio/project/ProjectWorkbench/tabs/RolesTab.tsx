@@ -232,10 +232,6 @@ export function RolesTab() {
       message.warning('请输入角色名称')
       return
     }
-    if (!formActorId) {
-      message.warning('请选择关联演员')
-      return
-    }
     setCreating(true)
     try {
       const createRes = await StudioEntitiesApi.create('character', {
@@ -247,7 +243,7 @@ export function RolesTab() {
         description: formDesc.trim() || undefined,
         visual_style: formVisualStyle || '现实',
         style: formStyle,
-        actor_id: formActorId,
+        actor_id: formActorId ?? null,
         costume_id: formCostumeId ?? null,
       })
       const charId = (createRes.data as { id?: string } | undefined)?.id
@@ -469,10 +465,11 @@ export function RolesTab() {
             />
           </div>
           <div>
-            <div className="text-sm text-gray-600 mb-1">关联演员（必填）</div>
+            <div className="text-sm text-gray-600 mb-1">关联演员（可选）</div>
             <Select
               className="w-full"
-              placeholder="选择当前项目已关联的演员"
+              allowClear
+              placeholder="可选择当前项目已关联的演员"
               loading={loadingLinks}
               value={formActorId}
               onChange={(v) => setFormActorId(v)}

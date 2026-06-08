@@ -36,7 +36,6 @@ type ChapterStudioReadinessDiagnosisPanelProps = {
   selectedShot: ShotRead | null
   shotAssetsOverview: unknown | null
   promptAssetReadiness: PromptAssetReadiness
-  promptAssetReadinessNote: string
   shotExtractStatusSource: 'idle'
   shotExtractStatusText: string
   onGoToShotEdit: () => void
@@ -48,7 +47,6 @@ export function ChapterStudioReadinessDiagnosisPanel({
   selectedShot,
   shotAssetsOverview,
   promptAssetReadiness,
-  promptAssetReadinessNote,
   shotExtractStatusSource,
   shotExtractStatusText,
   onGoToShotEdit,
@@ -60,7 +58,6 @@ export function ChapterStudioReadinessDiagnosisPanel({
       <div className="cs-group-title">
         <CheckCircleOutlined /> 信息确认诊断
       </div>
-      <div className="cs-readiness-note">{promptAssetReadinessNote}</div>
       {selectedShot ? (
         <div className="mt-3">
           <Button icon={<EditOutlined />} onClick={onGoToShotEdit}>
@@ -98,9 +95,6 @@ export function ChapterStudioReadinessDiagnosisPanel({
         <div className="text-xs text-gray-400 mt-3">当前分镜还没有可用的资产总览数据，请前往分镜编辑页处理提取与确认。</div>
       ) : (
         <div className="space-y-4 mt-3">
-          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500">
-            这里主要用于诊断当前镜头为什么仍然是 <span className="font-medium text-slate-700">pending</span>。如果需要修改提取结果、忽略候选或调整“无需提取”，请前往分镜编辑页处理。
-          </div>
           <div className="cs-readiness-summary">
             <div>
               <div className="cs-readiness-summary__title">
@@ -118,12 +112,6 @@ export function ChapterStudioReadinessDiagnosisPanel({
                 strokeColor={promptAssetReadiness.hasMissing ? '#f59e0b' : '#10b981'}
               />
             </div>
-          </div>
-
-          <div>
-            <Button icon={<EditOutlined />} onClick={onGoToShotEdit}>
-              去分镜编辑确认
-            </Button>
           </div>
 
           <div className="cs-readiness-grid">

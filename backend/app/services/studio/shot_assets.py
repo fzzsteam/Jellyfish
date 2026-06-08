@@ -307,15 +307,45 @@ async def list_project_asset_links_paginated(
         stmt = stmt.where(model.shot_id == shot_id)
     if asset_id is not None:
         stmt = stmt.where(getattr(model, field_name) == asset_id)
-    stmt = apply_order(
-        stmt,
-        model=model,
-        order=order,
-        is_desc=is_desc,
-        allow_fields=allow_fields,
-        default="id",
+
+    is_project_asset_overview = (
+        project_id is not None
+        and chapter_id is None
+        and shot_id is None
+        and asset_id is None
     )
-    items, total = await paginate(db, stmt=stmt, page=page, page_size=page_size)
+    if is_project_asset_overview:
+        ordered_stmt = apply_order(
+            stmt,
+            model=model,
+            order=order,
+            is_desc=is_desc,
+            allow_fields=allow_fields,
+            default="id",
+        )
+        all_items = (await db.execute(ordered_stmt)).scalars().all()
+        seen_asset_ids: set[str] = set()
+        unique_items = []
+        for item in all_items:
+            current_asset_id = getattr(item, field_name, None)
+            if not current_asset_id or current_asset_id in seen_asset_ids:
+                continue
+            seen_asset_ids.add(current_asset_id)
+            unique_items.append(item)
+        total = len(unique_items)
+        start = (page - 1) * page_size
+        end = start + page_size
+        items = unique_items[start:end]
+    else:
+        stmt = apply_order(
+            stmt,
+            model=model,
+            order=order,
+            is_desc=is_desc,
+            allow_fields=allow_fields,
+            default="id",
+        )
+        items, total = await paginate(db, stmt=stmt, page=page, page_size=page_size)
 
     es = entity_spec(entity_type)
     ids = [getattr(x, field_name) for x in items if getattr(x, field_name, None)]

@@ -11,10 +11,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.studio import (
+    Actor,
+    ActorImage,
     Character,
     CharacterImage,
     Costume,
     CostumeImage,
+    ProjectActorLink,
     ProjectCostumeLink,
     ProjectPropLink,
     ProjectSceneLink,
@@ -38,6 +41,8 @@ from app.services.studio.shot_status import recompute_shot_status_sync
 
 FUZZY_MATCH_THRESHOLD = 0.92
 FUZZY_AMBIGUITY_GAP = 0.08
+_CHINESE_MODIFIER_CHARS = set("青绿绿色红赤朱白黑玄金银黄蓝紫粉灰棕褐瓷陶木竹铜铁石玉")
+_CHINESE_SUFFIX_CHARS = set("子儿")
 
 
 @dataclass(slots=True)
@@ -72,6 +77,30 @@ def _normalize_name(value: str) -> str:
     return re.sub(r"[\W_]+", "", value, flags=re.UNICODE).casefold()
 
 
+def _normalize_core_name(value: str) -> str:
+    """移除常见中文颜色、材质修饰和弱后缀，用于保守近似匹配。"""
+
+    normalized = _normalize_name(value)
+    for weak_word in ("演员", "角色", "人物"):
+        normalized = normalized.replace(weak_word, "")
+    core = "".join(ch for ch in normalized if ch not in _CHINESE_MODIFIER_CHARS)
+    while len(core) > 1 and core[-1] in _CHINESE_SUFFIX_CHARS:
+        core = core[:-1]
+    return core or normalized
+
+
+def _is_subsequence(shorter: str, longer: str) -> bool:
+    """判断较短名称是否按顺序完整出现在较长名称中。"""
+
+    if not shorter:
+        return False
+    cursor = 0
+    for ch in longer:
+        if cursor < len(shorter) and shorter[cursor] == ch:
+            cursor += 1
+    return cursor == len(shorter)
+
+
 def _similarity(left: str, right: str) -> float:
     """计算两个归一化名称的保守相似度。"""
 
@@ -82,32 +111,56 @@ def _similarity(left: str, right: str) -> float:
     return SequenceMatcher(None, left, right).ratio()
 
 
+def _rank_name_match(candidate_name: str, option_name: str) -> tuple[int, float]:
+    """返回候选名与资产名的匹配等级与分数，等级越高越可信。"""
+
+    normalized_candidate = _normalize_name(candidate_name)
+    normalized_option = _normalize_name(option_name)
+    if not normalized_candidate or not normalized_option:
+        return (0, 0.0)
+    if normalized_candidate == normalized_option:
+        return (3, 1.0)
+
+    candidate_core = _normalize_core_name(candidate_name)
+    option_core = _normalize_core_name(option_name)
+    if candidate_core and option_core and candidate_core == option_core:
+        return (2, 1.0)
+    if candidate_core and option_core and len(candidate_core) > len(option_core) >= 2:
+        if _is_subsequence(option_core, candidate_core):
+            return (2, len(option_core) / len(candidate_core))
+    if len(normalized_candidate) > len(normalized_option) >= 2:
+        if _is_subsequence(normalized_option, normalized_candidate):
+            return (2, len(normalized_option) / len(normalized_candidate))
+
+    return (1, _similarity(normalized_candidate, normalized_option))
+
+
 def _pick_unique_match(candidate_name: str, options: list[_AssetOption]) -> _AssetOption | None:
     """只返回同类型、高置信且唯一的资产匹配，避免自动误关联。"""
 
-    normalized_candidate = _normalize_name(candidate_name)
-    exact_matches = [
-        option for option in options if _normalize_name(option.name) == normalized_candidate and option.has_image
-    ]
-    if len(exact_matches) == 1:
-        return exact_matches[0]
-    if len(exact_matches) > 1:
-        return None
-
     scored = sorted(
         (
-            (_similarity(normalized_candidate, _normalize_name(option.name)), option)
+            (*_rank_name_match(candidate_name, option.name), option)
             for option in options
             if option.has_image
         ),
-        key=lambda item: item[0],
+        key=lambda item: (item[0], item[1]),
         reverse=True,
     )
-    if not scored or scored[0][0] < FUZZY_MATCH_THRESHOLD:
+    if not scored:
         return None
-    if len(scored) > 1 and scored[0][0] - scored[1][0] < FUZZY_AMBIGUITY_GAP:
+    top_rank, top_score, top_option = scored[0]
+    if top_rank == 0:
         return None
-    return scored[0][1]
+    if top_rank == 1 and top_score < FUZZY_MATCH_THRESHOLD:
+        return None
+    if len(scored) > 1:
+        second_rank, second_score, _ = scored[1]
+        if top_rank == 2 and second_rank == 2:
+            return None
+        if second_rank == top_rank and top_score - second_score < FUZZY_AMBIGUITY_GAP:
+            return None
+    return top_option
 
 
 def _load_asset_options(db: Session, *, project_id: str) -> dict[ShotCandidateType, list[_AssetOption]]:
@@ -157,6 +210,21 @@ def _load_asset_options(db: Session, *, project_id: str) -> dict[ShotCandidateTy
     }
 
 
+def _load_actor_options(db: Session) -> list[_AssetOption]:
+    """加载已有可用图片的演员资产，用于角色候选自动关联演员。"""
+
+    actor_rows = db.execute(
+        select(Actor.id, Actor.name, func.count(ActorImage.id))
+        .join(ActorImage, ActorImage.actor_id == Actor.id)
+        .where(ActorImage.file_id.is_not(None))
+        .group_by(Actor.id, Actor.name)
+    ).all()
+    return [
+        _AssetOption(entity_id=str(row[0]), name=str(row[1]), has_image=bool(row[2]))
+        for row in actor_rows
+    ]
+
+
 def _next_character_index(db: Session, *, shot_id: str) -> int:
     """为镜头角色关联选择下一个不冲突的排序号。"""
 
@@ -182,6 +250,42 @@ def _ensure_character_link(db: Session, *, shot_id: str, character_id: str) -> N
             index=_next_character_index(db, shot_id=shot_id),
         )
     )
+
+
+def _ensure_project_actor_link(db: Session, *, project_id: str, actor_id: str) -> None:
+    """幂等写入项目级演员关联，供角色自动匹配演员后在项目演员页展示。"""
+
+    existing = db.scalar(
+        select(ProjectActorLink).where(
+            ProjectActorLink.project_id == project_id,
+            ProjectActorLink.chapter_id.is_(None),
+            ProjectActorLink.shot_id.is_(None),
+            ProjectActorLink.actor_id == actor_id,
+        )
+    )
+    if existing is not None:
+        return
+    db.add(ProjectActorLink(project_id=project_id, actor_id=actor_id))
+
+
+def _ensure_character_actor_link(
+    db: Session,
+    *,
+    project_id: str,
+    character_id: str,
+    actor_option: _AssetOption | None,
+) -> None:
+    """当存在唯一演员匹配时，将角色挂到演员并确保项目演员关联存在。"""
+
+    if actor_option is None:
+        return
+    character = db.get(Character, character_id)
+    if character is None:
+        return
+    if character.actor_id is None:
+        character.actor_id = actor_option.entity_id
+    if character.actor_id == actor_option.entity_id:
+        _ensure_project_actor_link(db, project_id=project_id, actor_id=actor_option.entity_id)
 
 
 def _ensure_project_asset_link(
@@ -234,6 +338,12 @@ def _link_candidate(
     candidate_type = ShotCandidateType(str(candidate.candidate_type))
     if candidate_type == ShotCandidateType.character:
         _ensure_character_link(db, shot_id=candidate.shot_id, character_id=option.entity_id)
+        _ensure_character_actor_link(
+            db,
+            project_id=project_id,
+            character_id=option.entity_id,
+            actor_option=_pick_unique_match(str(candidate.candidate_name), _load_actor_options(db)),
+        )
     else:
         _ensure_project_asset_link(
             db,

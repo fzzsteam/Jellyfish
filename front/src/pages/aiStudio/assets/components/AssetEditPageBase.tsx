@@ -346,6 +346,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     const description = (formDesc || '').trim()
     if (!description) {
       if (relationType === 'actor_image') message.warning('请先输入演员描述再进行智能检测')
+      else if (relationType === 'character_image') message.warning('请先输入角色描述再进行智能检测')
       else if (relationType === 'scene_image') message.warning('请先输入场景描述再进行智能检测')
       else if (relationType === 'prop_image') message.warning('请先输入道具描述再进行智能检测')
       else if (relationType === 'costume_image') message.warning('请先输入服装描述再进行智能检测')
@@ -362,8 +363,9 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     setSmartDetectLoading(true)
     try {
       const request = () => {
-        if (relationType === 'actor_image') {
-          const character_context = asset?.name ? `角色名：${formName}\n演员标签：${formTags}` : `演员标签：${formTags}`
+        if (relationType === 'actor_image' || relationType === 'character_image') {
+          const subjectLabel = relationType === 'character_image' ? '角色' : '演员'
+          const character_context = asset?.name ? `${subjectLabel}名：${formName}\n标签：${formTags}` : `标签：${formTags}`
           return ScriptProcessingService.analyzeCharacterPortraitAsyncApiV1ScriptProcessingAnalyzeCharacterPortraitAsyncPost({
             requestBody: {
               relation_entity_id: smartDetectRelationEntityId,
@@ -656,6 +658,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <div className="text-gray-600 text-sm">描述</div>
                       {relationType === 'actor_image' ||
+                      relationType === 'character_image' ||
                       relationType === 'scene_image' ||
                       relationType === 'prop_image' ||
                       relationType === 'costume_image' ? (

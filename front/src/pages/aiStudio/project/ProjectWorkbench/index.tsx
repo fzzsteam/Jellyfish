@@ -1,11 +1,8 @@
 import React, { useEffect, useState } from 'react'
-import { Card, Button, Tabs, Space, Dropdown, Empty } from 'antd'
-import type { MenuProps } from 'antd'
+import { Card, Button, Tabs, Empty } from 'antd'
 import {
   PlusOutlined,
-  EllipsisOutlined,
   ArrowLeftOutlined,
-  VideoCameraFilled,
 } from '@ant-design/icons'
 import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { TAB_CONFIG, type TabKey, isTabKey, DEFAULT_TAB } from './constants'
@@ -18,7 +15,7 @@ import { CostumesTab, PropsTab } from './tabs/PropsTab'
 import { FilesTab } from './tabs/FilesTab'
 import { EditTab } from './tabs/EditTab'
 import { SettingsTab } from './tabs/SettingsTab'
-import { getChapterShotsPath, getChapterStudioPath, getProjectEditorPath } from './routes'
+import { getChapterShotsPath, getChapterStudioPath } from './routes'
 import { useProject, useChapters } from './hooks/useProjectData'
 import { ensureHasShotsBeforeShooting } from './ensureHasShotsBeforeShooting'
 import { getChapterPreparationState } from './chapterPreparation'
@@ -159,15 +156,6 @@ const ProjectWorkbench: React.FC = () => {
     )
   }
 
-  const moreMenuItems: MenuProps['items'] = [
-    { key: 'newActor', label: '关联演员', onClick: () => setTabInUrl('actors') },
-    { key: 'newRole', label: '新建角色', onClick: () => setTabInUrl('roles') },
-    { key: 'upload', label: '上传素材', onClick: () => navigate('/assets') },
-    { key: 'newScene', label: '新建场景', onClick: () => setTabInUrl('scenes') },
-    { key: 'newProp', label: '新建道具', onClick: () => setTabInUrl('props') },
-    { key: 'newCostume', label: '新建服装', onClick: () => setTabInUrl('costumes') },
-  ]
-
   if (!project && !projectLoading) {
     return (
       <Card>
@@ -203,21 +191,6 @@ const ProjectWorkbench: React.FC = () => {
               ),
             }))}
           />
-          <Space size="small" wrap className="shrink-0">
-            <Button
-              type="primary"
-              icon={primaryCta.icon}
-              onClick={primaryCta.onClick}
-            >
-              {primaryCta.label}
-            </Button>
-            <Button icon={<VideoCameraFilled />} onClick={() => projectId && navigate(getProjectEditorPath(projectId))}>
-              进入后期剪辑
-            </Button>
-            <Dropdown menu={{ items: moreMenuItems }} placement="bottomRight">
-              <Button icon={<EllipsisOutlined />}>更多</Button>
-            </Dropdown>
-          </Space>
         </div>
         <div className="mt-2 text-xs text-gray-500">
           {primaryCta.hint}

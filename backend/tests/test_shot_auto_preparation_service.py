@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from app.core.db import Base
 from app.models.studio import (
     Actor,
+    ActorImage,
     Character,
     CharacterImage,
     CameraAngle,
@@ -21,6 +22,7 @@ from app.models.studio import (
     FileItem,
     FileType,
     Project,
+    ProjectActorLink,
     ProjectCostumeLink,
     ProjectPropLink,
     ProjectSceneLink,
@@ -345,6 +347,211 @@ def test_auto_prepare_uses_conservative_fuzzy_matching() -> None:
         assert ambiguous_candidate is not None
         assert ambiguous_candidate.candidate_status == ShotCandidateStatus.pending
         assert db.scalar(select(ProjectPropLink).where(ProjectPropLink.shot_id == "shot-3")) is None
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_auto_prepare_links_unique_chinese_near_name_assets() -> None:
+    db, engine = _build_session()
+    try:
+        _seed_project_graph(db)
+        lychee_file = FileItem(id="file-lychee", type=FileType.image, name="lychee.png", storage_key="files/lychee.png")
+        plate_file = FileItem(id="file-plate", type=FileType.image, name="plate.png", storage_key="files/plate.png")
+        lychee = Prop(
+            id="prop-lychee",
+            name="青荔枝",
+            description="",
+            style=ProjectStyle.guoman,
+            visual_style=ProjectVisualStyle.anime,
+        )
+        plate = Prop(
+            id="prop-plate",
+            name="碟子",
+            description="",
+            style=ProjectStyle.guoman,
+            visual_style=ProjectVisualStyle.anime,
+        )
+        db.add_all(
+            [
+                lychee_file,
+                plate_file,
+                lychee,
+                plate,
+                PropImage(prop_id=lychee.id, file_id=lychee_file.id),
+                PropImage(prop_id=plate.id, file_id=plate_file.id),
+                ShotExtractedCandidate(
+                    shot_id="shot-2",
+                    candidate_type=ShotCandidateType.prop,
+                    candidate_name="青绿色荔枝",
+                ),
+                ShotExtractedCandidate(
+                    shot_id="shot-3",
+                    candidate_type=ShotCandidateType.prop,
+                    candidate_name="瓷碟",
+                ),
+            ]
+        )
+        db.flush()
+
+        auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
+
+        lychee_candidate = db.scalar(
+            select(ShotExtractedCandidate).where(ShotExtractedCandidate.candidate_name == "青绿色荔枝")
+        )
+        plate_candidate = db.scalar(
+            select(ShotExtractedCandidate).where(ShotExtractedCandidate.candidate_name == "瓷碟")
+        )
+        assert lychee_candidate is not None
+        assert lychee_candidate.candidate_status == ShotCandidateStatus.linked
+        assert lychee_candidate.linked_entity_id == lychee.id
+        assert plate_candidate is not None
+        assert plate_candidate.candidate_status == ShotCandidateStatus.linked
+        assert plate_candidate.linked_entity_id == plate.id
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_auto_prepare_keeps_ambiguous_chinese_near_name_pending() -> None:
+    db, engine = _build_session()
+    try:
+        _seed_project_graph(db)
+        db.add_all(
+            [
+                FileItem(id="file-green-lychee", type=FileType.image, name="green.png", storage_key="files/green.png"),
+                FileItem(id="file-blue-lychee", type=FileType.image, name="blue.png", storage_key="files/blue.png"),
+                Prop(
+                    id="prop-green-lychee",
+                    name="青荔枝",
+                    description="",
+                    style=ProjectStyle.guoman,
+                    visual_style=ProjectVisualStyle.anime,
+                ),
+                Prop(
+                    id="prop-blue-lychee",
+                    name="绿荔枝",
+                    description="",
+                    style=ProjectStyle.guoman,
+                    visual_style=ProjectVisualStyle.anime,
+                ),
+                PropImage(prop_id="prop-green-lychee", file_id="file-green-lychee"),
+                PropImage(prop_id="prop-blue-lychee", file_id="file-blue-lychee"),
+                ShotExtractedCandidate(
+                    shot_id="shot-2",
+                    candidate_type=ShotCandidateType.prop,
+                    candidate_name="青绿色荔枝",
+                ),
+            ]
+        )
+        db.flush()
+
+        auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
+
+        candidate = db.scalar(
+            select(ShotExtractedCandidate).where(ShotExtractedCandidate.candidate_name == "青绿色荔枝")
+        )
+        assert candidate is not None
+        assert candidate.candidate_status == ShotCandidateStatus.pending
+        assert candidate.linked_entity_id is None
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_auto_prepare_links_character_to_matching_actor_and_project_actor_link() -> None:
+    db, engine = _build_session()
+    try:
+        _seed_project_graph(db)
+        db.add_all(
+            [
+                FileItem(id="file-actor-green", type=FileType.image, name="actor.png", storage_key="files/actor.png"),
+                FileItem(id="file-character-green", type=FileType.image, name="character.png", storage_key="files/character.png"),
+                Actor(
+                    id="actor-green",
+                    name="青衣少女演员",
+                    description="",
+                    style=ProjectStyle.guoman,
+                    visual_style=ProjectVisualStyle.anime,
+                ),
+                ActorImage(actor_id="actor-green", file_id="file-actor-green"),
+                Character(
+                    id="character-green",
+                    project_id="project-1",
+                    name="青衣少女",
+                    description="",
+                    style=ProjectStyle.guoman,
+                    visual_style=ProjectVisualStyle.anime,
+                    actor_id=None,
+                ),
+                CharacterImage(character_id="character-green", file_id="file-character-green"),
+                ShotExtractedCandidate(
+                    shot_id="shot-2",
+                    candidate_type=ShotCandidateType.character,
+                    candidate_name="青衣少女",
+                ),
+            ]
+        )
+        db.flush()
+
+        auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
+
+        character = db.get(Character, "character-green")
+        candidate = db.scalar(
+            select(ShotExtractedCandidate).where(ShotExtractedCandidate.candidate_name == "青衣少女")
+        )
+        assert character is not None
+        assert character.actor_id == "actor-green"
+        assert candidate is not None
+        assert candidate.candidate_status == ShotCandidateStatus.linked
+        assert db.scalar(
+            select(ProjectActorLink).where(
+                ProjectActorLink.project_id == "project-1",
+                ProjectActorLink.actor_id == "actor-green",
+            )
+        ) is not None
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_auto_prepare_leaves_character_actor_empty_without_unique_actor_match() -> None:
+    db, engine = _build_session()
+    try:
+        _seed_project_graph(db)
+        db.add_all(
+            [
+                FileItem(id="file-character-lone", type=FileType.image, name="character.png", storage_key="files/character-lone.png"),
+                Character(
+                    id="character-lone",
+                    project_id="project-1",
+                    name="无演员角色",
+                    description="",
+                    style=ProjectStyle.guoman,
+                    visual_style=ProjectVisualStyle.anime,
+                    actor_id=None,
+                ),
+                CharacterImage(character_id="character-lone", file_id="file-character-lone"),
+                ShotExtractedCandidate(
+                    shot_id="shot-2",
+                    candidate_type=ShotCandidateType.character,
+                    candidate_name="无演员角色",
+                ),
+            ]
+        )
+        db.flush()
+
+        auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
+
+        character = db.get(Character, "character-lone")
+        candidate = db.scalar(
+            select(ShotExtractedCandidate).where(ShotExtractedCandidate.candidate_name == "无演员角色")
+        )
+        assert character is not None
+        assert character.actor_id is None
+        assert candidate is not None
+        assert candidate.candidate_status == ShotCandidateStatus.linked
+        assert db.scalar(select(ShotCharacterLink).where(ShotCharacterLink.character_id == character.id)) is not None
     finally:
         db.close()
         engine.dispose()

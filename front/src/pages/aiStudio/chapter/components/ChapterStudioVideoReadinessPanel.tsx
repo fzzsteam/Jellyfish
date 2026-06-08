@@ -6,21 +6,18 @@ type ChapterStudioVideoReadinessPanelProps = {
   selectedShot: ShotRead | null
   videoReadinessLoading: boolean
   videoReadiness: ShotVideoReadinessRead | null
-  videoReferenceMode: string
 }
 
 export function ChapterStudioVideoReadinessPanel({
   selectedShot,
   videoReadinessLoading,
   videoReadiness,
-  videoReferenceMode,
 }: ChapterStudioVideoReadinessPanelProps) {
   return (
     <div className="cs-group">
       <div className="cs-group-title">
         <VideoCameraAddOutlined /> 视频准备度
       </div>
-      <div className="cs-hint">这里优先回答当前镜头能不能生成视频，以及还差哪些前置条件。</div>
       {videoReadinessLoading ? (
         <div className="py-6 text-center">
           <Spin />
@@ -37,9 +34,6 @@ export function ChapterStudioVideoReadinessPanel({
             <div>
               <div className="text-sm font-medium text-slate-900">
                 {videoReadiness.ready ? '当前镜头已满足视频生成条件' : '当前镜头还不能直接生成视频'}
-              </div>
-              <div className="text-xs text-slate-500 mt-1">
-                当前按 <Tag className="!mx-1">{videoReferenceMode}</Tag> 参考模式检查视频生成条件。
               </div>
             </div>
             <Tag color={videoReadiness.ready ? 'green' : 'gold'}>

@@ -30,7 +30,6 @@ import {
   DeleteOutlined,
   DoubleLeftOutlined,
   DoubleRightOutlined,
-  EditOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
   FileTextOutlined,
@@ -42,7 +41,6 @@ import {
   SettingOutlined,
   SoundOutlined,
   StopOutlined,
-  TagOutlined,
   ToolOutlined,
   VideoCameraOutlined,
   ThunderboltOutlined,
@@ -63,7 +61,6 @@ import {
   StudioProjectsService,
   StudioShotCharacterLinksService,
   StudioShotDetailsService,
-  StudioShotDialogLinesService,
   StudioShotFrameImagesService,
   StudioShotLinksService,
   StudioShotsService,
@@ -78,9 +75,7 @@ import type {
   ImageGenerationOptionsRead,
   ProjectCostumeLinkRead,
   ShotDetailRead,
-  ShotDialogLineRead,
   ShotExtractedCandidateRead,
-  ShotExtractedDialogueCandidateRead,
   ShotAssetsOverviewRead,
   ShotFrameImageRead,
   ShotCharacterLinkRead,
@@ -100,7 +95,6 @@ import { executeTaskCancel } from '../components/taskActionHelpers'
 import { useRelationTaskNotification } from '../components/taskNotificationHelpers'
 import { TASK_COPY } from '../components/taskCopy'
 import { ChapterStudioBatchToolbar } from './components/ChapterStudioBatchToolbar'
-import { ChapterStudioMaintenancePanel } from './components/ChapterStudioMaintenancePanel'
 import { ChapterStudioReadinessDiagnosisPanel } from './components/ChapterStudioReadinessDiagnosisPanel'
 import { ChapterStudioVideoReadinessPanel } from './components/ChapterStudioVideoReadinessPanel'
 import { useGenerationDraft, type GenerationDraftState } from '../hooks/useGenerationDraft'
@@ -359,7 +353,7 @@ type KeyframeCardState = {
 
 type KeyframeResolutionProfile = 'standard' | 'high'
 
-type InspectorTabKey = 'ops' | 'camera' | 'prompt_image' | 'dialogue' | 'keyframe_gen' | 'gen_ref'
+type InspectorTabKey = 'camera' | 'prompt_image' | 'keyframe_gen' | 'gen_ref'
 
 const LAYOUT_STORAGE_KEY = 'jellyfish_chapter_studio_layout_v1'
 type PromptFrameType = 'first' | 'key' | 'last'
@@ -588,14 +582,12 @@ const ChapterStudio: React.FC = () => {
   const locationSelectionAppliedRef = useRef(false)
   const lastSelectedIndexRef = useRef<number>(-1)
   const [shotDetail, setShotDetail] = useState<ShotDetailRead | null>(null)
-  const [dialogLines, setDialogLines] = useState<ShotDialogLineRead[]>([])
   const [frameImages, setFrameImages] = useState<ShotFrameImageRead[]>([])
   const [sceneLinks, setSceneLinks] = useState<ProjectSceneLinkRead[]>([])
   const [propLinks, setPropLinks] = useState<ProjectPropLinkRead[]>([])
   const [costumeLinks, setCostumeLinks] = useState<ProjectCostumeLinkRead[]>([])
   const [shotCharacterLinks, setShotCharacterLinks] = useState<ShotCharacterLinkRead[]>([])
   const [shotCandidateItems, setShotCandidateItems] = useState<ShotExtractedCandidateRead[]>([])
-  const [shotDialogueCandidateItems, setShotDialogueCandidateItems] = useState<ShotExtractedDialogueCandidateRead[]>([])
   const shotCandidatesRequestSeqRef = useRef(0)
   const [shotDurations, setShotDurations] = useState<Record<string, number>>({})
   const [loadingShots, setLoadingShots] = useState(true)
@@ -771,42 +763,6 @@ const ChapterStudio: React.FC = () => {
     setShots((prev) => prev.map((s) => (s.id === shotId ? { ...s, ...patch } : s)))
   }
 
-  const updateShotTitleInOps = async (shotId: string, title: string) => {
-    try {
-      const res = await StudioShotsService.updateShotApiV1StudioShotsShotIdPatch({
-        shotId,
-        requestBody: { title },
-      } as any)
-      if (res.data) patchShotInList(shotId, res.data as any)
-      message.success('标题已保存')
-    } catch {
-      message.error('保存标题失败')
-    }
-  }
-
-  const updateShotScriptExcerptInOps = async (shotId: string, script_excerpt: string) => {
-    try {
-      const res = await StudioShotsService.updateShotApiV1StudioShotsShotIdPatch({
-        shotId,
-        requestBody: { script_excerpt },
-      } as any)
-      if (res.data) patchShotInList(shotId, res.data as any)
-      message.success('备注已保存')
-    } catch {
-      message.error('保存备注失败')
-    }
-  }
-
-  const deleteShotFromOps = async (shotId: string) => {
-    try {
-      await StudioShotsService.deleteShotApiV1StudioShotsShotIdDelete({ shotId })
-      await loadShots()
-      message.success('已删除')
-    } catch {
-      message.error('删除失败')
-    }
-  }
-
   const loadChapter = async () => {
     if (!chapterId) return
     try {
@@ -847,30 +803,19 @@ const ChapterStudio: React.FC = () => {
     if (!selectedShotId) {
       shotCandidatesRequestSeqRef.current += 1
       setShotDetail(null)
-      setDialogLines([])
       setFrameImages([])
       setSceneLinks([])
       setPropLinks([])
       setCostumeLinks([])
       setShotCharacterLinks([])
       setShotCandidateItems([])
-      setShotDialogueCandidateItems([])
       return
     }
     setLoadingDetail(true)
     const reqSeq = ++shotCandidatesRequestSeqRef.current
     setShotCandidateItems([])
-    setShotDialogueCandidateItems([])
     Promise.all([
       StudioShotDetailsService.getShotDetailApiV1StudioShotDetailsShotIdGet({ shotId: selectedShotId }).then((r: any) => r.data ?? null),
-      StudioShotDialogLinesService.listShotDialogLinesApiV1StudioShotDialogLinesGet({
-        shotDetailId: selectedShotId,
-        q: null,
-        order: 'index',
-        isDesc: false,
-        page: 1,
-        pageSize: 100,
-      }).then((r: any) => r.data?.items ?? []),
       StudioShotFrameImagesService.listShotFrameImagesApiV1StudioShotFrameImagesGet({
         shotDetailId: selectedShotId,
         order: null,
@@ -917,22 +862,17 @@ const ChapterStudio: React.FC = () => {
       StudioShotsService.getShotExtractedCandidatesApiV1StudioShotsShotIdExtractedCandidatesGet({
         shotId: selectedShotId,
       }).then((r) => r.data ?? []),
-      StudioShotsService.getShotExtractedDialogueCandidatesApiV1StudioShotsShotIdExtractedDialogueCandidatesGet({
-        shotId: selectedShotId,
-      }).then((r) => r.data ?? []),
     ])
-      .then(([detail, dialogs, frames, scenes, props, costumes, shotCharacters, candidates, dialogueCandidates]) => {
+      .then(([detail, frames, scenes, props, costumes, shotCharacters, candidates]) => {
         if (reqSeq !== shotCandidatesRequestSeqRef.current) return
         setShotDetail(detail)
         lastSavedDetailRef.current = detail
-        setDialogLines(dialogs)
         setFrameImages(frames)
         setSceneLinks(scenes)
         setPropLinks(props)
         setCostumeLinks(costumes)
         setShotCharacterLinks(shotCharacters)
         setShotCandidateItems(candidates as ShotExtractedCandidateRead[])
-        setShotDialogueCandidateItems(dialogueCandidates as ShotExtractedDialogueCandidateRead[])
         if (detail?.duration != null) {
           setShotDurations((prev) => ({ ...prev, [selectedShotId]: detail.duration ?? 0 }))
         }
@@ -1015,41 +955,6 @@ const ChapterStudio: React.FC = () => {
       canceled = true
     }
   }, [selectedShot?.id, selectedShot?.generated_video_file_id, videoResultsRefreshKey])
-
-  const refreshDialogLines = async (shotId: string) => {
-    const res = await StudioShotDialogLinesService.listShotDialogLinesApiV1StudioShotDialogLinesGet({
-      shotDetailId: shotId,
-      q: null,
-      order: 'index',
-      isDesc: false,
-      page: 1,
-      pageSize: 100,
-    })
-    setDialogLines(res.data?.items ?? [])
-  }
-
-  const refreshShotFrameImages = useCallback(async () => {
-    if (!selectedShotId) return
-    try {
-      const res = await StudioShotFrameImagesService.listShotFrameImagesApiV1StudioShotFrameImagesGet({
-        shotDetailId: selectedShotId,
-        order: null,
-        isDesc: false,
-        page: 1,
-        pageSize: 100,
-      })
-      setFrameImages((res.data?.items ?? []) as ShotFrameImageRead[])
-    } catch {
-      message.error('刷新关键帧类型失败')
-    }
-  }, [selectedShotId])
-
-  const deleteDialogLine = async (lineId: number) => {
-    if (!selectedShotId) return
-    await StudioShotDialogLinesService.deleteShotDialogLineApiV1StudioShotDialogLinesLineIdDelete({ lineId })
-    await refreshDialogLines(selectedShotId)
-  }
-
   const refreshPromptAssetLinks = async (shotId: string) => {
     const [scenes, props, costumes] = await Promise.all([
       StudioShotLinksService.listProjectEntityLinksApiV1StudioShotLinksEntityTypeGet({
@@ -1091,6 +996,23 @@ const ChapterStudio: React.FC = () => {
     setCostumeLinks(costumes)
   }
 
+  /** 刷新当前分镜帧图列表，供右侧关键帧/参考图面板在展开选项前拉取最新状态。 */
+  const refreshShotFrameImages = useCallback(async () => {
+    if (!selectedShotId) return
+    try {
+      const res = await StudioShotFrameImagesService.listShotFrameImagesApiV1StudioShotFrameImagesGet({
+        shotDetailId: selectedShotId,
+        order: null,
+        isDesc: false,
+        page: 1,
+        pageSize: 100,
+      })
+      setFrameImages((res.data?.items ?? []) as ShotFrameImageRead[])
+    } catch {
+      message.error('刷新关键帧类型失败')
+    }
+  }, [selectedShotId])
+
   const loadShotCandidateItems = useCallback(async (shotId: string) => {
     try {
       const res = await StudioShotsService.getShotExtractedCandidatesApiV1StudioShotsShotIdExtractedCandidatesGet({
@@ -1099,17 +1021,6 @@ const ChapterStudio: React.FC = () => {
       setShotCandidateItems(res.data ?? [])
     } catch {
       setShotCandidateItems([])
-    }
-  }, [])
-
-  const loadShotDialogueCandidateItems = useCallback(async (shotId: string) => {
-    try {
-      const res = await StudioShotsService.getShotExtractedDialogueCandidatesApiV1StudioShotsShotIdExtractedDialogueCandidatesGet({
-        shotId,
-      })
-      setShotDialogueCandidateItems(res.data ?? [])
-    } catch {
-      setShotDialogueCandidateItems([])
     }
   }, [])
 
@@ -1139,10 +1050,7 @@ const ChapterStudio: React.FC = () => {
           }
         })
         if (selectedShotId && targetShots.some((shot) => shot.id === selectedShotId)) {
-          await Promise.all([
-            loadShotCandidateItems(selectedShotId),
-            loadShotDialogueCandidateItems(selectedShotId),
-          ])
+          await loadShotCandidateItems(selectedShotId)
         }
         message.success(
           skip
@@ -1155,7 +1063,7 @@ const ChapterStudio: React.FC = () => {
         setBatchSkipExtractionUpdating(false)
       }
     },
-    [loadShotCandidateItems, loadShotDialogueCandidateItems, patchShotInList, selectedShotId, selectedShots],
+    [loadShotCandidateItems, patchShotInList, selectedShotId, selectedShots],
   )
 
   const fetchBatchVideoReadiness = useCallback(async () => {
@@ -2380,25 +2288,19 @@ const ChapterStudio: React.FC = () => {
                 onChangeKeyframeResolutionProfile={setKeyframeResolutionProfile}
                 loadingDetail={loadingDetail}
                 shotDetail={shotDetail}
-                dialogLines={dialogLines}
                 frameImages={frameImages}
                 sceneLinks={sceneLinks}
                 propLinks={propLinks}
                 costumeLinks={costumeLinks}
                 shotCharacterLinks={shotCharacterLinks}
                 shotCandidateItems={shotCandidateItems}
-                shotDialogueCandidateItems={shotDialogueCandidateItems}
                 cameraUpdating={cameraUpdating}
                 promptAssetsUpdating={promptAssetsUpdating}
-                onDeleteDialogLine={deleteDialogLine}
                 onUpdatePromptScene={updatePromptScene}
                 onUpdatePromptActors={updatePromptActors}
                 onUpdatePromptProps={updatePromptProps}
                 onUpdatePromptCostumes={updatePromptCostumes}
                 selectedShot={selectedShot}
-                onUpdateShotTitle={updateShotTitleInOps}
-                onUpdateShotScriptExcerpt={updateShotScriptExcerptInOps}
-                onDeleteShotOps={deleteShotFromOps}
                 onPatchShotDetail={patchShotDetailLocal}
                 onPatchShotDetailImmediate={patchShotDetailImmediate}
                 onVideoResultsChanged={() => setVideoResultsRefreshKey((value) => value + 1)}
@@ -2454,25 +2356,19 @@ const ChapterStudio: React.FC = () => {
                     onChangeKeyframeResolutionProfile={setKeyframeResolutionProfile}
                     loadingDetail={loadingDetail}
                     shotDetail={shotDetail}
-                    dialogLines={dialogLines}
                     frameImages={frameImages}
                     sceneLinks={sceneLinks}
                     propLinks={propLinks}
                     costumeLinks={costumeLinks}
                     shotCharacterLinks={shotCharacterLinks}
                     shotCandidateItems={shotCandidateItems}
-                    shotDialogueCandidateItems={shotDialogueCandidateItems}
                     cameraUpdating={cameraUpdating}
                     promptAssetsUpdating={promptAssetsUpdating}
-                    onDeleteDialogLine={deleteDialogLine}
                     onUpdatePromptScene={updatePromptScene}
                     onUpdatePromptActors={updatePromptActors}
                     onUpdatePromptProps={updatePromptProps}
                     onUpdatePromptCostumes={updatePromptCostumes}
                     selectedShot={selectedShot}
-                    onUpdateShotTitle={updateShotTitleInOps}
-                    onUpdateShotScriptExcerpt={updateShotScriptExcerptInOps}
-                    onDeleteShotOps={deleteShotFromOps}
                     onPatchShotDetail={patchShotDetailLocal}
                     onPatchShotDetailImmediate={patchShotDetailImmediate}
                     onVideoResultsChanged={() => setVideoResultsRefreshKey((value) => value + 1)}
@@ -2598,25 +2494,19 @@ function Inspector(props: {
   onChangeKeyframeResolutionProfile: (value: KeyframeResolutionProfile) => void
   loadingDetail: boolean
   shotDetail: ShotDetailRead | null
-  dialogLines: ShotDialogLineRead[]
   frameImages: ShotFrameImageRead[]
   sceneLinks: ProjectSceneLinkRead[]
   propLinks: ProjectPropLinkRead[]
   costumeLinks: ProjectCostumeLinkRead[]
   shotCharacterLinks: ShotCharacterLinkRead[]
   shotCandidateItems: ShotExtractedCandidateRead[]
-  shotDialogueCandidateItems: ShotExtractedDialogueCandidateRead[]
   cameraUpdating: boolean
   promptAssetsUpdating: boolean
-  onDeleteDialogLine: (lineId: number) => Promise<void>
   onUpdatePromptScene: (sceneId?: string) => Promise<void>
   onUpdatePromptActors: (actorIds: string[]) => Promise<void>
   onUpdatePromptProps: (propIds: string[]) => Promise<void>
   onUpdatePromptCostumes: (costumeIds: string[]) => Promise<void>
   selectedShot: StudioShot | null
-  onUpdateShotTitle: (shotId: string, title: string) => Promise<void>
-  onUpdateShotScriptExcerpt: (shotId: string, script_excerpt: string) => Promise<void>
-  onDeleteShotOps: (shotId: string) => Promise<void>
   onClose: () => void
   onPatchShotDetail: (patch: Partial<ShotDetailRead>) => void
   onPatchShotDetailImmediate: (patch: Partial<ShotDetailRead>) => Promise<void>
@@ -2637,25 +2527,19 @@ function Inspector(props: {
     onChangeKeyframeResolutionProfile,
     loadingDetail,
     shotDetail,
-    dialogLines,
     frameImages,
     sceneLinks,
     propLinks,
     costumeLinks,
     shotCharacterLinks,
     shotCandidateItems,
-    shotDialogueCandidateItems,
     cameraUpdating,
     promptAssetsUpdating,
-    onDeleteDialogLine,
     onUpdatePromptScene,
     onUpdatePromptActors,
     onUpdatePromptProps,
     onUpdatePromptCostumes,
     selectedShot,
-    onUpdateShotTitle,
-    onUpdateShotScriptExcerpt,
-    onDeleteShotOps,
     onClose,
     onPatchShotDetail,
     onPatchShotDetailImmediate,
@@ -2668,7 +2552,6 @@ function Inspector(props: {
   const [refFrameTypeSelectLoading, setRefFrameTypeSelectLoading] = useState(false)
   const [useBoneDepth, setUseBoneDepth] = useState(false)
   const [audioMode, setAudioMode] = useState<'none' | 'prompt' | 'upload'>('none')
-  const [hideShot, setHideShot] = useState(false)
   const [inspectorTabKey, setInspectorTabKey] = useState<InspectorTabKey>('camera')
   const [sceneNameMap, setSceneNameMap] = useState<Record<string, string>>({})
   const [characterNameMap, setCharacterNameMap] = useState<Record<string, string>>({})
@@ -2708,10 +2591,6 @@ function Inspector(props: {
   const [linkCostumeLoading, setLinkCostumeLoading] = useState(false)
   const [linkCostumeSelectedIds, setLinkCostumeSelectedIds] = useState<string[]>([])
   const [projectCostumeOptions, setProjectCostumeOptions] = useState<Array<{ value: string; label: React.ReactNode; searchLabel: string; disabled?: boolean }>>([])
-  const [opsTitleDraft, setOpsTitleDraft] = useState('')
-  const [opsNoteDraft, setOpsNoteDraft] = useState('')
-  const opsTitleSaveTimerRef = useRef<number | null>(null)
-  const opsNoteSaveTimerRef = useRef<number | null>(null)
   const [keyframePromptPreviewOpen, setKeyframePromptPreviewOpen] = useState(false)
   const [keyframePromptPreviewLoading, setKeyframePromptPreviewLoading] = useState(false)
   const [keyframePromptActionLoading, setKeyframePromptActionLoading] = useState(false)
@@ -2918,10 +2797,9 @@ function Inspector(props: {
   const getInspectorTabForSelectedShot = useCallback(
     (shot: StudioShot | null): InspectorTabKey => {
       if (!shot) return 'camera'
-      if (shot.hasProblem) return 'ops'
+      if (shot.hasProblem) return 'prompt_image'
       if (!(shot.script_excerpt ?? '').trim() || shot.status !== 'ready') return 'prompt_image'
       if (shot.status === 'ready') return 'gen_ref'
-      if (!shot.hasSpeech) return 'dialogue'
       return 'camera'
     },
     [],
@@ -2930,11 +2808,6 @@ function Inspector(props: {
   useEffect(() => {
     setInspectorTabKey(getInspectorTabForSelectedShot(selectedShot))
   }, [getInspectorTabForSelectedShot, selectedShot?.id])
-
-  useEffect(() => {
-    setHideShot(Boolean(selectedShot?.hidden))
-  }, [selectedShot?.hidden])
-
   useEffect(() => {
     if (!selectedShot?.id) {
       setVideoReadiness(null)
@@ -2970,63 +2843,6 @@ function Inspector(props: {
     shotDetail?.last_frame_prompt,
     frameImages.map((x) => `${x.id}:${x.file_id ?? ''}`).join('|'),
   ])
-
-  useEffect(() => {
-    setOpsTitleDraft(selectedShot?.title ?? '')
-    setOpsNoteDraft(selectedShot?.script_excerpt ?? '')
-    if (opsTitleSaveTimerRef.current) window.clearTimeout(opsTitleSaveTimerRef.current)
-    if (opsNoteSaveTimerRef.current) window.clearTimeout(opsNoteSaveTimerRef.current)
-    opsTitleSaveTimerRef.current = null
-    opsNoteSaveTimerRef.current = null
-  }, [selectedShot?.id])
-
-  useEffect(() => {
-    if (!selectedShot?.id) return
-    if (opsTitleDraft === (selectedShot.title ?? '')) return
-
-    if (opsTitleSaveTimerRef.current) window.clearTimeout(opsTitleSaveTimerRef.current)
-    opsTitleSaveTimerRef.current = window.setTimeout(() => {
-      void onUpdateShotTitle(selectedShot.id, opsTitleDraft)
-      opsTitleSaveTimerRef.current = null
-    }, 500)
-
-    return () => {
-      if (opsTitleSaveTimerRef.current) window.clearTimeout(opsTitleSaveTimerRef.current)
-      opsTitleSaveTimerRef.current = null
-    }
-  }, [opsTitleDraft, selectedShot?.id, selectedShot?.title, onUpdateShotTitle])
-
-  useEffect(() => {
-    if (!selectedShot?.id) return
-    if (opsNoteDraft === (selectedShot.script_excerpt ?? '')) return
-
-    if (opsNoteSaveTimerRef.current) window.clearTimeout(opsNoteSaveTimerRef.current)
-    opsNoteSaveTimerRef.current = window.setTimeout(() => {
-      void onUpdateShotScriptExcerpt(selectedShot.id, opsNoteDraft)
-      opsNoteSaveTimerRef.current = null
-    }, 500)
-
-    return () => {
-      if (opsNoteSaveTimerRef.current) window.clearTimeout(opsNoteSaveTimerRef.current)
-      opsNoteSaveTimerRef.current = null
-    }
-  }, [opsNoteDraft, selectedShot?.id, selectedShot?.script_excerpt, onUpdateShotScriptExcerpt])
-
-  const flushOpsTitle = async () => {
-    if (!selectedShot?.id) return
-    if (opsTitleSaveTimerRef.current) window.clearTimeout(opsTitleSaveTimerRef.current)
-    opsTitleSaveTimerRef.current = null
-    if (opsTitleDraft === (selectedShot.title ?? '')) return
-    await onUpdateShotTitle(selectedShot.id, opsTitleDraft)
-  }
-
-  const flushOpsNote = async () => {
-    if (!selectedShot?.id) return
-    if (opsNoteSaveTimerRef.current) window.clearTimeout(opsNoteSaveTimerRef.current)
-    opsNoteSaveTimerRef.current = null
-    if (opsNoteDraft === (selectedShot.script_excerpt ?? '')) return
-    await onUpdateShotScriptExcerpt(selectedShot.id, opsNoteDraft)
-  }
 
   const sceneIds = useMemo(() => Array.from(new Set(sceneLinks.map((x) => x.scene_id).filter(Boolean))), [sceneLinks])
   const characterIds = useMemo(() => Array.from(new Set(shotCharacterLinks.map((x) => x.character_id).filter(Boolean))), [shotCharacterLinks])
@@ -3306,14 +3122,6 @@ function Inspector(props: {
     if (item.linked_to_shot) return '已关联'
     return null
   }, [readinessExistenceLoading, readinessExistenceMap])
-
-
-  const promptAssetReadinessNote = useMemo(() => {
-    if (!selectedShot) return '请先选择一个分镜。'
-    if (selectedShot.skip_extraction) return '当前分镜已明确标记为无需提取，系统会直接按“提取确认已完成”处理。'
-    if (!shotAssetsOverview) return '当前还没有拿到这条分镜的资产总览，暂时无法展示候选确认状态。'
-    return '这里作为生成前的诊断面板，优先依据后端 assets-overview 展示当前镜头的信息确认状态；提取、刷新与精细确认统一在分镜编辑页处理。'
-  }, [selectedShot, shotAssetsOverview])
 
   const shotExtractStatusText = useMemo(() => {
     if (!shotExtractStatus.message) return ''
@@ -4341,8 +4149,6 @@ function Inspector(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedShot?.id, frameImages.map((x) => `${x.id}:${x.file_id ?? ''}`).join('|')])
 
-  const pendingDialogueCandidates = shotDialogueCandidateItems.filter((item) => item.candidate_status === 'pending')
-
   return (
     <div className="w-full h-full flex flex-col min-h-0">
       <div className="cs-inspector-header flex items-center justify-between">
@@ -4366,38 +4172,7 @@ function Inspector(props: {
           onChange={(activeKey) => setInspectorTabKey(activeKey as InspectorTabKey)}
           items={(() => {
             const items = [
-              {
-              key: 'ops',
-              label: '维护设置',
-              children: (
-                <ChapterStudioMaintenancePanel
-                  opsTitleDraft={opsTitleDraft}
-                  opsNoteDraft={opsNoteDraft}
-                  hideShot={hideShot}
-                  onChangeTitle={setOpsTitleDraft}
-                  onBlurTitle={() => {
-                    void flushOpsTitle()
-                  }}
-                  onChangeNote={setOpsNoteDraft}
-                  onBlurNote={() => {
-                    void flushOpsNote()
-                  }}
-                  onToggleHidden={setHideShot}
-                  onRequestDelete={() => {
-                    if (!selectedShot?.id) return
-                    Modal.confirm({
-                      title: '删除分镜？',
-                      content: '此操作不可撤销。',
-                      okText: '删除',
-                      okButtonProps: { danger: true },
-                      cancelText: '取消',
-                      onOk: () => onDeleteShotOps(selectedShot.id),
-                    })
-                  }}
-                />
-              ),
-            },
-              {
+{
               key: 'camera',
               label: '生成参数',
               children: (
@@ -4490,24 +4265,6 @@ function Inspector(props: {
                         </div>
                       </div>
 
-                      <div className="cs-group">
-                        <div className="cs-group-title">
-                          <TagOutlined /> 情绪标签
-                        </div>
-                        <div className="cs-hint">用标签快速标记镜头情绪，便于生成风格统一。</div>
-                        <div className="mt-3">
-                          <Space wrap>
-                            {['愤怒', '反转', '紧张', '温馨', '压抑'].map((t) => (
-                              <Tag key={t} className="cursor-pointer">
-                                {t}
-                              </Tag>
-                            ))}
-                            <Button size="small" type="dashed">
-                              + 自定义
-                            </Button>
-                          </Space>
-                        </div>
-                      </div>
                     </>
                   ) : (
                     <div className="text-gray-500">请选择分镜</div>
@@ -4517,14 +4274,13 @@ function Inspector(props: {
             },
               {
               key: 'prompt_image',
-              label: '确认诊断',
+              label: '确认资产与台词',
               children: (
                 <div>
                   <ChapterStudioReadinessDiagnosisPanel
                     selectedShot={selectedShot}
                     shotAssetsOverview={shotAssetsOverview}
                     promptAssetReadiness={promptAssetReadiness}
-                    promptAssetReadinessNote={promptAssetReadinessNote}
                     shotExtractStatusSource={shotExtractStatus.source}
                     shotExtractStatusText={shotExtractStatusText}
                     onGoToShotEdit={goToShotEditForAssets}
@@ -4556,90 +4312,6 @@ function Inspector(props: {
                     </div>
                   </div>
 
-                </div>
-              ),
-            },
-              {
-              key: 'dialogue',
-              label: '对白状态',
-              children: (
-                <div>
-                  <div className="cs-group">
-                    <div className="cs-group-title">
-                      <SoundOutlined /> 对白状态
-                    </div>
-                    <div className="cs-hint">这里主要查看当前镜头对白与待确认状态。对白候选的主确认入口在分镜编辑页，工作室侧重继续准备关键帧、图片和视频生成。</div>
-                    <div className="space-y-4 mt-3">
-                      <div>
-                        <Button icon={<EditOutlined />} onClick={goToShotEditForAssets}>
-                          去分镜编辑确认对白
-                        </Button>
-                      </div>
-                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500">
-                        如需新增对白、接受候选或忽略候选，请前往分镜编辑页处理。工作室这里主要用于查看当前对白状态，并继续后续生成准备。
-                      </div>
-
-                      {pendingDialogueCandidates.length > 0 ? (
-                        <div>
-                          <div className="text-gray-500 text-xs mb-2">待确认对白候选</div>
-                          <div className="space-y-2">
-                            {pendingDialogueCandidates.map((candidate) => (
-                              <div key={candidate.id} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <div className="text-xs text-amber-700 mb-1">
-                                      {candidate.speaker_name?.trim() || '未知'} → {candidate.target_name?.trim() || '未知'}
-                                    </div>
-                                    <div className="text-xs text-gray-700 break-words">{candidate.text}</div>
-                                  </div>
-                                  <Button size="small" icon={<EditOutlined />} onClick={goToShotEditForAssets}>
-                                    去编辑页处理
-                                  </Button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-
-                      <div>
-                        <div className="text-gray-500 text-xs mb-2">当前对白</div>
-                        {dialogLines.length > 0 ? (
-                          <div className="space-y-1">
-                            {dialogLines.slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).map((l) => (
-                              <div key={l.id} className="flex items-center gap-2">
-                                <div className="text-xs text-gray-600 truncate flex-1 min-w-0">{l.text}</div>
-                                <Button
-                                  size="small"
-                                  type="text"
-                                  danger
-                                  icon={<DeleteOutlined />}
-                                  onClick={() => {
-                                    Modal.confirm({
-                                      title: '删除该对白？',
-                                      okText: '删除',
-                                      cancelText: '取消',
-                                      okButtonProps: { danger: true },
-                                      onOk: async () => {
-                                        try {
-                                          await onDeleteDialogLine(l.id)
-                                          message.success('已删除')
-                                        } catch {
-                                          message.error('删除失败')
-                                        }
-                                      },
-                                    })
-                                  }}
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-xs text-gray-400">当前镜头还没有对白。</div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
                 </div>
               ),
             },
@@ -5112,7 +4784,6 @@ function Inspector(props: {
                     selectedShot={selectedShot}
                     videoReadinessLoading={videoReadinessLoading}
                     videoReadiness={videoReadiness}
-                    videoReferenceMode={videoReferenceMode}
                   />
 
                   <div className="cs-group">
@@ -5190,13 +4861,11 @@ function Inspector(props: {
             ]
 
             const order: Record<string, number> = {
-              gen_ref: 0,
+              prompt_image: 0,
               keyframe_gen: 1,
               camera: 2,
-              prompt_image: 3,
-              dialogue: 4,
-              ops: 5,
-              av: 6,
+              gen_ref: 3,
+              av: 4,
             }
 
             return items.sort((a, b) => (order[String(a.key)] ?? 999) - (order[String(b.key)] ?? 999))
