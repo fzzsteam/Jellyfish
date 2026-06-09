@@ -121,7 +121,7 @@ async def create_file_from_url_or_b64(
         id=file_id,
         type=file_type,
         name=display_name,
-        thumbnail=info.url,
+        thumbnail="",
         tags=[],
         storage_key=key,
     )

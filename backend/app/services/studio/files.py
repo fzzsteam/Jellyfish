@@ -161,7 +161,7 @@ async def upload_file(
             id=str(uuid.uuid4()),
             type=file_type,
             name=display_name,
-            thumbnail=info.url,
+            thumbnail="",
             tags=[],
             storage_key=key,
         ),
