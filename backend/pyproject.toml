@@ -21,7 +21,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "python-dotenv>=1.0.0",
-    "oss2>=2.18.0",                # 阿里云 OSS 原生 SDK（对象存储，替代 boto3 S3 兼容模式）
+    "boto3>=1.43.0,<2.0.0",        # S3 兼容对象存储客户端（boto3 通过 S3-compatible 接口对接 RustFS 本地和阿里云 OSS）
     "python-multipart>=0.0.5",
     "jinja2",
 ]
