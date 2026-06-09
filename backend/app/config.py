@@ -61,8 +61,8 @@ class Settings(BaseSettings):
     s3_base_path: str = ""
     # 可选：对外访问基址（CDN 或自定义域名），为空则使用 S3 自带 URL 或预签名 URL
     s3_public_base_url: str | None = None
-    # 寻址风格：virtual（阿里云 OSS 生产必须）或 path（本地 RustFS/MinIO）
-    s3_addressing_style: str = "virtual"
+    # 寻址风格：virtual（阿里云 OSS ）, path（本地 RustFS/MinIO）
+    s3_addressing_style: str | None = None
 
     def model_post_init(self, __context: object) -> None:
         if not self.celery_broker_url or not str(self.celery_broker_url).strip():
