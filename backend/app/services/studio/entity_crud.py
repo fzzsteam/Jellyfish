@@ -67,11 +67,15 @@ async def list_entities_paginated(
     is_desc: bool,
     page: int,
     page_size: int,
+    project_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     entity_type_norm = normalize_entity_type(entity_type)
     spec = entity_spec(entity_type_norm)
     stmt = select(spec.model)
     stmt = apply_keyword_filter(stmt, q=q, fields=[spec.model.name, spec.model.description])
+    # character 是项目级实体，可按 project_id 过滤以只展示当前项目的角色
+    if project_id and entity_type_norm in {"actor", "character"} and hasattr(spec.model, "project_id"):
+        stmt = stmt.where(getattr(spec.model, "project_id") == project_id)
     if style:
         stmt = stmt.where(getattr(spec.model, "style") == style)
     if visual_style:

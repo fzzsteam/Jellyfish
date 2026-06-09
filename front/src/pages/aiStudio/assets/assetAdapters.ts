@@ -25,7 +25,7 @@ export const assetAdapters = {
   character: {
     missingAssetIdText: '缺少 character_id',
     assetDisplayName: '角色',
-    backTo: '/projects',
+    backTo: '/assets?tab=character',
     relationType: 'character_image',
     getAsset: async (id: string) => {
       const res = await StudioEntitiesApi.get('character', id)
@@ -54,6 +54,9 @@ export const assetAdapters = {
     },
     deleteImageCandidate: async (id: string, imageId: number, candidateId: number) => {
       await StudioEntitiesApi.deleteImageCandidate('character', id, imageId, candidateId)
+    },
+    attachImageCandidates: async (id: string, imageId: number, fileIds: string[]) => {
+      await StudioEntitiesApi.attachImageCandidates('character', id, imageId, { file_ids: fileIds, source_type: 'upload' })
     },
     createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
       const res = await StudioImageTasksService.createCharacterImageGenerationTaskApiV1StudioImageTasksCharactersCharacterIdImageTasksPost({
@@ -96,6 +99,9 @@ export const assetAdapters = {
     deleteImageCandidate: async (id: string, imageId: number, candidateId: number) => {
       await StudioEntitiesApi.deleteImageCandidate('actor', id, imageId, candidateId)
     },
+    attachImageCandidates: async (id: string, imageId: number, fileIds: string[]) => {
+      await StudioEntitiesApi.attachImageCandidates('actor', id, imageId, { file_ids: fileIds, source_type: 'upload' })
+    },
     createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
       const res = await StudioImageTasksService.createActorImageGenerationTaskApiV1StudioImageTasksActorsActorIdImageTasksPost({
         actorId: id,
@@ -136,6 +142,9 @@ export const assetAdapters = {
     },
     deleteImageCandidate: async (id: string, imageId: number, candidateId: number) => {
       await StudioEntitiesApi.deleteImageCandidate('scene', id, imageId, candidateId)
+    },
+    attachImageCandidates: async (id: string, imageId: number, fileIds: string[]) => {
+      await StudioEntitiesApi.attachImageCandidates('scene', id, imageId, { file_ids: fileIds, source_type: 'upload' })
     },
     createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
       const res = await StudioImageTasksService.createAssetImageGenerationTaskApiV1StudioImageTasksAssetsAssetTypeAssetIdImageTasksPost({
@@ -179,6 +188,9 @@ export const assetAdapters = {
     deleteImageCandidate: async (id: string, imageId: number, candidateId: number) => {
       await StudioEntitiesApi.deleteImageCandidate('prop', id, imageId, candidateId)
     },
+    attachImageCandidates: async (id: string, imageId: number, fileIds: string[]) => {
+      await StudioEntitiesApi.attachImageCandidates('prop', id, imageId, { file_ids: fileIds, source_type: 'upload' })
+    },
     createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
       const res = await StudioImageTasksService.createAssetImageGenerationTaskApiV1StudioImageTasksAssetsAssetTypeAssetIdImageTasksPost({
         assetType: 'prop',
@@ -220,6 +232,9 @@ export const assetAdapters = {
     },
     deleteImageCandidate: async (id: string, imageId: number, candidateId: number) => {
       await StudioEntitiesApi.deleteImageCandidate('costume', id, imageId, candidateId)
+    },
+    attachImageCandidates: async (id: string, imageId: number, fileIds: string[]) => {
+      await StudioEntitiesApi.attachImageCandidates('costume', id, imageId, { file_ids: fileIds, source_type: 'upload' })
     },
     createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
       const res = await StudioImageTasksService.createAssetImageGenerationTaskApiV1StudioImageTasksAssetsAssetTypeAssetIdImageTasksPost({

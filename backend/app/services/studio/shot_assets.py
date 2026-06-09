@@ -33,7 +33,7 @@ from app.schemas.studio.shots import (
 )
 from app.services.common import delete_if_exists, entity_not_found, invalid_choice, require_entity
 from app.services.studio.entity_specs import entity_spec, normalize_entity_type
-from app.services.studio.shot_extracted_candidates import mark_linked_by_name, mark_pending_by_name
+from app.services.studio.shot_extracted_candidates import mark_ignored_by_name, mark_linked_by_name, mark_pending_by_name
 from app.services.studio.entity_thumbnails import resolve_thumbnail_infos, resolve_thumbnails
 from app.utils.project_links import upsert_project_link
 
@@ -135,6 +135,47 @@ async def delete_project_asset_link(
             candidate_type=candidate_type,
             candidate_name=str(asset_obj.name),
         )
+
+
+async def delete_project_asset_link_by_entity(
+    db: AsyncSession,
+    *,
+    entity_type: str,
+    shot_id: str,
+    entity_id: str,
+    revert_candidate: bool = True,
+) -> str | None:
+    """按镜头 + 实体 ID 删除对应关联行（不存在时静默跳过）。
+
+    返回被删关联资产的名称（供调用方决定后续候选状态处理）。
+    revert_candidate=True 时将同名候选回退为 pending（默认行为，用于替换场景）；
+    revert_candidate=False 时仅删除关联，候选状态留给调用方自行处理（用于忽略场景）。
+    """
+    spec = _link_spec(entity_type)
+    stmt = (
+        select(spec["model"])
+        .where(
+            getattr(spec["model"], "shot_id") == shot_id,
+            getattr(spec["model"], spec["field"]) == entity_id,
+        )
+    )
+    row = (await db.execute(stmt)).scalars().one_or_none()
+    if row is None:
+        return None
+    link_id = row.id
+    asset_obj = await db.get(spec["asset_model"], entity_id)
+    asset_name = str(asset_obj.name) if asset_obj is not None and getattr(asset_obj, "name", None) else None
+    await delete_if_exists(db, spec["model"], link_id)
+    if revert_candidate:
+        candidate_type = {"scene": "scene", "prop": "prop", "costume": "costume"}.get(normalize_entity_type(entity_type))
+        if candidate_type and asset_name:
+            await mark_pending_by_name(
+                db,
+                shot_id=shot_id,
+                candidate_type=candidate_type,
+                candidate_name=asset_name,
+            )
+    return asset_name
 
 
 async def list_shot_linked_assets(

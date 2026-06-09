@@ -105,7 +105,7 @@ from app.services.studio.shot_extracted_dialogue_candidates import (
 )
 from app.services.studio.shot_video_prompt_pack import build_shot_video_prompt_pack
 from app.services.studio.shot_runtime_summary import list_shot_runtime_summary_by_chapter
-from app.services.studio.shot_preparation_state import build_shot_preparation_state, link_existing_asset_for_preparation
+from app.services.studio.shot_preparation_state import build_shot_preparation_state, link_existing_asset_for_preparation, replace_asset_for_preparation, unlink_asset_for_preparation
 from app.services.studio.shot_video_readiness import get_shot_video_readiness
 from app.services.studio.shot_status import (
     mark_shot_generating,
@@ -181,6 +181,8 @@ __all__ = [
     "list_shot_extracted_dialogue_candidates",
     "build_shot_preparation_state",
     "link_existing_asset_for_preparation",
+    "replace_asset_for_preparation",
+    "unlink_asset_for_preparation",
     "list_shot_linked_assets_paginated",
     "get_shot_assets_overview",
     "get_shot_video_readiness",

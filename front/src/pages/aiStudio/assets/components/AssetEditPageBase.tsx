@@ -12,13 +12,15 @@ import {
   Spin,
   Tag,
   Typography,
+  Upload,
   message,
 } from 'antd'
-import { ArrowLeftOutlined, CloseCircleOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
-import { FilmService, ScriptProcessingService } from '../../../../services/generated'
+import { ArrowLeftOutlined, CloseCircleOutlined, EditOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
+import { FilmService, ScriptProcessingService, StudioFilesService } from '../../../../services/generated'
 import type { AssetImageCandidateRead, TaskStatus } from '../../../../services/generated'
 import { buildFileDownloadUrl } from '../utils'
 import { AssetImageCandidateGallery } from './AssetImageCandidateGallery'
+import { MentionEditor } from './MentionEditor'
 import { DisplayImageCard } from './DisplayImageCard'
 import { defaultTaskActionErrorMessage, executeAsyncTaskCreate, executeTaskCancel, notifyExistingTask } from '../../components/taskActionHelpers'
 import { handleTaskResultSafely } from '../../components/taskResultHelpers'
@@ -92,6 +94,7 @@ export type AssetEditPageBaseProps<TAsset extends BaseAsset, TImage extends Base
   adoptImageCandidate: (assetId: string, imageId: number, candidateId: number) => Promise<void>
   deleteImageCandidate: (assetId: string, imageId: number, candidateId: number) => Promise<void>
   createGenerationTask: (assetId: string, imageId: number, payload: { prompt: string; images: string[] }) => Promise<string | null>
+  attachImageCandidates?: (assetId: string, imageId: number, fileIds: string[]) => Promise<void>
   onNavigate: (to: string, replace?: boolean) => void
 }
 
@@ -161,6 +164,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   adoptImageCandidate,
   deleteImageCandidate,
   createGenerationTask,
+  attachImageCandidates,
   onNavigate,
 }: AssetEditPageBaseProps<TAsset, TImage>) {
   const taskCopy = TASK_COPY.smartDetect
@@ -189,6 +193,9 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   const [editingSlotImage, setEditingSlotImage] = useState<TImage | null>(null)
   const [adoptingImageId, setAdoptingImageId] = useState<number | null>(null)
   const [deletingCandidateId, setDeletingCandidateId] = useState<number | null>(null)
+  const [uploadingCandidates, setUploadingCandidates] = useState(false)
+  const [mentionedFileIds, setMentionedFileIds] = useState<string[]>([])
+
   const smartDetectRelationType = useMemo(() => getSmartDetectRelationType(relationType), [relationType])
   const smartDetectRelationEntityId = useMemo(
     () => (assetId && smartDetectRelationType ? `${relationType}:${assetId}` : null),
@@ -511,7 +518,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
 
       const taskId = await createGenerationTask(assetId, image.id, {
         prompt,
-        images: [],
+        images: mentionedFileIds,
       })
       if (!taskId) {
         message.error('生成任务创建失败：缺少任务 ID')
@@ -611,6 +618,50 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     }
   }
 
+  const handleCandidateUpload = async (files: File[]) => {
+    if (!assetId || !editingSlotImage || files.length === 0 || !attachImageCandidates) return
+    setUploadingCandidates(true)
+    try {
+      const fileIds: string[] = []
+      for (const file of files) {
+        const res = await StudioFilesService.uploadFileApiApiV1StudioFilesUploadPost({
+          formData: { file } as any,
+          name: file.name,
+        })
+        const fileId = res.data?.id
+        if (fileId) fileIds.push(String(fileId))
+      }
+      if (fileIds.length > 0) {
+        await attachImageCandidates(assetId, editingSlotImage.id, fileIds)
+        const candidates = await listImageCandidates(assetId, editingSlotImage.id)
+        setHistoryCandidates(candidates)
+        message.success(`已上传 ${fileIds.length} 张图片到候选池`)
+      }
+    } catch {
+      message.error('上传候选图片失败')
+    } finally {
+      setUploadingCandidates(false)
+    }
+  }
+
+  // Loads all image candidates from every slot and deduplicates by file_id, for MentionEditor.
+  const loadMentionCandidates = useCallback(async (): Promise<AssetImageCandidateRead[]> => {
+    if (!assetId) return []
+    const all: AssetImageCandidateRead[] = []
+    for (const item of slotItems) {
+      if (item.image) {
+        const cands = await listImageCandidates(assetId, item.image.id)
+        all.push(...cands)
+      }
+    }
+    const seen = new Set<string>()
+    return all.filter((c) => {
+      if (!c.file_id || seen.has(c.file_id)) return false
+      seen.add(c.file_id)
+      return true
+    })
+  }, [assetId, slotItems, listImageCandidates])
+
   if (!assetId) {
     return (
       <Card>
@@ -686,11 +737,15 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                         </>
                       ) : null}
                     </div>
-                  <Input.TextArea
-                    rows={4}
+                  <MentionEditor
                     value={formDesc}
-                    onChange={(e) => setFormDesc(e.target.value)}
+                    onChange={(text, fileIds) => {
+                      setFormDesc(text)
+                      setMentionedFileIds(fileIds)
+                    }}
                     disabled={smartDetectBusy || savingBase}
+                    placeholder="支持输入 @ 选择候选池图片作为参考"
+                    loadCandidates={loadMentionCandidates}
                   />
                 </div>
                 <div>
@@ -745,7 +800,28 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       />
 
       <Modal
-        title="图片候选池"
+        title={
+          <div className="flex items-center justify-between pr-8">
+            <span>图片候选池</span>
+            {attachImageCandidates && (
+              <Upload
+                accept="image/*"
+                multiple
+                showUploadList={false}
+                disabled={uploadingCandidates}
+                beforeUpload={(file, fileList) => {
+                  const isLast = file.uid === fileList[fileList.length - 1]?.uid
+                  if (isLast) void handleCandidateUpload(fileList)
+                  return Upload.LIST_IGNORE
+                }}
+              >
+                <Button size="small" icon={<UploadOutlined />} loading={uploadingCandidates}>
+                  本地上传
+                </Button>
+              </Upload>
+            )}
+          </div>
+        }
         open={historyOpen}
         onCancel={() => {
           setHistoryOpen(false)

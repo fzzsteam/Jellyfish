@@ -131,6 +131,10 @@ class AbstractWorkerTaskExecutor(ABC):
             ctx.store.set_progress(task_id, self.succeeded_progress)
             ctx.store.set_status(task_id, TaskStatus.succeeded)
             db.commit()
+        self.after_apply_commit(task_id, run_args, result)
+
+    def after_apply_commit(self, task_id: str, run_args: dict[str, Any], result: Any) -> None:
+        """事务提交后的钩子，子类可覆盖以执行提交后副作用（如任务入队）。"""
 
     def _mark_failed(self, task_id: str, error: str) -> None:
         with self._session_maker() as db:

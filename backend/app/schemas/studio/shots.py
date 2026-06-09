@@ -366,6 +366,7 @@ class ShotAssetOverviewItem(BaseModel):
     linked_entity_id: str | None = Field(None, description="当前已关联实体 ID")
     linked_image_id: int | None = Field(None, description="当前已关联实体的 image 行 ID")
     is_linked: bool = Field(..., description="当前是否已关联到镜头")
+    is_generating: bool = Field(False, description="是否存在活跃的图片生成任务（pending/running），图片尚未落库")
 
 
 class ShotAssetsOverviewSummary(BaseModel):
@@ -395,6 +396,27 @@ class ShotPreparationLinkRequest(BaseModel):
     chapter_id: str = Field(..., description="章节 ID")
     entity_type: ShotPreparationLinkEntityType = Field(..., description="准备页关联的实体类型")
     linked_entity_id: str = Field(..., description="要关联的实体 ID")
+
+
+class ShotPreparationReplaceRequest(BaseModel):
+    """准备页替换关联实体请求：解除 old_entity_id 关联，关联 new_entity_id。"""
+
+    project_id: str = Field(..., description="项目 ID")
+    chapter_id: str = Field(..., description="章节 ID")
+    entity_type: ShotPreparationLinkEntityType = Field(..., description="准备页关联的实体类型")
+    old_entity_id: str = Field(..., description="要替换掉的旧实体 ID")
+    new_entity_id: str = Field(..., description="要关联的新实体 ID")
+
+
+class ShotPreparationUnlinkRequest(BaseModel):
+    """准备页解除关联请求：移除 entity_id 与当前镜头的关联。"""
+
+    entity_type: ShotPreparationLinkEntityType = Field(..., description="准备页关联的实体类型")
+    entity_id: str = Field(..., description="要解除关联的实体 ID")
+    candidate_id: int | None = Field(
+        None,
+        description="候选项 ID，用于精确定位要忽略的候选；多个候选指向同一实体时可避免操作错误目标",
+    )
 
 
 class ActionBeatPhaseRead(BaseModel):

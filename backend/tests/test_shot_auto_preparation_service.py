@@ -287,7 +287,8 @@ def test_auto_prepare_links_assets_with_images_and_accepts_dialogue() -> None:
         engine.dispose()
 
 
-def test_auto_prepare_keeps_no_image_assets_pending() -> None:
+def test_auto_prepare_links_no_image_assets_and_schedules_generation() -> None:
+    """资产存在但无图时，自动准备应关联候选并调度图片生成（测试环境无模型配置则跳过生成）。"""
     db, engine = _build_session()
     try:
         _seed_project_graph(db)
@@ -304,10 +305,10 @@ def test_auto_prepare_keeps_no_image_assets_pending() -> None:
 
         candidate = db.scalar(select(ShotExtractedCandidate).where(ShotExtractedCandidate.shot_id == "shot-4"))
         assert candidate is not None
-        assert candidate.candidate_status == ShotCandidateStatus.pending
-        assert candidate.linked_entity_id is None
-        assert db.get(Shot, "shot-4").status == ShotStatus.pending
-        assert summary.pending_asset_count == 1
+        assert candidate.candidate_status == ShotCandidateStatus.linked
+        assert candidate.linked_entity_id == "scene-no-image"
+        assert db.get(Shot, "shot-4").status == ShotStatus.ready
+        assert summary.pending_asset_count == 0
     finally:
         db.close()
         engine.dispose()

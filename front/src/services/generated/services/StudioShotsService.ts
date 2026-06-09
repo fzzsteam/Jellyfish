@@ -19,6 +19,8 @@ import type { ShotCreate } from '../models/ShotCreate';
 import type { ShotExtractedCandidateLinkRequest } from '../models/ShotExtractedCandidateLinkRequest';
 import type { ShotExtractedDialogueCandidateAcceptRequest } from '../models/ShotExtractedDialogueCandidateAcceptRequest';
 import type { ShotPreparationLinkRequest } from '../models/ShotPreparationLinkRequest';
+import type { ShotPreparationReplaceRequest } from '../models/ShotPreparationReplaceRequest';
+import type { ShotPreparationUnlinkRequest } from '../models/ShotPreparationUnlinkRequest';
 import type { ShotSkipExtractionUpdate } from '../models/ShotSkipExtractionUpdate';
 import type { ShotUpdate } from '../models/ShotUpdate';
 import type { CancelablePromise } from '../core/CancelablePromise';
@@ -231,6 +233,56 @@ export class StudioShotsService {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/shots/{shot_id}/preparation-link',
+            path: {
+                'shot_id': shotId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 准备页解除已关联实体并返回最新聚合状态
+     * @returns ApiResponse_ShotPreparationMutationResultRead_ Successful Response
+     * @throws ApiError
+     */
+    public static unlinkAssetForPreparationApiV1StudioShotsShotIdPreparationUnlinkPost({
+        shotId,
+        requestBody,
+    }: {
+        shotId: string,
+        requestBody: ShotPreparationUnlinkRequest,
+    }): CancelablePromise<ApiResponse_ShotPreparationMutationResultRead_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/studio/shots/{shot_id}/preparation-unlink',
+            path: {
+                'shot_id': shotId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 准备页替换已关联实体并返回最新聚合状态
+     * @returns ApiResponse_ShotPreparationMutationResultRead_ Successful Response
+     * @throws ApiError
+     */
+    public static replaceAssetForPreparationApiV1StudioShotsShotIdPreparationReplacePost({
+        shotId,
+        requestBody,
+    }: {
+        shotId: string,
+        requestBody: ShotPreparationReplaceRequest,
+    }): CancelablePromise<ApiResponse_ShotPreparationMutationResultRead_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/studio/shots/{shot_id}/preparation-replace',
             path: {
                 'shot_id': shotId,
             },

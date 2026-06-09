@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
+import uuid as _uuid_mod
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 import re
@@ -10,13 +12,16 @@ import re
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider
 from app.models.studio import (
     Actor,
     ActorImage,
+    AssetViewAngle,
     Character,
     CharacterImage,
     Costume,
     CostumeImage,
+    Project,
     ProjectActorLink,
     ProjectCostumeLink,
     ProjectPropLink,
@@ -36,7 +41,13 @@ from app.models.studio import (
     ShotExtractedDialogueCandidate,
     ShotStatus,
 )
+from app.models.task import GenerationDeliveryMode, GenerationTask, GenerationTaskStatus
+from app.models.task_links import GenerationTaskLink
+from app.models.types import ProjectStyle, ProjectVisualStyle
+from app.services.llm.provider_resolver import resolve_provider_config_from_provider
 from app.services.studio.shot_status import recompute_shot_status_sync
+
+_logger = logging.getLogger(__name__)
 
 
 FUZZY_MATCH_THRESHOLD = 0.92
@@ -56,6 +67,8 @@ class AutoPreparationSummary:
     skipped_dialogue_count: int = 0
     ready_shot_count: int = 0
     pending_shot_count: int = 0
+    auto_created_asset_count: int = 0
+    image_task_ids: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -422,6 +435,331 @@ def _accept_dialogue_candidate(db: Session, *, candidate: ShotExtractedDialogueC
     return True
 
 
+def _find_entity_by_name_sync(
+    db: Session,
+    *,
+    candidate_type: ShotCandidateType,
+    candidate_name: str,
+    project_id: str,
+) -> str | None:
+    """按归一化名称精确匹配现有资产实体，返回 entity_id 或 None。"""
+    norm = _normalize_name(candidate_name)
+    if not norm:
+        return None
+
+    if candidate_type == ShotCandidateType.character:
+        rows = db.execute(select(Character.id, Character.name).where(Character.project_id == project_id)).all()
+    elif candidate_type == ShotCandidateType.scene:
+        rows = db.execute(select(Scene.id, Scene.name)).all()
+    elif candidate_type == ShotCandidateType.prop:
+        rows = db.execute(select(Prop.id, Prop.name)).all()
+    elif candidate_type == ShotCandidateType.costume:
+        rows = db.execute(select(Costume.id, Costume.name)).all()
+    else:
+        return None
+
+    for row_id, row_name in rows:
+        if _normalize_name(str(row_name)) == norm:
+            return str(row_id)
+    return None
+
+
+def _ngram_overlap(shorter: str, longer: str, min_gram: int = 2) -> bool:
+    """判断 shorter 的任意 min_gram+ 字连续子串是否出现在 longer 中。
+
+    用于捕捉如 "青荔枝" 与 "青绿色硬荔枝" 共享 "荔枝" 这类关键标识符的情况，
+    核心名剥离修饰词后仍存在共同语义锚点，但原始子串检测会因两侧修饰词不同而漏判。
+    """
+    for gram_len in range(min_gram, len(shorter) + 1):
+        for i in range(len(shorter) - gram_len + 1):
+            if shorter[i : i + gram_len] in longer:
+                return True
+    return False
+
+
+def _has_name_overlap_with_existing(candidate_name: str, existing_names: list[str]) -> bool:
+    """检查候选名是否与任意已有实体名存在子串或核心子串关系。
+
+    用于二次轮自动建档前的保守歧义检测：若候选名包含在某个现有名称里，
+    或现有名称被包含在候选名里（含核心名版本），则认为可能是对现有资产的
+    缩写引用，不应擅自创建新实体。
+
+    额外使用 n-gram 检测：取两名称中较短者的所有 2+ 字连续子串，若任意一个
+    出现在另一名称中则视为重叠（分别在归一化全名和核心名两个层次各做一次）。
+    """
+    norm_cand = _normalize_name(candidate_name)
+    core_cand = _normalize_core_name(candidate_name)
+    if not norm_cand or len(norm_cand) < 2:
+        return False
+    for name in existing_names:
+        norm_opt = _normalize_name(name)
+        core_opt = _normalize_core_name(name)
+        if not norm_opt:
+            continue
+        # 全名双向子串检测
+        if len(norm_cand) >= 2 and (norm_cand in norm_opt or norm_opt in norm_cand):
+            return True
+        # 核心名双向子串检测
+        if core_cand and core_opt and len(core_cand) >= 2 and len(core_opt) >= 2:
+            if core_cand in core_opt or core_opt in core_cand:
+                return True
+        # N-gram 检测：取较短一方的所有 2+ 字连续子串，检查是否出现在较长一方中
+        # 捕捉 "青荔枝"/"青绿色硬荔枝" 这类修饰词不同但语义锚字相同的情况
+        if len(norm_cand) >= 2 and len(norm_opt) >= 2:
+            shorter_n, longer_n = (norm_cand, norm_opt) if len(norm_cand) <= len(norm_opt) else (norm_opt, norm_cand)
+            if _ngram_overlap(shorter_n, longer_n):
+                return True
+        if core_cand and core_opt and len(core_cand) >= 2 and len(core_opt) >= 2:
+            shorter_c, longer_c = (core_cand, core_opt) if len(core_cand) <= len(core_opt) else (core_opt, core_cand)
+            if _ngram_overlap(shorter_c, longer_c):
+                return True
+    return False
+
+
+def _create_entity_sync(
+    db: Session,
+    *,
+    candidate_type: ShotCandidateType,
+    name: str,
+    description: str,
+    style: ProjectStyle,
+    visual_style: ProjectVisualStyle,
+    project_id: str,
+) -> str:
+    """同步创建资产实体，scene/prop/costume 同时初始化正面视角图片槽位，返回 entity_id。"""
+    entity_id = str(_uuid_mod.uuid4())
+    if candidate_type == ShotCandidateType.character:
+        db.add(Character(id=entity_id, project_id=project_id, name=name, description=description, style=style, visual_style=visual_style))
+        db.flush()
+    elif candidate_type == ShotCandidateType.scene:
+        db.add(Scene(id=entity_id, name=name, description=description, style=style, visual_style=visual_style))
+        db.flush()
+        db.add(SceneImage(scene_id=entity_id, view_angle=AssetViewAngle.front))
+        db.flush()
+    elif candidate_type == ShotCandidateType.prop:
+        db.add(Prop(id=entity_id, name=name, description=description, style=style, visual_style=visual_style))
+        db.flush()
+        db.add(PropImage(prop_id=entity_id, view_angle=AssetViewAngle.front))
+        db.flush()
+    elif candidate_type == ShotCandidateType.costume:
+        db.add(Costume(id=entity_id, name=name, description=description, style=style, visual_style=visual_style))
+        db.flush()
+        db.add(CostumeImage(costume_id=entity_id, view_angle=AssetViewAngle.front))
+        db.flush()
+    return entity_id
+
+
+def _get_or_create_image_slot_sync(
+    db: Session,
+    *,
+    candidate_type: ShotCandidateType,
+    entity_id: str,
+) -> tuple[str, str] | None:
+    """获取或创建资产的图片生成槽位，返回 (relation_type, relation_entity_id)。
+    character 类型的槽位由 worker 的 _resolve_generated_image_target 负责动态创建。
+    """
+    if candidate_type == ShotCandidateType.character:
+        return ("character", entity_id)
+
+    if candidate_type == ShotCandidateType.scene:
+        slot = db.scalar(
+            select(SceneImage)
+            .where(SceneImage.scene_id == entity_id, SceneImage.file_id.is_(None))
+            .order_by(SceneImage.id.asc())
+            .limit(1)
+        )
+        if slot is None:
+            slot = SceneImage(scene_id=entity_id, view_angle=AssetViewAngle.front)
+            db.add(slot)
+            db.flush()
+        return ("scene_image", str(slot.id))
+
+    if candidate_type == ShotCandidateType.prop:
+        slot = db.scalar(
+            select(PropImage)
+            .where(PropImage.prop_id == entity_id, PropImage.file_id.is_(None))
+            .order_by(PropImage.id.asc())
+            .limit(1)
+        )
+        if slot is None:
+            slot = PropImage(prop_id=entity_id, view_angle=AssetViewAngle.front)
+            db.add(slot)
+            db.flush()
+        return ("prop_image", str(slot.id))
+
+    if candidate_type == ShotCandidateType.costume:
+        slot = db.scalar(
+            select(CostumeImage)
+            .where(CostumeImage.costume_id == entity_id, CostumeImage.file_id.is_(None))
+            .order_by(CostumeImage.id.asc())
+            .limit(1)
+        )
+        if slot is None:
+            slot = CostumeImage(costume_id=entity_id, view_angle=AssetViewAngle.front)
+            db.add(slot)
+            db.flush()
+        return ("costume_image", str(slot.id))
+
+    return None
+
+
+def _load_image_run_args_sync(
+    db: Session,
+    *,
+    relation_type: str,
+    relation_entity_id: str,
+    prompt: str,
+) -> dict | None:
+    """从 DB 加载默认图片模型配置并构建 run_args；未配置时返回 None。"""
+    settings = db.get(ModelSettings, 1)
+    if settings is None or not settings.default_image_model_id:
+        return None
+    model = db.get(Model, settings.default_image_model_id)
+    if model is None:
+        return None
+    provider = db.get(Provider, model.provider_id)
+    if provider is None:
+        return None
+    try:
+        resolved = resolve_provider_config_from_provider(provider=provider, category=ModelCategoryKey.image)
+    except Exception:  # noqa: BLE001
+        return None
+    return {
+        "provider": resolved.provider_key,
+        "api_key": resolved.api_key,
+        "base_url": resolved.base_url,
+        "relation_type": relation_type,
+        "relation_entity_id": relation_entity_id,
+        "input": {
+            "prompt": prompt,
+            "model": model.name,
+            "purpose": "generic",
+        },
+    }
+
+
+def _schedule_image_task_sync(
+    db: Session,
+    *,
+    run_args: dict,
+    summary: AutoPreparationSummary,
+) -> None:
+    """在当前事务的 SAVEPOINT 中创建图片生成任务记录；失败则静默回滚并跳过。"""
+    task_id = str(_uuid_mod.uuid4())
+    try:
+        with db.begin_nested():
+            db.add(GenerationTask(
+                id=task_id,
+                mode=GenerationDeliveryMode.async_polling,
+                task_kind="image_generation",
+                status=GenerationTaskStatus.pending,
+                payload={"run_args": run_args},
+            ))
+            db.flush()
+            db.add(GenerationTaskLink(
+                task_id=task_id,
+                resource_type="image",
+                relation_type=run_args["relation_type"],
+                relation_entity_id=run_args["relation_entity_id"],
+            ))
+            db.flush()
+        summary.image_task_ids.append(task_id)
+    except Exception:  # noqa: BLE001
+        _logger.warning(
+            "auto_prep: 图片任务记录创建失败，跳过 relation_type=%s relation_entity_id=%s",
+            run_args.get("relation_type"),
+            run_args.get("relation_entity_id"),
+        )
+
+
+def _auto_create_and_link_sync(
+    db: Session,
+    *,
+    candidate: ShotExtractedCandidate,
+    project_id: str,
+    chapter_id: str,
+    style: ProjectStyle,
+    visual_style: ProjectVisualStyle,
+    summary: AutoPreparationSummary,
+    batch_pending_names: list[str] | None = None,
+) -> bool:
+    """为无匹配候选自动创建资产实体、调度图片生成，并完成候选关联。返回是否成功关联。
+
+    batch_pending_names 为同批次中其他仍为 pending 的同类候选名，用于在 DB flush
+    前就能检测出批次内名称重叠，避免因处理顺序导致重叠候选被分别新建。
+    """
+    candidate_type = ShotCandidateType(str(candidate.candidate_type))
+    candidate_name = str(candidate.candidate_name)
+    description = str((candidate.payload or {}).get("description") or "")
+    # 拼接项目视觉风格前缀，让生成图片的风格与项目定位一致
+    # 格式示例：「视觉风格：现实、视频风格：真人古装  北宋诗人苏东坡…」
+    # 注：SQLAlchemy 加载 ORM 字段时可能返回原始字符串而非枚举实例，
+    # 用 getattr(x, 'value', x) 兼容两种情况。
+    _vs = getattr(visual_style, "value", visual_style)
+    _st = getattr(style, "value", style)
+    style_prefix = f"视觉风格：{_vs}、视频风格：{_st}  "
+    prompt = style_prefix + (description or candidate_name)
+
+    entity_id = _find_entity_by_name_sync(
+        db, candidate_type=candidate_type, candidate_name=candidate_name, project_id=project_id
+    )
+    if entity_id is None:
+        # Before creating a new entity, check if any existing entity has a
+        # name-overlap relationship with this candidate (substring in either direction).
+        # If so, the candidate is likely an abbreviated reference to an existing entity,
+        # not a genuinely new asset — leave it pending for manual resolution.
+        if candidate_type == ShotCandidateType.character:
+            existing_names = [str(r[0]) for r in db.execute(select(Character.name).where(Character.project_id == project_id)).all()]
+        elif candidate_type == ShotCandidateType.scene:
+            existing_names = [str(r[0]) for r in db.execute(select(Scene.name)).all()]
+        elif candidate_type == ShotCandidateType.prop:
+            existing_names = [str(r[0]) for r in db.execute(select(Prop.name)).all()]
+        elif candidate_type == ShotCandidateType.costume:
+            existing_names = [str(r[0]) for r in db.execute(select(Costume.name)).all()]
+        else:
+            existing_names = []
+        # 同批次内其他仍为 pending 的候选名也纳入重叠检测，避免两个互相重叠的
+        # 新候选因处理顺序不同而被分别建档（"青荔枝" 先于 "青绿色硬荔枝" 处理时）
+        if batch_pending_names:
+            norm_self = _normalize_name(candidate_name)
+            existing_names = existing_names + [
+                n for n in batch_pending_names if _normalize_name(n) != norm_self
+            ]
+        if _has_name_overlap_with_existing(candidate_name, existing_names):
+            _logger.debug("auto_prep: 候选 '%s' 与现有资产存在名称重叠，保留 pending", candidate_name)
+            return False
+        try:
+            entity_id = _create_entity_sync(
+                db,
+                candidate_type=candidate_type,
+                name=candidate_name,
+                description=description,
+                style=style,
+                visual_style=visual_style,
+                project_id=project_id,
+            )
+            summary.auto_created_asset_count += 1
+        except Exception:  # noqa: BLE001
+            _logger.warning("auto_prep: 资产创建失败，候选 '%s'(%s) 保留 pending", candidate_name, candidate_type)
+            return False
+
+    try:
+        slot_info = _get_or_create_image_slot_sync(db, candidate_type=candidate_type, entity_id=entity_id)
+        if slot_info is not None:
+            relation_type, relation_entity_id = slot_info
+            run_args = _load_image_run_args_sync(
+                db, relation_type=relation_type, relation_entity_id=relation_entity_id, prompt=prompt
+            )
+            if run_args is not None:
+                _schedule_image_task_sync(db, run_args=run_args, summary=summary)
+    except Exception:  # noqa: BLE001
+        _logger.warning("auto_prep: 图片生成调度失败，候选 '%s' 仍将完成关联", candidate_name)
+
+    option = _AssetOption(entity_id=entity_id, name=candidate_name, has_image=False)
+    _link_candidate(db, project_id=project_id, chapter_id=chapter_id, candidate=candidate, option=option)
+    return True
+
+
 def auto_prepare_chapter_shots_sync(
     db: Session,
     *,
@@ -430,8 +768,10 @@ def auto_prepare_chapter_shots_sync(
 ) -> AutoPreparationSummary:
     """批量自动准备章节镜头的资产与对白候选。
 
-    该服务只自动确认有高置信唯一匹配且已有 file_id 图片的资产；其余候选保留为
-    pending，让用户在分镜编辑页补图、修正或新建资产。
+    - 第一轮：将有高置信唯一匹配且已有 file_id 图片的候选与现有资产关联。
+    - 第二轮：对仍为 pending 的候选，自动创建资产实体并调度图片生成任务；
+      创作者只需在资产管理页审核生成结果，无需手动逐一补图。
+    - 对白候选全部自动接受。
     """
 
     summary = AutoPreparationSummary()
@@ -449,6 +789,8 @@ def auto_prepare_chapter_shots_sync(
             .order_by(ShotExtractedCandidate.id.asc())
         ).scalars().all()
     )
+
+    # 第一轮：与已有图片的资产高置信匹配
     for candidate in candidates:
         if candidate.candidate_status != ShotCandidateStatus.pending:
             continue
@@ -458,7 +800,6 @@ def auto_prepare_chapter_shots_sync(
             options_by_type.get(candidate_type, []),
         )
         if match is None:
-            summary.pending_asset_count += 1
             continue
         _link_candidate(
             db,
@@ -468,6 +809,41 @@ def auto_prepare_chapter_shots_sync(
             option=match,
         )
         summary.linked_asset_count += 1
+
+    # 第二轮：自动创建资产并调度图片生成（服装不参与自动建档，由创作者手动管理）
+    project = db.get(Project, project_id)
+    proj_style = project.style if project is not None else ProjectStyle.real_people_city
+    proj_visual_style = project.visual_style if project is not None else ProjectVisualStyle.live_action
+
+    # 在第二轮开始前收集所有仍为 pending 的候选名，按类型分组。
+    # 传给 _auto_create_and_link_sync 用于批次内重叠检测：防止 "青荔枝" 因早于
+    # "青绿色硬荔枝" 处理而错误建档（此时后者尚未 flush 到 DB，DB 查询查不到它）。
+    pending_names_by_type: dict[ShotCandidateType, list[str]] = {}
+    for _c in candidates:
+        if _c.candidate_status == ShotCandidateStatus.pending:
+            _ct = ShotCandidateType(str(_c.candidate_type))
+            pending_names_by_type.setdefault(_ct, []).append(str(_c.candidate_name))
+
+    for candidate in candidates:
+        if candidate.candidate_status != ShotCandidateStatus.pending:
+            continue
+        # 服装资产款式差异大、需人工审定，跳过自动创建，留给创作者在资产管理页处理
+        if ShotCandidateType(str(candidate.candidate_type)) == ShotCandidateType.costume:
+            summary.pending_asset_count += 1
+            continue
+        candidate_type = ShotCandidateType(str(candidate.candidate_type))
+        succeeded = _auto_create_and_link_sync(
+            db,
+            candidate=candidate,
+            project_id=project_id,
+            chapter_id=chapter_id,
+            style=proj_style,
+            visual_style=proj_visual_style,
+            summary=summary,
+            batch_pending_names=pending_names_by_type.get(candidate_type, []),
+        )
+        if not succeeded:
+            summary.pending_asset_count += 1
 
     dialogue_candidates = list(
         db.execute(

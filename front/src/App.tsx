@@ -12,6 +12,7 @@ import ActorAssetEditPage from './pages/aiStudio/assets/ActorAssetEditPage.tsx'
 import SceneAssetEditPage from './pages/aiStudio/assets/SceneAssetEditPage.tsx'
 import PropAssetEditPage from './pages/aiStudio/assets/PropAssetEditPage.tsx'
 import CostumeAssetEditPage from './pages/aiStudio/assets/CostumeAssetEditPage.tsx'
+import CharacterAssetEditPage from './pages/aiStudio/assets/CharacterAssetEditPage.tsx'
 import PromptTemplateManager from './pages/aiStudio/prompts/PromptTemplateManager'
 import FileManager from './pages/aiStudio/files/FileManager'
 import VideoEditor from './pages/aiStudio/editor/VideoEditor'
@@ -42,6 +43,7 @@ const App: React.FC = () => {
           <Route path="assets/scenes/:sceneId/edit" element={<SceneAssetEditPage />} />
           <Route path="assets/props/:propId/edit" element={<PropAssetEditPage />} />
           <Route path="assets/costumes/:costumeId/edit" element={<CostumeAssetEditPage />} />
+          <Route path="assets/characters/:characterId/edit" element={<CharacterAssetEditPage />} />
           <Route path="prompts" element={<PromptTemplateManager />} />
           <Route path="files" element={<FileManager />} />
           <Route path="agents/:id/edit" element={<AgentEdit />} />

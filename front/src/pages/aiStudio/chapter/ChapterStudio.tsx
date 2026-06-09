@@ -25,6 +25,7 @@ import {
   ArrowLeftOutlined,
   CameraOutlined,
   CheckCircleOutlined,
+  CheckOutlined,
   ClockCircleOutlined,
   CustomerServiceOutlined,
   DeleteOutlined,
@@ -37,7 +38,6 @@ import {
   LinkOutlined,
   MergeCellsOutlined,
   PictureOutlined,
-  ScissorOutlined,
   SettingOutlined,
   SoundOutlined,
   StopOutlined,
@@ -46,7 +46,6 @@ import {
   ThunderboltOutlined,
   UndoOutlined,
   UploadOutlined,
-  VideoCameraAddOutlined,
   PlusOutlined,
   UserOutlined,
   DownloadOutlined,
@@ -164,9 +163,13 @@ function requestVideoFullscreen(video: HTMLVideoElement | null): void {
 function GeneratedVideoGrid({
   selectedShot,
   videos,
+  selectedVideosByShot,
+  onSelectVideo,
 }: {
   selectedShot: StudioShot | null
   videos: GeneratedVideoItem[]
+  selectedVideosByShot: Record<string, string>
+  onSelectVideo: (shotId: string, fileId: string) => void
 }) {
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({})
 
@@ -213,6 +216,14 @@ function GeneratedVideoGrid({
               <div className="truncate text-xs text-gray-400">{item.fileId}</div>
             </div>
             <Space size="small">
+              <Tooltip title={selectedVideosByShot[selectedShot.id] === item.fileId ? '已选择' : '选择该视频'}>
+                <Button
+                  size="small"
+                  icon={<CheckOutlined />}
+                  type={selectedVideosByShot[selectedShot.id] === item.fileId ? 'primary' : 'default'}
+                  onClick={() => onSelectVideo(selectedShot.id, item.fileId)}
+                />
+              </Tooltip>
               <Tooltip title="全屏播放">
                 <Button
                   size="small"
@@ -600,6 +611,10 @@ const ChapterStudio: React.FC = () => {
   const [batchVideoReadinessItems, setBatchVideoReadinessItems] = useState<
     Array<{ shot: StudioShot; readiness: ShotVideoReadinessRead | null; error?: string }>
   >([])
+  const [batchGenerating, setBatchGenerating] = useState(false)
+  const [batchGenerateProgress, setBatchGenerateProgress] = useState<{ current: number; total: number } | null>(null)
+  const [batchDownloading, setBatchDownloading] = useState(false)
+  const [batchDownloadProgress, setBatchDownloadProgress] = useState<{ current: number; total: number } | null>(null)
   const [saving, setSaving] = useState(false)
   const saveTimerRef = useRef<number | null>(null)
   const cameraPatchSeqRef = useRef(0)
@@ -608,6 +623,8 @@ const ChapterStudio: React.FC = () => {
 
   const [keyframeResolutionProfile, setKeyframeResolutionProfile] = useState<KeyframeResolutionProfile>('standard')
   const [generatedVideos, setGeneratedVideos] = useState<GeneratedVideoItem[]>([])
+  /** shotId → 该分镜被选中的视频 fileId */
+  const [selectedVideosByShot, setSelectedVideosByShot] = useState<Record<string, string>>({})
   const [videoResultsRefreshKey, setVideoResultsRefreshKey] = useState(0)
 
   const [filter, setFilter] = useState<ShotFilter>('all')
@@ -947,6 +964,12 @@ const ChapterStudio: React.FC = () => {
           if (currentUrl) list.unshift({ linkId: -1, fileId: currentId, url: currentUrl })
         }
         setGeneratedVideos(list)
+        // 若该分镜尚未选中视频，默认选中第一条
+        if (list.length > 0) {
+          setSelectedVideosByShot((prev) =>
+            prev[selectedShot.id] ? prev : { ...prev, [selectedShot.id]: list[0].fileId },
+          )
+        }
       } catch {
         if (!canceled) setGeneratedVideos([])
       }
@@ -1106,6 +1129,134 @@ const ChapterStudio: React.FC = () => {
       setBatchVideoReadinessLoading(false)
     }
   }, [fetchBatchVideoReadiness])
+
+  /** 串行为所有可见分镜提交视频生成任务 */
+  const handleBatchGenerateAll = useCallback(async () => {
+    const ratio = resolveShotVideoRatio(null)
+    if (!ratio) {
+      message.warning('当前缺少视频比例，请先设置项目默认比例')
+      return
+    }
+    const targets = shots.filter((s) => !s.hidden)
+    if (targets.length === 0) {
+      message.warning('没有可见分镜')
+      return
+    }
+    setBatchGenerating(true)
+    setBatchGenerateProgress({ current: 0, total: targets.length })
+    let successCount = 0
+    let failCount = 0
+    for (let i = 0; i < targets.length; i++) {
+      const shot = targets[i]
+      setBatchGenerateProgress({ current: i + 1, total: targets.length })
+      try {
+        const previewRes = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
+          requestBody: {
+            shot_id: shot.id,
+            reference_mode: 'text_only',
+            prompt: null,
+            images: [],
+            ratio,
+          } as any,
+        })
+        const derived = (previewRes as any)?.data ?? null
+        const prompt = typeof derived?.prompt === 'string' ? derived.prompt : ''
+        const images: string[] = Array.isArray(derived?.images)
+          ? (derived.images as string[]).filter(Boolean)
+          : []
+        await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
+          requestBody: {
+            shot_id: shot.id,
+            reference_mode: 'text_only',
+            prompt,
+            images,
+            ratio,
+          } as any,
+        })
+        successCount++
+      } catch {
+        failCount++
+      }
+    }
+    setBatchGenerating(false)
+    setBatchGenerateProgress(null)
+    if (failCount === 0) {
+      message.success(`已成功提交 ${successCount} 个分镜的视频生成任务`)
+    } else {
+      message.warning(`提交完成：${successCount} 成功，${failCount} 失败`)
+    }
+  }, [resolveShotVideoRatio, shots, setBatchGenerating, setBatchGenerateProgress])
+
+  /** 将所有已生成视频下载到用户选择的本地文件夹 */
+  /** 下载每个分镜中被选中的视频到用户指定的本地文件夹 */
+  const handleBatchDownloadAll = useCallback(async () => {
+    // 收集所有已选中的视频：{ shot, fileId, url }
+    const targets = shots
+      .filter((s) => !s.hidden && selectedVideosByShot[s.id])
+      .map((s) => ({
+        shot: s,
+        fileId: selectedVideosByShot[s.id],
+        url: buildFileDownloadUrl(selectedVideosByShot[s.id]) ?? '',
+      }))
+      .filter((t) => Boolean(t.url))
+
+    if (targets.length === 0) {
+      message.warning('没有已选中的视频，请先在各分镜中点击"√"选择视频')
+      return
+    }
+
+    setBatchDownloading(true)
+    setBatchDownloadProgress({ current: 0, total: targets.length })
+    try {
+      // 优先使用 File System Access API（Chrome/Edge 86+），支持选择本地文件夹
+      if (typeof (window as any).showDirectoryPicker === 'function') {
+        let dirHandle: FileSystemDirectoryHandle
+        try {
+          dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' })
+        } catch {
+          // 用户取消选择文件夹
+          return
+        }
+        for (let i = 0; i < targets.length; i++) {
+          const { shot, fileId, url } = targets[i]
+          setBatchDownloadProgress({ current: i + 1, total: targets.length })
+          try {
+            const resp = await fetch(url)
+            const blob = await resp.blob()
+            const idx = String(shot.index ?? i + 1).padStart(2, '0')
+            const title = (shot.title ?? '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 30)
+            const filename = `${idx}_${title}_${fileId.slice(0, 8)}.mp4`
+            const fileHandle: FileSystemFileHandle = await dirHandle.getFileHandle(filename, { create: true })
+            const writable = await fileHandle.createWritable()
+            await writable.write(blob)
+            await writable.close()
+          } catch {
+            // 单个文件失败不中断整体流程
+          }
+        }
+        message.success(`已下载 ${targets.length} 个视频到所选文件夹`)
+      } else {
+        // 降级：逐个触发 <a download>
+        for (let i = 0; i < targets.length; i++) {
+          const { shot, fileId, url } = targets[i]
+          setBatchDownloadProgress({ current: i + 1, total: targets.length })
+          const idx = String(shot.index ?? i + 1).padStart(2, '0')
+          const title = (shot.title ?? '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 30)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = `${idx}_${title}_${fileId.slice(0, 8)}.mp4`
+          document.body.appendChild(a)
+          a.click()
+          document.body.removeChild(a)
+          await new Promise((r) => setTimeout(r, 300))
+        }
+        message.success(`已触发 ${targets.length} 个视频下载`)
+      }
+    } finally {
+      setBatchDownloading(false)
+      setBatchDownloadProgress(null)
+    }
+  }, [shots, selectedVideosByShot])
 
   const runBatchGenerate = useCallback(
     async (targetShotIds: string[]) => {
@@ -1742,25 +1893,6 @@ const ChapterStudio: React.FC = () => {
 
   const shotContextMenu = (shot: StudioShot) => ([
     {
-      key: 'copy',
-      icon: <LinkOutlined />,
-      label: '复制分镜',
-      onClick: () => message.success('已复制（Mock）'),
-    },
-    {
-      key: 'insert_after',
-      icon: <VideoCameraAddOutlined />,
-      label: '在后插入新分镜',
-      onClick: () => message.success('已插入（Mock）'),
-    },
-    {
-      key: 'transition',
-      icon: <ScissorOutlined />,
-      label: '设为转场点',
-      onClick: () => message.success('已设置（Mock）'),
-    },
-    { type: 'divider' as const },
-    {
       key: 'toggle_hide',
       icon: shot.hidden ? <EyeOutlined /> : <EyeInvisibleOutlined />,
       label: shot.hidden ? '取消隐藏' : '隐藏',
@@ -1906,41 +2038,6 @@ const ChapterStudio: React.FC = () => {
 
   const batchMaintenanceMenuItems = batchMenuItems.filter((item) => item.key !== 'generate')
 
-  const toolbarSettingsItems = [
-    {
-      key: 'mode',
-      icon: <AppstoreOutlined />,
-      label: (
-        <div className="flex items-center justify-between gap-3">
-          <span>属性面板模式</span>
-          <Select
-            size="small"
-            value={prefs.inspectorMode}
-            style={{ width: 120 }}
-            onChange={(v) => setPrefs((p) => ({ ...p, inspectorMode: v }))}
-            options={[
-              { value: 'push', label: '推挤模式' },
-              { value: 'overlay', label: '覆盖模式' },
-            ]}
-          />
-        </div>
-      ),
-    },
-    {
-      key: 'autoOpen',
-      icon: <SettingOutlined />,
-      label: (
-        <div className="flex items-center justify-between gap-3">
-          <span>选中分镜自动展开</span>
-          <Switch
-            size="small"
-            checked={prefs.autoOpenInspector}
-            onChange={(v) => setPrefs((p) => ({ ...p, autoOpenInspector: v }))}
-          />
-        </div>
-      ),
-    },
-  ]
 
   return (
     <div className={['cs-studio w-full h-full min-h-0 flex flex-col', isResizing ? 'cs-resizing' : ''].join(' ')} ref={containerRef}>
@@ -1979,20 +2076,6 @@ const ChapterStudio: React.FC = () => {
 
         <div className="flex-1 min-w-0" />
 
-        <div className="flex items-center gap-2 shrink-0">
-          <Dropdown menu={{ items: toolbarSettingsItems }} trigger={['click']}>
-            <Tooltip title="工作台设置">
-              <Button size="small" icon={<SettingOutlined />} />
-            </Tooltip>
-          </Dropdown>
-          <Tooltip title={prefs.inspectorOpen ? '收起属性面板（P / Ctrl/Cmd+I）' : '展开属性面板（P / Ctrl/Cmd+I）'}>
-            <Button
-              size="small"
-              icon={prefs.inspectorOpen ? <DoubleRightOutlined /> : <DoubleLeftOutlined />}
-              onClick={() => setPrefs((p) => ({ ...p, inspectorOpen: !p.inspectorOpen }))}
-            />
-          </Tooltip>
-        </div>
       </div>
 
       {/* 三栏动态布局 */}
@@ -2193,7 +2276,6 @@ const ChapterStudio: React.FC = () => {
                                 {s.hasMusic && <Tag icon={<SoundOutlined />} className="m-0" color="default">音乐</Tag>}
                                 {statusTag(s.status)}
                                 {s.hidden && <Tag icon={<EyeInvisibleOutlined />} className="m-0">隐藏</Tag>}
-                                {s.hasProblem && <Tag color="error" className="m-0">有问题</Tag>}
                               </div>
                             </div>
                             </div>
@@ -2235,15 +2317,50 @@ const ChapterStudio: React.FC = () => {
               </div>
             }
             extra={
-              <Tag className="m-0" color={generatedVideos.length > 0 ? 'blue' : 'default'}>
-                已生成 {generatedVideos.length}
-              </Tag>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="small"
+                  loading={batchGenerating}
+                  onClick={handleBatchGenerateAll}
+                >
+                  {batchGenerating && batchGenerateProgress
+                    ? `生成中 ${batchGenerateProgress.current}/${batchGenerateProgress.total}`
+                    : '一键全部生成'}
+                </Button>
+                <Button
+                  size="small"
+                  loading={batchDownloading}
+                  disabled={generatedVideos.length === 0}
+                  onClick={handleBatchDownloadAll}
+                >
+                  {batchDownloading && batchDownloadProgress
+                    ? `下载中 ${batchDownloadProgress.current}/${batchDownloadProgress.total}`
+                    : '一键全部下载'}
+                </Button>
+                <Tag className="m-0" color={generatedVideos.length > 0 ? 'blue' : 'default'}>
+                  已生成 {generatedVideos.length}
+                </Tag>
+              </div>
             }
             className="cs-preview-card flex-1 min-h-0"
             bodyStyle={{ height: '100%', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 12 }}
           >
             <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pr-1">
-              <GeneratedVideoGrid selectedShot={selectedShot} videos={generatedVideos} />
+              <GeneratedVideoGrid
+                selectedShot={selectedShot}
+                videos={generatedVideos}
+                selectedVideosByShot={selectedVideosByShot}
+                onSelectVideo={(shotId, fileId) =>
+                  setSelectedVideosByShot((prev) => {
+                    if (prev[shotId] === fileId) {
+                      const next = { ...prev }
+                      delete next[shotId]
+                      return next
+                    }
+                    return { ...prev, [shotId]: fileId }
+                  })
+                }
+              />
             </div>
           </Card>
         </Content>
@@ -4295,14 +4412,6 @@ function Inspector(props: {
                       <PictureOutlined /> 氛围描述
                     </div>
                     <div>
-                        <div className="flex items-center justify-between">
-                          <div className="text-gray-500 text-xs">氛围描述</div>
-                          <Switch
-                            size="small"
-                            checked={shotDetail?.follow_atmosphere ?? false}
-                            onChange={(v) => onPatchShotDetail({ follow_atmosphere: v })}
-                          />
-                        </div>
                         <TextArea
                           rows={3}
                           placeholder="氛围描述…（可选跟随画面）"

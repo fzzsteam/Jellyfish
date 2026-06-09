@@ -118,12 +118,6 @@ export function ActorsTab() {
     }
   }
 
-  const openEdit = (a: ActorEntityLike) => {
-    setEditing(a)
-    setFromShotCreateContext(null)
-    setEditOpen(true)
-  }
-
   const handleModalCancel = () => {
     setEditOpen(false)
     setEditing(null)
@@ -207,37 +201,36 @@ export function ActorsTab() {
               imageUrl={resolveAssetUrl(a.thumbnail)}
               imageAlt={a.name}
               extra={
-                <Space>
-                  <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(a)}>
-                    编辑
-                  </Button>
-                  <Button size="small" onClick={() => navigate(`/assets/actors/${a.id}/edit`)}>
-                    详情
-                  </Button>
-                  <Button
-                    danger
-                    size="small"
-                    icon={<DeleteOutlined />}
-                    onClick={() => {
-                      Modal.confirm({
-                        title: `删除演员「${a.name}」？`,
-                        okText: '删除',
-                        cancelText: '取消',
-                        okButtonProps: { danger: true },
-                        onOk: async () => {
-                          try {
-                            await StudioEntitiesApi.remove('actor', a.id)
-                            message.success('已删除')
-                            void load()
-                          } catch {
-                            message.error('删除失败')
-                          }
-                        },
-                      })
-                    }}
-                  />
-                </Space>
+                <Button size="small" type="link" icon={<EditOutlined />} onClick={() => navigate(`/assets/actors/${a.id}/edit`)}>
+                  编辑
+                </Button>
               }
+              actions={[
+                <Button
+                  key="del"
+                  type="text"
+                  danger
+                  size="small"
+                  icon={<DeleteOutlined />}
+                  onClick={() => {
+                    Modal.confirm({
+                      title: `删除演员「${a.name}」？`,
+                      okText: '删除',
+                      cancelText: '取消',
+                      okButtonProps: { danger: true },
+                      onOk: async () => {
+                        try {
+                          await StudioEntitiesApi.remove('actor', a.id)
+                          message.success('已删除')
+                          void load()
+                        } catch {
+                          message.error('删除失败')
+                        }
+                      },
+                    })
+                  }}
+                />,
+              ]}
               meta={
                 <div>
                   {a.description && <div className="text-xs text-gray-600 line-clamp-2">{a.description}</div>}
