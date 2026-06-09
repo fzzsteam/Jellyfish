@@ -29,7 +29,7 @@ class StoredFileInfo:
     extra: dict[str, Any] | None = None
 
 
-def _build_client():
+def _build_client() -> Any:
     """构建 boto3 S3 客户端。"""
     if not settings.s3_access_key_id or not settings.s3_secret_access_key:
         raise RuntimeError(
@@ -161,8 +161,10 @@ async def list_files(*, prefix: str = "") -> list[StoredFileInfo]:
                 Bucket=settings.s3_bucket_name, Prefix=normalized_prefix
             )
             return [(obj["Key"], obj.get("Size")) for obj in resp.get("Contents", [])]
-        except ClientError:
-            return []
+        except ClientError as e:
+            if e.response["Error"]["Code"] in ("404", "NoSuchBucket"):
+                return []
+            raise
 
     contents = await to_thread.run_sync(_list)
     return [
