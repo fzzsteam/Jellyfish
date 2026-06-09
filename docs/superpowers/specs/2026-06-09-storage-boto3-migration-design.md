@@ -13,13 +13,13 @@
 
 仅涉及以下文件，调用方零改动：
 
-| 文件 | 改动内容 |
-|------|---------|
-| `backend/app/core/storage.py` | 移除 `oss2`，改用 `boto3`；删除 `_build_public_url`；`StoredFileInfo.url` 改返回空字符串 |
-| `backend/pyproject.toml` | 移除 `oss2`，添加 `boto3` |
-| `backend/app/services/studio/files.py:164` | `thumbnail=info.url` → `thumbnail=""` |
-| `backend/app/utils/files.py:124` | `thumbnail=info.url` → `thumbnail=""` |
-| 线上环境变量 | 新增 `S3_REGION_NAME=cn-shenzhen` |
+| 文件                                       | 改动内容                                                                                 |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `backend/app/core/storage.py`              | 移除 `oss2`，改用 `boto3`；删除 `_build_public_url`；`StoredFileInfo.url` 改返回空字符串 |
+| `backend/pyproject.toml`                   | 移除 `oss2`，添加 `boto3`                                                                |
+| `backend/app/services/studio/files.py:164` | `thumbnail=info.url` → `thumbnail=""`                                                    |
+| `backend/app/utils/files.py:124`           | `thumbnail=info.url` → `thumbnail=""`                                                    |
+| 线上环境变量                               | 新增 `S3_REGION_NAME=cn-shenzhen`                                                        |
 
 ## 设计细节
 
@@ -33,13 +33,13 @@ boto3.client(
     endpoint_url=settings.s3_endpoint_url,
     aws_access_key_id=settings.s3_access_key_id,
     aws_secret_access_key=settings.s3_secret_access_key,
-    region_name=settings.s3_region_name or "us-east-1",
+    region_name=settings.s3_region_name or "cn-shenzhen",
     config=Config(s3={"addressing_style": "path"}),
 )
 ```
 
 - `addressing_style="path"` 写死：path 格式同时兼容 RustFS（localhost 不支持 virtual-hosted）和阿里云 OSS，无需对外暴露配置
-- `region_name` 从 `settings.s3_region_name` 读取，未填时 fallback `us-east-1`（RustFS 不校验此值）
+- `region_name` 从 `settings.s3_region_name` 读取，未填时 fallback `cn-shenzhen`（RustFS 不校验此值）
 
 ### thumbnail 字段处理
 
@@ -62,15 +62,15 @@ init_storage() -> None
 
 ### 环境变量配置对照
 
-| 变量 | 本地（RustFS） | 线上（OSS 内网） |
-|------|--------------|----------------|
-| `S3_ENDPOINT_URL` | `http://localhost:9000` | `https://oss-cn-shenzhen-internal.aliyuncs.com` |
-| `S3_REGION_NAME` | （不填，fallback us-east-1） | `cn-shenzhen` |
-| `S3_ACCESS_KEY_ID` | `rustfsadmin` | 阿里云 AccessKey ID |
-| `S3_SECRET_ACCESS_KEY` | `rustfsadmin` | 阿里云 AccessKey Secret |
-| `S3_BUCKET_NAME` | `jellyfish-assets` | `fzzs-jellyfish` |
-| `S3_BASE_PATH` | （空） | `jellyfish/test` |
-| `S3_PUBLIC_BASE_URL` | （不再使用） | （不再使用） |
+| 变量                   | 本地（RustFS）                 | 线上（OSS 内网）                                |
+| ---------------------- | ------------------------------ | ----------------------------------------------- |
+| `S3_ENDPOINT_URL`      | `http://localhost:9000`        | `https://oss-cn-shenzhen-internal.aliyuncs.com` |
+| `S3_REGION_NAME`       | （不填，fallback cn-shenzhen） | `cn-shenzhen`                                   |
+| `S3_ACCESS_KEY_ID`     | `rustfsadmin`                  | 阿里云 AccessKey ID                             |
+| `S3_SECRET_ACCESS_KEY` | `rustfsadmin`                  | 阿里云 AccessKey Secret                         |
+| `S3_BUCKET_NAME`       | `jellyfish-assets`             | `fzzs-jellyfish`                                |
+| `S3_BASE_PATH`         | （空）                         | `jellyfish/test`                                |
+| `S3_PUBLIC_BASE_URL`   | （不再使用）                   | （不再使用）                                    |
 
 ## 不在本次范围内
 
