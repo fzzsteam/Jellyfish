@@ -44,7 +44,7 @@ def _build_client() -> Any:
         aws_access_key_id=settings.s3_access_key_id,
         aws_secret_access_key=settings.s3_secret_access_key,
         region_name=settings.s3_region_name or "cn-shenzhen",
-        config=Config(s3={"addressing_style": "path"}),
+        config=Config(s3={"addressing_style": settings.s3_addressing_style}),
     )
 
 
