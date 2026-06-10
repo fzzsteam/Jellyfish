@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./jellyfish.db"
 
     # JWT 认证
-    jwt_secret_key: str = "change-me-in-production"
+    jwt_secret_key: str = "please-change-me-to-a-random-secret"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
@@ -78,6 +78,10 @@ class Settings(BaseSettings):
         if not self.celery_broker_url or not str(self.celery_broker_url).strip():
             password_part = f":{self.redis_password}@" if self.redis_password else ""
             self.celery_broker_url = f"redis://{password_part}{self.redis_host}:{self.redis_port}/{self.redis_db}"
+
+        # Validate initial admin password for bootstrap
+        if not self.initial_admin_password or not str(self.initial_admin_password).strip():
+            raise ValueError("INITIAL_ADMIN_PASSWORD is required for admin bootstrap")
 
 
 settings = Settings()
