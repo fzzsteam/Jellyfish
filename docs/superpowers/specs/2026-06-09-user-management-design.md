@@ -30,6 +30,15 @@ Jellyfish 平台当前无任何用户管理机制，所有 API 均为公开访�
 - JWT payload 携带 `{ user_id, token_version }`
 - `token_version` 字段：管理员禁用账号或重置密码时递增，旧 token 立即失效
 
+### 新增后端依赖
+
+`pyproject.toml` 当前无任何 JWT / 密码哈希库，需新增：
+
+```toml
+"pyjwt>=2.9.0",    # JWT 生成与验证
+"bcrypt>=4.2.0",   # 密码哈希
+```
+
 ---
 
 ## Section 1：数据模型
@@ -38,14 +47,14 @@ Jellyfish 平台当前无任何用户管理机制，所有 API 均为公开访�
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `id` | int PK | 主键 |
-| `username` | str unique | 唯一用户名 |
-| `hashed_password` | str | bcrypt 哈希密码 |
+| `id` | String(64) PK | 主键（与现有业务表主键风格一致，如 `projects.id`） |
+| `username` | String(64) unique | 唯一用户名 |
+| `hashed_password` | String(255) | bcrypt 哈希密码 |
 | `is_admin` | bool = False | 是否管理员 |
 | `is_active` | bool = True | 是否启用 |
 | `token_version` | int = 0 | token 版本号，递增使所有 token 失效 |
-| `created_at` | datetime | 创建时间 |
-| `updated_at` | datetime | 更新时间 |
+| `created_at` | datetime | 创建时间（TimestampMixin） |
+| `updated_at` | datetime | 更新时间（TimestampMixin） |
 
 ### 需要添加 `user_id` FK 的现有表
 
@@ -60,9 +69,22 @@ Jellyfish 平台当前无任何用户管理机制，所有 API 均为公开访�
 | `file_items` | 素材文件 |
 | `providers` | LLM 供应商配置 |
 | `models` | LLM 模型配置 |
-| `model_settings` | LLM 模型参数设置 |
+| `model_settings` | LLM 模型参数设置（注意单例语义变化，见下） |
+| `generation_tasks` | 生成任务（任务中心数据源，严格隔离下用户只能看到自己的任务） |
 
 `characters`、`shots` 等通过 `project_id → projects.user_id` 间接隔离，无需单独加 `user_id`。
+
+### `model_settings` 单例语义变化
+
+当前 `ModelSettings` 是"单表单行（id=1）"的全局设置表。加 `user_id` 后语义变为**每用户一行**：
+
+- 读取：按 `user_id` 查询，无记录时返回默认值（或惰性创建）
+- 写入：按 `user_id` upsert，不再固定操作 id=1
+- `app/services/llm/` 中所有"读/写 id=1"的逻辑需要相应重写
+
+### `created_by` 字段的处理
+
+`providers` / `models` 表已有 `created_by: String(64), default=""` 闲置字段。本次**不复用**该字段做隔离（语义是"创建人记录"而非"归属"），统一新加 `user_id` FK；`created_by` 保留原样，创建时顺带填入用户名便于审计。
 
 ---
 
@@ -113,6 +135,18 @@ _: User = Depends(require_admin)
 
 `get_current_user` 解析 JWT → 查 DB 验证 `token_version` + `is_active`，任一不符返回 401。
 
+### 公开路径白名单
+
+以下路径**不需要**鉴权，其余所有业务路由（含 `studio`、`llm`、`film`、`script_processing`）均需注入 `get_current_user`：
+
+| 路径 | 说明 |
+|---|---|
+| `POST /api/v1/auth/login` | 登录 |
+| `POST /api/v1/auth/refresh` | 刷新 token |
+| `GET /health`、`GET /api/v1/health` | 健康检查 |
+| `GET /docs`、`GET /redoc`、`GET /openapi.json` | API 文档 |
+| `/`（SPA 静态资源挂载） | 前端页面本身公开，数据由 API 鉴权保护 |
+
 ---
 
 ## Section 3：Service 层改造
@@ -153,7 +187,8 @@ async def admin_list_user_projects(user_id: int, _=Depends(require_admin), db=De
 | `services/studio/files.py` | 文件列表/上传加 `user_id` |
 | `services/studio/assets/` (actors/scenes/props/costumes) | 资产 CRUD 加 `user_id` |
 | `services/studio/prompts.py` | 模板查询加 `user_id` |
-| `services/llm/` (providers/models/settings) | 模型配置查询加 `user_id` |
+| `services/llm/` (providers/models/settings) | 模型配置查询加 `user_id`；settings 从"读写 id=1"改为按 `user_id` upsert |
+| 任务查询相关 service | `generation_tasks` 列表/详情按 `user_id` 过滤 |
 
 ---
 
@@ -204,41 +239,67 @@ interface AuthStore {
 
 ## Section 5：数据迁移与初始化
 
-### Alembic Migration 执行顺序
+> 项目**不使用 Alembic**。现有迁移方式为 `backend/sql/` 下的编号 SQL 文件（MySQL 幂等写法）+ 启动时 `init_db()` 的 `Base.metadata.create_all`（负责建新表）。本设计遵循该约定。
 
-1. 新建 `users` 表
-2. 插入初始管理员（从环境变量读取用户名和密码，bcrypt hash 后存入；若变量未设置则迁移报错终止）
-3. 对 10 类表逐一添加 `user_id` 可空列，批量 UPDATE 填充为管理员 id，再设为 `NOT NULL` + FK
+### 迁移脚本：`backend/sql/009-add-users-and-user-isolation.sql`
 
-### 环境变量
+沿用现有幂等写法（`information_schema` 检查 + `PREPARE/EXECUTE`），内容：
+
+1. 对 11 类现有表（projects / actors / scenes / props / costumes / prompt_templates / file_items / providers / models / model_settings / generation_tasks）逐一：
+   - 添加 `user_id VARCHAR(64) NULL` 列
+   - `UPDATE ... SET user_id = (SELECT id FROM users WHERE is_admin = 1 ORDER BY created_at LIMIT 1) WHERE user_id IS NULL`（历史数据归属初始管理员）
+   - 修改为 `NOT NULL` + 添加 FK 与索引
+
+> `users` 表本身由 `init_db()` 的 `create_all` 创建，SQL 脚本只负责存量表加列。脚本需在管理员播种完成后执行（见启动顺序）。
+
+### 初始管理员播种（应用启动 bootstrap）
+
+在 `app/bootstrap.py` 的启动流程中新增 `seed_initial_admin()`：
+
+- 查询 `users` 表，若已存在任意管理员则跳过（幂等）
+- 否则从环境变量读取用户名/密码，bcrypt hash 后插入
+- `INITIAL_ADMIN_PASSWORD` 未设置且表为空时：记录 ERROR 并拒绝启动，避免默认弱密码
+
+### 启动顺序
+
+```
+init_db()（create_all 建 users 等新表）
+  → seed_initial_admin()（播种管理员）
+  → 人工/部署脚本执行 sql/009（存量表加 user_id 并回填）
+```
+
+新部署环境没有存量数据，`create_all` 直接建出带 `user_id` 的完整表结构，sql/009 幂等跳过。
+
+### 环境变量（`app/config.py` Settings 新增字段）
 
 | 变量 | 说明 | 是否必填 |
 |---|---|---|
 | `INITIAL_ADMIN_USERNAME` | 初始管理员用户名，默认 `admin` | 否 |
-| `INITIAL_ADMIN_PASSWORD` | 初始管理员密码 | **必填**，未设置则迁移终止 |
+| `INITIAL_ADMIN_PASSWORD` | 初始管理员密码 | **必填**（首次启动且无管理员时），否则拒绝启动 |
 | `JWT_SECRET_KEY` | JWT 签名密钥 | **必填** |
 | `JWT_ALGORITHM` | 签名算法，默认 `HS256` | 否 |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | access token 有效期，默认 15 | 否 |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | refresh token 有效期，默认 7 | 否 |
 
-`.env.example` 中标注必填项并给出示例。
-
-### 新环境初始化
-
-Docker Compose 启动时 Alembic 迁移自动运行，`INITIAL_ADMIN_PASSWORD` 和 `JWT_SECRET_KEY` 在 `.env` 中配置。
+`deploy/compose/.env.example` 中标注必填项并给出示例。
 
 ---
 
 ## 完成检查清单
 
+- [ ] 新增依赖 `pyjwt` + `bcrypt`
 - [ ] `users` 表 ORM 模型创建
-- [ ] 10 类业务表添加 `user_id` FK
-- [ ] Alembic migration 编写（含历史数据归属）
+- [ ] 11 类业务表添加 `user_id` FK（含 `generation_tasks`）
+- [ ] `sql/009-add-users-and-user-isolation.sql` 编写（幂等，含历史数据归属）
+- [ ] `seed_initial_admin()` 启动播种（幂等，无密码时拒绝启动）
 - [ ] `app/core/security.py`：JWT 生成/验证、密码 hash
 - [ ] `app/api/deps.py`：`get_current_user`、`require_admin` 依赖
 - [ ] `app/services/auth.py`：登录、刷新、用户 CRUD
 - [ ] `app/api/v1/routes/auth.py`：认证端点
 - [ ] `app/api/v1/routes/admin/users.py`：管理员端点
-- [ ] 所有 studio/llm service 加 `user_id` 过滤
-- [ ] 所有业务路由注入 `current_user`
+- [ ] 所有 studio/llm/任务 service 加 `user_id` 过滤
+- [ ] `model_settings` 从单例改为按 `user_id` upsert
+- [ ] 所有业务路由注入 `current_user`（公开路径白名单除外）
 - [ ] 前端 `useAuthStore.ts`
 - [ ] 前端请求拦截器（token 注入 + 自动刷新）
 - [ ] 前端 `LoginPage`
