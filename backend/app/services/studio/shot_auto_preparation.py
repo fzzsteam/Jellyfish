@@ -336,6 +336,9 @@ def _ensure_project_asset_link(
             **{id_key: entity_id},
         )
     )
+    # session 配置了 autoflush=False，立即 flush 让本次 add 对后续 SELECT 可见，
+    # 避免同一 shot 多个 candidate 匹配同一资产时出现重复 add 导致唯一约束冲突。
+    db.flush()
 
 
 def _link_candidate(
@@ -809,6 +812,14 @@ def auto_prepare_chapter_shots_sync(
             option=match,
         )
         summary.linked_asset_count += 1
+
+    # 第一轮结束后统一 flush：将所有已写入 session 的 ProjectPropLink / ProjectSceneLink
+    # 等关联对象持久化到 DB，保证第二轮的幂等 SELECT 能读到它们。
+    # 背景：sync session 配置了 autoflush=False，若不在此显式 flush，第二轮
+    # _ensure_project_asset_link 的幂等检查会遗漏 session 中 pending 的对象，
+    # 导致同一 (prop/scene/costume, shot) 组合被 db.add 两次，最终在第二轮
+    # _create_entity_sync 的 db.flush() 时触发唯一约束冲突。
+    db.flush()
 
     # 第二轮：自动创建资产并调度图片生成（服装不参与自动建档，由创作者手动管理）
     project = db.get(Project, project_id)
