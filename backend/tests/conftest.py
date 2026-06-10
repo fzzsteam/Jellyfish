@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 
 import pytest
 from fastapi.testclient import TestClient
+
+# 为测试环境设置必需的环境变量
+os.environ.setdefault("INITIAL_ADMIN_PASSWORD", "test-admin-password")
 
 try:
     from app.main import app  # type: ignore
