@@ -246,7 +246,12 @@ def _next_character_index(db: Session, *, shot_id: str) -> int:
 
 
 def _ensure_character_link(db: Session, *, shot_id: str, character_id: str) -> None:
-    """幂等写入镜头与角色的关联。"""
+    """幂等写入镜头与角色的关联。
+
+    与 _ensure_project_asset_link 相同：session 使用 autoflush=False，
+    db.add() 后必须立即 flush，否则同一 shot 内后续的 SELECT 查不到本次新增，
+    导致多个 candidate 匹配到同一角色时产生重复 add 并触发唯一约束冲突。
+    """
 
     existing = db.scalar(
         select(ShotCharacterLink).where(
@@ -263,10 +268,16 @@ def _ensure_character_link(db: Session, *, shot_id: str, character_id: str) -> N
             index=_next_character_index(db, shot_id=shot_id),
         )
     )
+    db.flush()
 
 
 def _ensure_project_actor_link(db: Session, *, project_id: str, actor_id: str) -> None:
-    """幂等写入项目级演员关联，供角色自动匹配演员后在项目演员页展示。"""
+    """幂等写入项目级演员关联，供角色自动匹配演员后在项目演员页展示。
+
+    与 _ensure_project_asset_link 相同：session 使用 autoflush=False，
+    必须在 db.add() 后立即 flush，防止同批次内多个角色匹配到同一演员时
+    重复写入，触发 uq_project_actor_links_actor_scope 唯一约束冲突。
+    """
 
     existing = db.scalar(
         select(ProjectActorLink).where(
@@ -279,6 +290,7 @@ def _ensure_project_actor_link(db: Session, *, project_id: str, actor_id: str) -
     if existing is not None:
         return
     db.add(ProjectActorLink(project_id=project_id, actor_id=actor_id))
+    db.flush()
 
 
 def _ensure_character_actor_link(
