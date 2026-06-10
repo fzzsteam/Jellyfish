@@ -28,6 +28,16 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "sqlite+aiosqlite:///./jellyfish.db"
 
+    # JWT 认证
+    jwt_secret_key: str = "change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 7
+
+    # 初始管理员账号（仅在 users 表为空时用于播种）
+    initial_admin_username: str = "admin"
+    initial_admin_password: str | None = None
+
     # Redis / Celery Broker
     redis_host: str = "localhost"
     redis_port: int = 6379
