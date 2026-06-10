@@ -21,6 +21,62 @@ except Exception:  # noqa: BLE001
 
 
 @pytest.fixture
+def _auth_user_bypass() -> None:
+    """为非认证测试提供 get_current_user 绕过。
+
+    这样旧测试不需要修改；认证测试使用 auth_client fixture（不应用此绕过）。
+    """
+    if app is None:
+        return
+
+    from app.core.security import hash_password
+    from app.dependencies import get_current_user
+    from app.models.user import User
+
+    async def _mock_get_current_user():
+        """返回测试用户，无需真实令牌。"""
+        return User(
+            id="test-user",
+            username="test-user",
+            hashed_password=hash_password("test-pass"),
+            is_admin=True,
+            is_active=True,
+            token_version=0,
+        )
+
+    app.dependency_overrides[get_current_user] = _mock_get_current_user
+    yield
+    # 测试完成后清理
+    app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.fixture(autouse=True)
+def _auto_auth_bypass(request: pytest.FixtureRequest) -> None:
+    """除认证相关测试外自动应用 auth 绕过。"""
+    # 跳过 auth 相关测试文件
+    if "test_auth" not in request.node.nodeid and app is not None:
+        from app.core.security import hash_password
+        from app.dependencies import get_current_user
+        from app.models.user import User
+
+        async def _mock_get_current_user():
+            return User(
+                id="test-user",
+                username="test-user",
+                hashed_password=hash_password("test-pass"),
+                is_admin=True,
+                is_active=True,
+                token_version=0,
+            )
+
+        app.dependency_overrides[get_current_user] = _mock_get_current_user
+        yield
+        app.dependency_overrides.pop(get_current_user, None)
+    else:
+        yield
+
+
+@pytest.fixture
 def client() -> TestClient:
     """FastAPI 应用 TestClient，用于集成测试。"""
     if app is None:
