@@ -12,6 +12,7 @@ import {
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
+import { useAuthStore } from '../store/useAuthStore'
 import { useTranslation } from 'react-i18next'
 import { TaskCenter } from '../pages/aiStudio/components/TaskCenter'
 import { TaskRuntimeProvider } from '../pages/aiStudio/components/TaskRuntimeProvider'
@@ -26,7 +27,8 @@ const MainLayout: React.FC = () => {
 
   const collapsed = useAppStore((state) => state.siderCollapsed)
   const toggleCollapsed = useAppStore((state) => state.toggleSider)
-  const user = useAppStore((state) => state.user)
+  const authUser = useAuthStore((state) => state.user)
+  const logout = useAuthStore((state) => state.logout)
 
   const selectedKeys = useMemo(() => {
     if (location.pathname === '/projects' || location.pathname.startsWith('/projects/')) return ['projects']
@@ -138,7 +140,8 @@ const MainLayout: React.FC = () => {
       key: 'logout',
       label: t('user.logout'),
       onClick: () => {
-        // 这里保留占位，实际项目中可接入登录逻辑
+        logout()
+        navigate('/login')
       },
     },
   ]
@@ -229,8 +232,8 @@ const MainLayout: React.FC = () => {
               <div className="flex items-center gap-2 cursor-pointer">
                 <Avatar size={32} icon={<UserOutlined />} />
                 <div className="hidden md:flex flex-col leading-tight">
-                  <span className="text-sm font-medium text-gray-800">{user.name}</span>
-                  <span className="text-xs text-gray-500">{user.role}</span>
+                  <span className="text-sm font-medium text-gray-800">{authUser?.username}</span>
+                  <span className="text-xs text-gray-500">{authUser?.is_admin ? '管理员' : '成员'}</span>
                 </div>
               </div>
             </Dropdown>
