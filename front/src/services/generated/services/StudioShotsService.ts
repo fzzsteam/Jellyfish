@@ -37,6 +37,7 @@ export class StudioShotsService {
         isDesc = false,
         page = 1,
         pageSize = 10,
+        authorization,
     }: {
         /**
          * 按章节过滤
@@ -50,10 +51,14 @@ export class StudioShotsService {
         isDesc?: boolean,
         page?: number,
         pageSize?: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_ShotRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shots',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'chapter_id': chapterId,
                 'q': q,
@@ -74,12 +79,17 @@ export class StudioShotsService {
      */
     public static createShotApiV1StudioShotsPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ShotCreate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/shots',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -94,15 +104,20 @@ export class StudioShotsService {
      */
     public static listShotRuntimeSummaryApiV1StudioShotsRuntimeSummaryGet({
         chapterId,
+        authorization,
     }: {
         /**
          * 章节 ID
          */
         chapterId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_list_ShotRuntimeSummaryRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shots/runtime-summary',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'chapter_id': chapterId,
             },
@@ -118,14 +133,19 @@ export class StudioShotsService {
      */
     public static getShotExtractionDraftApiV1StudioShotsShotIdExtractionDraftGet({
         shotId,
+        authorization,
     }: {
         shotId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_StudioScriptExtractionDraft_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shots/{shot_id}/extraction-draft',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -139,14 +159,19 @@ export class StudioShotsService {
      */
     public static getShotExtractedCandidatesApiV1StudioShotsShotIdExtractedCandidatesGet({
         shotId,
+        authorization,
     }: {
         shotId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_list_ShotExtractedCandidateRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shots/{shot_id}/extracted-candidates',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -160,14 +185,19 @@ export class StudioShotsService {
      */
     public static getShotExtractedDialogueCandidatesApiV1StudioShotsShotIdExtractedDialogueCandidatesGet({
         shotId,
+        authorization,
     }: {
         shotId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_list_ShotExtractedDialogueCandidateRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shots/{shot_id}/extracted-dialogue-candidates',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -181,14 +211,19 @@ export class StudioShotsService {
      */
     public static getShotAssetsOverviewApiApiV1StudioShotsShotIdAssetsOverviewGet({
         shotId,
+        authorization,
     }: {
         shotId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotAssetsOverviewRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shots/{shot_id}/assets-overview',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -202,14 +237,19 @@ export class StudioShotsService {
      */
     public static getShotPreparationStateApiApiV1StudioShotsShotIdPreparationStateGet({
         shotId,
+        authorization,
     }: {
         shotId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotPreparationStateRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shots/{shot_id}/preparation-state',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -224,15 +264,20 @@ export class StudioShotsService {
     public static linkExistingAssetForPreparationApiApiV1StudioShotsShotIdPreparationLinkPost({
         shotId,
         requestBody,
+        authorization,
     }: {
         shotId: string,
         requestBody: ShotPreparationLinkRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotPreparationMutationResultRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/shots/{shot_id}/preparation-link',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -249,18 +294,23 @@ export class StudioShotsService {
     public static previewShotVideoPromptApiV1StudioShotsShotIdVideoPromptPreviewGet({
         shotId,
         templateId,
+        authorization,
     }: {
         shotId: string,
         /**
          * 指定视频提示词模板 ID；不传则使用默认模板
          */
         templateId?: (string | null),
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotVideoPromptPreviewRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shots/{shot_id}/video-prompt-preview',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             query: {
                 'template_id': templateId,
@@ -278,18 +328,23 @@ export class StudioShotsService {
     public static getShotVideoReadinessApiApiV1StudioShotsShotIdVideoReadinessGet({
         shotId,
         referenceMode = 'text_only',
+        authorization,
     }: {
         shotId: string,
         /**
          * 参考模式：first/last/key/first_last/first_last_key/text_only
          */
         referenceMode?: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotVideoReadinessRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shots/{shot_id}/video-readiness',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             query: {
                 'reference_mode': referenceMode,
@@ -307,15 +362,20 @@ export class StudioShotsService {
     public static updateShotSkipExtractionApiV1StudioShotsShotIdSkipExtractionPatch({
         shotId,
         requestBody,
+        authorization,
     }: {
         shotId: string,
         requestBody: ShotSkipExtractionUpdate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotPreparationMutationResultRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/studio/shots/{shot_id}/skip-extraction',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -332,15 +392,20 @@ export class StudioShotsService {
     public static linkExtractedCandidateApiV1StudioShotsExtractedCandidatesCandidateIdLinkPatch({
         candidateId,
         requestBody,
+        authorization,
     }: {
         candidateId: number,
         requestBody: ShotExtractedCandidateLinkRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotPreparationMutationResultRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/studio/shots/extracted-candidates/{candidate_id}/link',
             path: {
                 'candidate_id': candidateId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -356,14 +421,19 @@ export class StudioShotsService {
      */
     public static ignoreExtractedCandidateApiV1StudioShotsExtractedCandidatesCandidateIdIgnorePatch({
         candidateId,
+        authorization,
     }: {
         candidateId: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotPreparationMutationResultRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/studio/shots/extracted-candidates/{candidate_id}/ignore',
             path: {
                 'candidate_id': candidateId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -377,9 +447,11 @@ export class StudioShotsService {
      */
     public static acceptExtractedDialogueCandidateApiV1StudioShotsExtractedDialogueCandidatesCandidateIdAcceptPatch({
         candidateId,
+        authorization,
         requestBody,
     }: {
         candidateId: number,
+        authorization?: (string | null),
         requestBody?: (ShotExtractedDialogueCandidateAcceptRequest | null),
     }): CancelablePromise<ApiResponse_ShotPreparationMutationResultRead_> {
         return __request(OpenAPI, {
@@ -387,6 +459,9 @@ export class StudioShotsService {
             url: '/api/v1/studio/shots/extracted-dialogue-candidates/{candidate_id}/accept',
             path: {
                 'candidate_id': candidateId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -402,14 +477,19 @@ export class StudioShotsService {
      */
     public static ignoreExtractedDialogueCandidateApiV1StudioShotsExtractedDialogueCandidatesCandidateIdIgnorePatch({
         candidateId,
+        authorization,
     }: {
         candidateId: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotPreparationMutationResultRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/studio/shots/extracted-dialogue-candidates/{candidate_id}/ignore',
             path: {
                 'candidate_id': candidateId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -423,14 +503,19 @@ export class StudioShotsService {
      */
     public static getShotApiV1StudioShotsShotIdGet({
         shotId,
+        authorization,
     }: {
         shotId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shots/{shot_id}',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -445,15 +530,20 @@ export class StudioShotsService {
     public static updateShotApiV1StudioShotsShotIdPatch({
         shotId,
         requestBody,
+        authorization,
     }: {
         shotId: string,
         requestBody: ShotUpdate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/studio/shots/{shot_id}',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -469,14 +559,19 @@ export class StudioShotsService {
      */
     public static deleteShotApiV1StudioShotsShotIdDelete({
         shotId,
+        authorization,
     }: {
         shotId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/studio/shots/{shot_id}',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -492,16 +587,21 @@ export class StudioShotsService {
         shotId,
         page = 1,
         pageSize = 10,
+        authorization,
     }: {
         shotId: string,
         page?: number,
         pageSize?: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_ShotLinkedAssetItem__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shots/{shot_id}/linked-assets',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             query: {
                 'page': page,

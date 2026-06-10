@@ -31,12 +31,17 @@ export class FilmService {
      */
     public static previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
         requestBody,
+        authorization,
     }: {
         requestBody: VideoGenerationTaskRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_VideoPromptPreviewResponse_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/film/tasks/video/preview-prompt',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -52,12 +57,17 @@ export class FilmService {
      */
     public static createVideoGenerationTaskApiV1FilmTasksVideoPost({
         requestBody,
+        authorization,
     }: {
         requestBody: VideoGenerationTaskRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_TaskCreated_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/film/tasks/video',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -72,12 +82,17 @@ export class FilmService {
      */
     public static createShotFramePromptTaskApiV1FilmTasksShotFramePromptsPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ShotFramePromptRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_TaskCreated_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/film/tasks/shot-frame-prompts',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -98,6 +113,7 @@ export class FilmService {
         recentSeconds = 300,
         page = 1,
         pageSize = 20,
+        authorization,
     }: {
         /**
          * 按任务状态过滤，可多选
@@ -127,10 +143,14 @@ export class FilmService {
          * 每页条数
          */
         pageSize?: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_TaskListItemRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/film/tasks',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'statuses': statuses,
                 'task_kind': taskKind,
@@ -152,14 +172,19 @@ export class FilmService {
      */
     public static getTaskStatusApiV1FilmTasksTaskIdStatusGet({
         taskId,
+        authorization,
     }: {
         taskId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_TaskStatusRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/film/tasks/{task_id}/status',
             path: {
                 'task_id': taskId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -173,14 +198,19 @@ export class FilmService {
      */
     public static getTaskResultApiV1FilmTasksTaskIdResultGet({
         taskId,
+        authorization,
     }: {
         taskId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_TaskResultRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/film/tasks/{task_id}/result',
             path: {
                 'task_id': taskId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -195,15 +225,20 @@ export class FilmService {
     public static cancelTaskApiV1FilmTasksTaskIdCancelPost({
         taskId,
         requestBody,
+        authorization,
     }: {
         taskId: string,
         requestBody: TaskCancelRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_TaskCancelRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/film/tasks/{task_id}/cancel',
             path: {
                 'task_id': taskId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -220,12 +255,17 @@ export class FilmService {
      */
     public static adoptTaskLinkApiV1FilmTaskLinksAdoptPatch({
         requestBody,
+        authorization,
     }: {
         requestBody: TaskLinkAdoptRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_TaskLinkAdoptRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/film/task-links/adopt',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -248,6 +288,7 @@ export class FilmService {
         isDesc = true,
         page = 1,
         pageSize = 10,
+        authorization,
     }: {
         /**
          * 按 resource_type 过滤
@@ -285,10 +326,14 @@ export class FilmService {
          * 每页条数
          */
         pageSize?: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_GenerationTaskLinkRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/film/task-links',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'resource_type': resourceType,
                 'relation_type': relationType,
@@ -312,12 +357,17 @@ export class FilmService {
      */
     public static createTaskLinkApiV1FilmTaskLinksPost({
         requestBody,
+        authorization,
     }: {
         requestBody: GenerationTaskLinkCreate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_GenerationTaskLinkRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/film/task-links',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -332,14 +382,19 @@ export class FilmService {
      */
     public static getTaskLinkApiV1FilmTaskLinksLinkIdGet({
         linkId,
+        authorization,
     }: {
         linkId: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_GenerationTaskLinkRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/film/task-links/{link_id}',
             path: {
                 'link_id': linkId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -354,15 +409,20 @@ export class FilmService {
     public static updateTaskLinkApiV1FilmTaskLinksLinkIdPatch({
         linkId,
         requestBody,
+        authorization,
     }: {
         linkId: number,
         requestBody: GenerationTaskLinkUpdate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_GenerationTaskLinkRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/film/task-links/{link_id}',
             path: {
                 'link_id': linkId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -378,14 +438,19 @@ export class FilmService {
      */
     public static deleteTaskLinkApiV1FilmTaskLinksLinkIdDelete({
         linkId,
+        authorization,
     }: {
         linkId: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/film/task-links/{link_id}',
             path: {
                 'link_id': linkId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,

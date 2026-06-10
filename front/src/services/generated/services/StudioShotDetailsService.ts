@@ -22,6 +22,7 @@ export class StudioShotDetailsService {
         isDesc = false,
         page = 1,
         pageSize = 10,
+        authorization,
     }: {
         /**
          * 按镜头过滤（id 同 shot_id）
@@ -31,10 +32,14 @@ export class StudioShotDetailsService {
         isDesc?: boolean,
         page?: number,
         pageSize?: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_ShotDetailRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shot-details',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'shot_id': shotId,
                 'order': order,
@@ -54,12 +59,17 @@ export class StudioShotDetailsService {
      */
     public static createShotDetailApiV1StudioShotDetailsPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ShotDetailCreate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotDetailRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/shot-details',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -74,14 +84,19 @@ export class StudioShotDetailsService {
      */
     public static getShotDetailApiV1StudioShotDetailsShotIdGet({
         shotId,
+        authorization,
     }: {
         shotId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotDetailRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shot-details/{shot_id}',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -96,15 +111,20 @@ export class StudioShotDetailsService {
     public static updateShotDetailApiV1StudioShotDetailsShotIdPatch({
         shotId,
         requestBody,
+        authorization,
     }: {
         shotId: string,
         requestBody: ShotDetailUpdate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotDetailRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/studio/shot-details/{shot_id}',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -120,14 +140,19 @@ export class StudioShotDetailsService {
      */
     public static deleteShotDetailApiV1StudioShotDetailsShotIdDelete({
         shotId,
+        authorization,
     }: {
         shotId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/studio/shot-details/{shot_id}',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,

@@ -16,15 +16,20 @@ export class StudioShotCharacterLinksService {
      */
     public static listShotCharacterLinksApiV1StudioShotCharacterLinksGet({
         shotId,
+        authorization,
     }: {
         /**
          * 镜头 ID
          */
         shotId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_list_ShotCharacterLinkRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shot-character-links',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'shot_id': shotId,
             },
@@ -40,12 +45,17 @@ export class StudioShotCharacterLinksService {
      */
     public static upsertShotCharacterLinkApiV1StudioShotCharacterLinksPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ShotCharacterLinkCreate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotCharacterLinkRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/shot-character-links',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {

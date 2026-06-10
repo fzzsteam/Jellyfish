@@ -27,6 +27,7 @@ export class StudioFilesService {
         projectId,
         chapterTitle,
         shotTitle,
+        authorization,
     }: {
         /**
          * 关键字，过滤 name
@@ -48,10 +49,14 @@ export class StudioFilesService {
          * 镜头标题（精确匹配，与 project_id 联用）
          */
         shotTitle?: (string | null),
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_FileRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/files',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'q': q,
                 'order': order,
@@ -75,13 +80,18 @@ export class StudioFilesService {
     public static uploadFileApiApiV1StudioFilesUploadPost({
         formData,
         name,
+        authorization,
     }: {
         formData: Body_upload_file_api_api_v1_studio_files_upload_post,
         name?: (string | null),
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_FileRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/files/upload',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'name': name,
             },
@@ -99,14 +109,19 @@ export class StudioFilesService {
      */
     public static downloadFileApiApiV1StudioFilesFileIdDownloadGet({
         fileId,
+        authorization,
     }: {
         fileId: string,
+        authorization?: (string | null),
     }): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/files/{file_id}/download',
             path: {
                 'file_id': fileId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -120,14 +135,19 @@ export class StudioFilesService {
      */
     public static getFileStorageInfoApiApiV1StudioFilesFileIdStorageInfoGet({
         fileId,
+        authorization,
     }: {
         fileId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_dict_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/files/{file_id}/storage-info',
             path: {
                 'file_id': fileId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -141,14 +161,19 @@ export class StudioFilesService {
      */
     public static getFileDetailApiV1StudioFilesFileIdGet({
         fileId,
+        authorization,
     }: {
         fileId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_FileDetailRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/files/{file_id}',
             path: {
                 'file_id': fileId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -163,15 +188,20 @@ export class StudioFilesService {
     public static updateFileMetaApiV1StudioFilesFileIdPatch({
         fileId,
         requestBody,
+        authorization,
     }: {
         fileId: string,
         requestBody: FileUpdate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_FileRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/studio/files/{file_id}',
             path: {
                 'file_id': fileId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -187,14 +217,19 @@ export class StudioFilesService {
      */
     public static deleteFileApiApiV1StudioFilesFileIdDelete({
         fileId,
+        authorization,
     }: {
         fileId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/studio/files/{file_id}',
             path: {
                 'file_id': fileId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,

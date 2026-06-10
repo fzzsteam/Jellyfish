@@ -23,6 +23,7 @@ export class StudioShotDialogLinesService {
         isDesc = false,
         page = 1,
         pageSize = 10,
+        authorization,
     }: {
         /**
          * 按镜头细节过滤
@@ -36,10 +37,14 @@ export class StudioShotDialogLinesService {
         isDesc?: boolean,
         page?: number,
         pageSize?: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_ShotDialogLineRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shot-dialog-lines',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'shot_detail_id': shotDetailId,
                 'q': q,
@@ -60,12 +65,17 @@ export class StudioShotDialogLinesService {
      */
     public static createShotDialogLineApiV1StudioShotDialogLinesPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ShotDialogLineCreate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotDialogLineRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/shot-dialog-lines',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -81,15 +91,20 @@ export class StudioShotDialogLinesService {
     public static updateShotDialogLineApiV1StudioShotDialogLinesLineIdPatch({
         lineId,
         requestBody,
+        authorization,
     }: {
         lineId: number,
         requestBody: ShotDialogLineUpdate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotDialogLineRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/studio/shot-dialog-lines/{line_id}',
             path: {
                 'line_id': lineId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -105,14 +120,19 @@ export class StudioShotDialogLinesService {
      */
     public static deleteShotDialogLineApiV1StudioShotDialogLinesLineIdDelete({
         lineId,
+        authorization,
     }: {
         lineId: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/studio/shot-dialog-lines/{line_id}',
             path: {
                 'line_id': lineId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,

@@ -28,6 +28,7 @@ export class StudioShotLinksService {
         isDesc = false,
         page = 1,
         pageSize = 10,
+        authorization,
     }: {
         entityType: string,
         projectId?: (string | null),
@@ -38,12 +39,16 @@ export class StudioShotLinksService {
         isDesc?: boolean,
         page?: number,
         pageSize?: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_Any__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/shot-links/{entity_type}',
             path: {
                 'entity_type': entityType,
+            },
+            headers: {
+                'authorization': authorization,
             },
             query: {
                 'project_id': projectId,
@@ -67,12 +72,17 @@ export class StudioShotLinksService {
      */
     public static createProjectActorLinkApiV1StudioShotLinksActorPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ProjectAssetLinkCreate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ProjectActorLinkRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/shot-links/actor',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -87,14 +97,19 @@ export class StudioShotLinksService {
      */
     public static deleteProjectActorLinkApiV1StudioShotLinksActorLinkIdDelete({
         linkId,
+        authorization,
     }: {
         linkId: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/studio/shot-links/actor/{link_id}',
             path: {
                 'link_id': linkId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -108,12 +123,17 @@ export class StudioShotLinksService {
      */
     public static createProjectSceneLinkApiV1StudioShotLinksScenePost({
         requestBody,
+        authorization,
     }: {
         requestBody: ProjectAssetLinkCreate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ProjectSceneLinkRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/shot-links/scene',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -128,14 +148,19 @@ export class StudioShotLinksService {
      */
     public static deleteProjectSceneLinkApiV1StudioShotLinksSceneLinkIdDelete({
         linkId,
+        authorization,
     }: {
         linkId: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/studio/shot-links/scene/{link_id}',
             path: {
                 'link_id': linkId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -149,12 +174,17 @@ export class StudioShotLinksService {
      */
     public static createProjectPropLinkApiV1StudioShotLinksPropPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ProjectAssetLinkCreate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ProjectPropLinkRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/shot-links/prop',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -169,14 +199,19 @@ export class StudioShotLinksService {
      */
     public static deleteProjectPropLinkApiV1StudioShotLinksPropLinkIdDelete({
         linkId,
+        authorization,
     }: {
         linkId: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/studio/shot-links/prop/{link_id}',
             path: {
                 'link_id': linkId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -190,12 +225,17 @@ export class StudioShotLinksService {
      */
     public static createProjectCostumeLinkApiV1StudioShotLinksCostumePost({
         requestBody,
+        authorization,
     }: {
         requestBody: ProjectAssetLinkCreate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ProjectCostumeLinkRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/shot-links/costume',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -210,14 +250,19 @@ export class StudioShotLinksService {
      */
     public static deleteProjectCostumeLinkApiV1StudioShotLinksCostumeLinkIdDelete({
         linkId,
+        authorization,
     }: {
         linkId: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/studio/shot-links/costume/{link_id}',
             path: {
                 'link_id': linkId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,

@@ -21,12 +21,17 @@ export class StudioEntitiesService {
      */
     public static checkEntityNamesExistenceApiV1StudioEntitiesExistenceCheckPost({
         requestBody,
+        authorization,
     }: {
         requestBody: EntityNameExistenceCheckRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_EntityNameExistenceCheckResponse_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/entities/existence-check',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -48,6 +53,7 @@ export class StudioEntitiesService {
         isDesc = false,
         page = 1,
         pageSize = 10,
+        authorization,
     }: {
         entityType: string,
         /**
@@ -66,12 +72,16 @@ export class StudioEntitiesService {
         isDesc?: boolean,
         page?: number,
         pageSize?: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_dict_str__Any___> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/entities/{entity_type}',
             path: {
                 'entity_type': entityType,
+            },
+            headers: {
+                'authorization': authorization,
             },
             query: {
                 'q': q,
@@ -95,15 +105,20 @@ export class StudioEntitiesService {
     public static createEntityApiV1StudioEntitiesEntityTypePost({
         entityType,
         requestBody,
+        authorization,
     }: {
         entityType: string,
         requestBody: Record<string, any>,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_dict_str__Any__> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/entities/{entity_type}',
             path: {
                 'entity_type': entityType,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -120,9 +135,11 @@ export class StudioEntitiesService {
     public static getEntityApiV1StudioEntitiesEntityTypeEntityIdGet({
         entityType,
         entityId,
+        authorization,
     }: {
         entityType: string,
         entityId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_dict_str__Any__> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -130,6 +147,9 @@ export class StudioEntitiesService {
             path: {
                 'entity_type': entityType,
                 'entity_id': entityId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -145,10 +165,12 @@ export class StudioEntitiesService {
         entityType,
         entityId,
         requestBody,
+        authorization,
     }: {
         entityType: string,
         entityId: string,
         requestBody: Record<string, any>,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_dict_str__Any__> {
         return __request(OpenAPI, {
             method: 'PATCH',
@@ -156,6 +178,9 @@ export class StudioEntitiesService {
             path: {
                 'entity_type': entityType,
                 'entity_id': entityId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -172,9 +197,11 @@ export class StudioEntitiesService {
     public static deleteEntityApiV1StudioEntitiesEntityTypeEntityIdDelete({
         entityType,
         entityId,
+        authorization,
     }: {
         entityType: string,
         entityId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
@@ -182,6 +209,9 @@ export class StudioEntitiesService {
             path: {
                 'entity_type': entityType,
                 'entity_id': entityId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -200,6 +230,7 @@ export class StudioEntitiesService {
         isDesc = false,
         page = 1,
         pageSize = 10,
+        authorization,
     }: {
         entityType: string,
         entityId: string,
@@ -207,6 +238,7 @@ export class StudioEntitiesService {
         isDesc?: boolean,
         page?: number,
         pageSize?: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_dict_str__Any___> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -214,6 +246,9 @@ export class StudioEntitiesService {
             path: {
                 'entity_type': entityType,
                 'entity_id': entityId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             query: {
                 'order': order,
@@ -235,10 +270,12 @@ export class StudioEntitiesService {
         entityType,
         entityId,
         requestBody,
+        authorization,
     }: {
         entityType: string,
         entityId: string,
         requestBody: Record<string, any>,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_dict_str__Any__> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -246,6 +283,9 @@ export class StudioEntitiesService {
             path: {
                 'entity_type': entityType,
                 'entity_id': entityId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -264,11 +304,13 @@ export class StudioEntitiesService {
         entityId,
         imageId,
         requestBody,
+        authorization,
     }: {
         entityType: string,
         entityId: string,
         imageId: number,
         requestBody: Record<string, any>,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_dict_str__Any__> {
         return __request(OpenAPI, {
             method: 'PATCH',
@@ -277,6 +319,9 @@ export class StudioEntitiesService {
                 'entity_type': entityType,
                 'entity_id': entityId,
                 'image_id': imageId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -294,10 +339,12 @@ export class StudioEntitiesService {
         entityType,
         entityId,
         imageId,
+        authorization,
     }: {
         entityType: string,
         entityId: string,
         imageId: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
@@ -306,6 +353,9 @@ export class StudioEntitiesService {
                 'entity_type': entityType,
                 'entity_id': entityId,
                 'image_id': imageId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -321,10 +371,12 @@ export class StudioEntitiesService {
         entityType,
         entityId,
         imageId,
+        authorization,
     }: {
         entityType: string,
         entityId: string,
         imageId: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_list_AssetImageCandidateRead__> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -333,6 +385,9 @@ export class StudioEntitiesService {
                 'entity_type': entityType,
                 'entity_id': entityId,
                 'image_id': imageId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -349,11 +404,13 @@ export class StudioEntitiesService {
         entityId,
         imageId,
         requestBody,
+        authorization,
     }: {
         entityType: string,
         entityId: string,
         imageId: number,
         requestBody: AssetImageCandidateAttachRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_list_AssetImageCandidateRead__> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -362,6 +419,9 @@ export class StudioEntitiesService {
                 'entity_type': entityType,
                 'entity_id': entityId,
                 'image_id': imageId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -380,11 +440,13 @@ export class StudioEntitiesService {
         entityId,
         imageId,
         candidateId,
+        authorization,
     }: {
         entityType: string,
         entityId: string,
         imageId: number,
         candidateId: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_AssetImageCandidateRead_> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -394,6 +456,9 @@ export class StudioEntitiesService {
                 'entity_id': entityId,
                 'image_id': imageId,
                 'candidate_id': candidateId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -410,11 +475,13 @@ export class StudioEntitiesService {
         entityId,
         imageId,
         candidateId,
+        authorization,
     }: {
         entityType: string,
         entityId: string,
         imageId: number,
         candidateId: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
@@ -424,6 +491,9 @@ export class StudioEntitiesService {
                 'entity_id': entityId,
                 'image_id': imageId,
                 'candidate_id': candidateId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
