@@ -79,9 +79,5 @@ class Settings(BaseSettings):
             password_part = f":{self.redis_password}@" if self.redis_password else ""
             self.celery_broker_url = f"redis://{password_part}{self.redis_host}:{self.redis_port}/{self.redis_db}"
 
-        # Validate initial admin password for bootstrap
-        if not self.initial_admin_password or not str(self.initial_admin_password).strip():
-            raise ValueError("INITIAL_ADMIN_PASSWORD is required for admin bootstrap")
-
 
 settings = Settings()
