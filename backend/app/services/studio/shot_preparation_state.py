@@ -225,6 +225,14 @@ async def replace_asset_for_preparation(
             await db.execute(
                 delete(ShotCharacterLink).where(ShotCharacterLink.id == old_link.id)
             )
+        # 级联忽略旧角色的候选：与 scene/prop/costume 分支保持一致，
+        # 避免候选仍以 'linked' 状态出现在 overview 中
+        await mark_all_linked_ignored_for_entity(
+            db,
+            shot_id=shot_id,
+            candidate_type="character",
+            entity_id=old_entity_id,
+        )
         # 复用旧 index 插入新角色关联，保持位置稳定
         await upsert_shot_character_link(
             db,

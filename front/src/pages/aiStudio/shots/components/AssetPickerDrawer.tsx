@@ -90,8 +90,7 @@ export function AssetPickerDrawer({
           q: q || null,
           page: p,
           pageSize: PAGE_SIZE,
-          // 角色类型按项目过滤
-          projectId: entityType === 'character' ? projectId : null,
+          projectId: null,
         })
         const data = res.data
         if (!data) return

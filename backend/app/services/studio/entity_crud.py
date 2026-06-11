@@ -172,7 +172,9 @@ async def create_entity(
     await db.flush()
     await db.refresh(obj)
 
-    if entity_type_norm in {"actor", "scene", "prop", "costume"}:
+    # character 也创建正面视角图片槽位，与 actor/scene/prop/costume 保持一致；
+    # view_count 在角色上未使用，固定创建 1 个正面槽位即可
+    if entity_type_norm in {"actor", "character", "scene", "prop", "costume"}:
         count = int(getattr(obj, "view_count", 1) or 1)
         angles = list(DEFAULT_VIEW_ANGLES[: min(max(count, 0), len(DEFAULT_VIEW_ANGLES))])
         for angle in angles:

@@ -149,13 +149,16 @@ def _rank_name_match(candidate_name: str, option_name: str) -> tuple[int, float]
 
 
 def _pick_unique_match(candidate_name: str, options: list[_AssetOption]) -> _AssetOption | None:
-    """只返回同类型、高置信且唯一的资产匹配，避免自动误关联。"""
+    """只返回同类型、高置信且唯一的资产匹配，避免自动误关联。
+
+    has_image 过滤已移至 _load_asset_options：非角色类型仍使用 INNER JOIN，
+    options 中只有有图片的资产；角色类型改为 OUTER JOIN，无图片角色也可参与匹配。
+    """
 
     scored = sorted(
         (
             (*_rank_name_match(candidate_name, option.name), option)
             for option in options
-            if option.has_image
         ),
         key=lambda item: (item[0], item[1]),
         reverse=True,
@@ -177,12 +180,20 @@ def _pick_unique_match(candidate_name: str, options: list[_AssetOption]) -> _Ass
 
 
 def _load_asset_options(db: Session, *, project_id: str) -> dict[ShotCandidateType, list[_AssetOption]]:
-    """加载每种候选类型的可匹配资产，并标记是否已有可用 file_id 图片。"""
+    """加载每种候选类型的可匹配资产，并标记是否已有可用 file_id 图片。
+
+    角色类型使用 LEFT JOIN：项目内所有角色均纳入匹配候选（含无图片角色），
+    has_image=False 的角色在第一轮匹配成功后会额外调度图片生成任务。
+    场景/道具/服装仍使用 INNER JOIN，只匹配已有图片的资产。
+    """
 
     character_rows = db.execute(
-        select(Character.id, Character.name, func.count(CharacterImage.id))
-        .join(CharacterImage, CharacterImage.character_id == Character.id)
-        .where(Character.project_id == project_id, CharacterImage.file_id.is_not(None))
+        select(Character.id, Character.name, func.count(CharacterImage.id).label("img_count"))
+        .outerjoin(
+            CharacterImage,
+            (CharacterImage.character_id == Character.id) & CharacterImage.file_id.is_not(None),
+        )
+        .where(Character.project_id == project_id)
         .group_by(Character.id, Character.name)
     ).all()
     scene_rows = db.execute(
@@ -546,6 +557,8 @@ def _create_entity_sync(
     if candidate_type == ShotCandidateType.character:
         db.add(Character(id=entity_id, project_id=project_id, name=name, description=description, style=style, visual_style=visual_style))
         db.flush()
+        db.add(CharacterImage(character_id=entity_id, view_angle=AssetViewAngle.front))
+        db.flush()
     elif candidate_type == ShotCandidateType.scene:
         db.add(Scene(id=entity_id, name=name, description=description, style=style, visual_style=visual_style))
         db.flush()
@@ -783,7 +796,8 @@ def auto_prepare_chapter_shots_sync(
 ) -> AutoPreparationSummary:
     """批量自动准备章节镜头的资产与对白候选。
 
-    - 第一轮：将有高置信唯一匹配且已有 file_id 图片的候选与现有资产关联。
+    - 第一轮：将高置信唯一匹配的现有资产（含无图片角色）与候选关联；
+      无图片的角色额外调度图片生成任务，与第二轮行为对齐。
     - 第二轮：对仍为 pending 的候选，自动创建资产实体并调度图片生成任务；
       创作者只需在资产管理页审核生成结果，无需手动逐一补图。
     - 对白候选全部自动接受。
@@ -796,6 +810,11 @@ def auto_prepare_chapter_shots_sync(
     if not shot_ids:
         return summary
 
+    # 提前加载项目风格，供两轮中图片生成任务的提示词拼接
+    project = db.get(Project, project_id)
+    proj_style = project.style if project is not None else ProjectStyle.real_people_city
+    proj_visual_style = project.visual_style if project is not None else ProjectVisualStyle.live_action
+
     options_by_type = _load_asset_options(db, project_id=project_id)
     candidates = list(
         db.execute(
@@ -805,7 +824,8 @@ def auto_prepare_chapter_shots_sync(
         ).scalars().all()
     )
 
-    # 第一轮：与已有图片的资产高置信匹配
+    # 第一轮：与现有资产高置信匹配并关联；角色类型现在也包含无图片项目角色，
+    # 匹配成功但无图片时同步调度图片生成任务（与第二轮对现有角色的处理方式对齐）
     for candidate in candidates:
         if candidate.candidate_status != ShotCandidateStatus.pending:
             continue
@@ -825,6 +845,31 @@ def auto_prepare_chapter_shots_sync(
         )
         summary.linked_asset_count += 1
 
+        # 角色无图片时调度图片生成，避免显示"暂无图片"
+        if candidate_type == ShotCandidateType.character and not match.has_image:
+            description = str((candidate.payload or {}).get("description") or "")
+            _vs = getattr(proj_visual_style, "value", proj_visual_style)
+            _st = getattr(proj_style, "value", proj_style)
+            prompt = f"视觉风格：{_vs}、视频风格：{_st}  " + (description or str(candidate.candidate_name))
+            try:
+                slot_info = _get_or_create_image_slot_sync(
+                    db, candidate_type=candidate_type, entity_id=match.entity_id
+                )
+                if slot_info is not None:
+                    relation_type, relation_entity_id = slot_info
+                    run_args = _load_image_run_args_sync(
+                        db,
+                        relation_type=relation_type,
+                        relation_entity_id=relation_entity_id,
+                        prompt=prompt,
+                    )
+                    if run_args is not None:
+                        _schedule_image_task_sync(db, run_args=run_args, summary=summary)
+            except Exception:  # noqa: BLE001
+                _logger.warning(
+                    "auto_prep: 第一轮角色图片调度失败，候选 '%s'", candidate.candidate_name
+                )
+
     # 第一轮结束后统一 flush：将所有已写入 session 的 ProjectPropLink / ProjectSceneLink
     # 等关联对象持久化到 DB，保证第二轮的幂等 SELECT 能读到它们。
     # 背景：sync session 配置了 autoflush=False，若不在此显式 flush，第二轮
@@ -834,9 +879,7 @@ def auto_prepare_chapter_shots_sync(
     db.flush()
 
     # 第二轮：自动创建资产并调度图片生成（服装不参与自动建档，由创作者手动管理）
-    project = db.get(Project, project_id)
-    proj_style = project.style if project is not None else ProjectStyle.real_people_city
-    proj_visual_style = project.visual_style if project is not None else ProjectVisualStyle.live_action
+    # proj_style / proj_visual_style 已在第一轮前加载，此处直接复用
 
     # 在第二轮开始前收集所有仍为 pending 的候选名，按类型分组。
     # 传给 _auto_create_and_link_sync 用于批次内重叠检测：防止 "青荔枝" 因早于
