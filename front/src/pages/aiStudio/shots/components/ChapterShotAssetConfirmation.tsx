@@ -36,6 +36,8 @@ type ChapterShotAssetConfirmationProps = {
   onToggleExpanded: (kind: AssetKind) => void
   onIgnoreCandidate: (asset: AssetVM) => void
   onHandleNewAsset: (asset: AssetVM) => void
+  /** 点击已关联资产下方"新建"按钮时触发，直接打开资产新建页并带入提取信息 */
+  onNewLinkedAsset: (asset: AssetVM) => void
   /** 点击"替换"按钮时触发，传入待替换的资产 */
   onReplaceAsset: (asset: AssetVM) => void
   /** 点击"忽略"按钮确认后触发，解除该资产的关联 */
@@ -63,6 +65,7 @@ export function ChapterShotAssetConfirmation({
   onToggleExpanded,
   onIgnoreCandidate,
   onHandleNewAsset,
+  onNewLinkedAsset,
   onReplaceAsset,
   onUnlinkAsset,
   unlinkingIds,
@@ -104,12 +107,16 @@ export function ChapterShotAssetConfirmation({
     const isLinked = asset.status === 'linked' || asset.status === 'generating'
     const unlinkBusy = isLinked && !!asset.id && !!unlinkingIds[asset.id]
 
-    // "忽略"按钮（解除关联）：显示在图片正下方，仅已关联卡片有
+    // 图片下方操作栏：仅已关联卡片有；生成中显示状态文字，已关联则提供"新建"快捷入口
     const meta = isLinked && asset.id ? (
       <div className="flex items-center justify-between gap-1 mt-1">
-        <div className="text-[11px] text-gray-400 truncate">
-          {asset.status === 'generating' ? '图片生成中…' : '已关联'}
-        </div>
+        {asset.status === 'generating' ? (
+          <div className="text-[11px] text-gray-400 truncate">图片生成中…</div>
+        ) : (
+          <Button size="small" className="!text-[11px]" onClick={() => onNewLinkedAsset(asset)}>
+            新建
+          </Button>
+        )}
         <div className="flex items-center gap-1 shrink-0">
           <Popconfirm
             title="确认忽略该资产关联？"

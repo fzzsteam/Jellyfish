@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -169,6 +169,14 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
 }: AssetEditPageBaseProps<TAsset, TImage>) {
   const taskCopy = TASK_COPY.smartDetect
   const location = useLocation()
+  // 从 URL 读取一次性预填名称（由分镜准备"新建"按钮传入）。
+  // 用 window.location.search 直接读取（而非 useSearchParams），避免清除时触发 React Router 重渲染链。
+  const prefillNameRef = useRef<string | null>(
+    new URLSearchParams(window.location.search).get('prefillName')?.trim() || null,
+  )
+  // onNavigate 来自父组件内联函数，每次渲染都是新引用；用 ref 稳定化以避免 loadData 被重建重跑。
+  const onNavigateRef = useRef(onNavigate)
+  onNavigateRef.current = onNavigate
   const [loading, setLoading] = useState(true)
   const [asset, setAsset] = useState<TAsset | null>(null)
   const [images, setImages] = useState<TImage[]>([])
@@ -290,12 +298,21 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       const nextAsset = await getAsset(assetId)
       if (!nextAsset) {
         message.error(`未找到${assetDisplayName}资产`)
-        onNavigate(backTo, true)
+        onNavigateRef.current(backTo, true)
         return
       }
 
       setAsset(nextAsset)
-      setFormName(nextAsset.name)
+      const prefillName = prefillNameRef.current
+      prefillNameRef.current = null  // 消费一次后清空，防止 reload 时重复覆盖
+      setFormName(prefillName ?? nextAsset.name)
+      // prefillName 已消费，用 replaceState 清除 URL 参数。
+      // 不用 setSearchParams 是因为它会触发父组件重渲染，导致 loadData 被重建重跑，覆盖掉刚设置的预填名称。
+      if (prefillName) {
+        const cleanUrl = new URL(window.location.href)
+        cleanUrl.searchParams.delete('prefillName')
+        window.history.replaceState(null, '', cleanUrl.toString())
+      }
       setFormDesc(nextAsset.description ?? '')
       setFormTags((nextAsset.tags ?? []).join(', '))
       const targetCount = clampViewCount(nextAsset.view_count)
@@ -306,7 +323,8 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     } finally {
       setLoading(false)
     }
-  }, [assetId, assetDisplayName, backTo, ensureImageSlots, getAsset, onNavigate])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assetId, assetDisplayName, backTo, ensureImageSlots, getAsset])
 
   useEffect(() => {
     void loadData()

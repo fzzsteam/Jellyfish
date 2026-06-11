@@ -1126,6 +1126,25 @@ export function ChapterShotEditPage() {
     [openLinkingModal, chapterId, projectId, projectStyle, projectVisualStyle, shotId],
   )
 
+  /**
+   * 点击已关联资产卡片下方的"新建"按钮：
+   * 直接在新标签页打开该已关联资产的编辑页，供用户为其新建/生成图片。
+   * 不创建新草稿资产，图片会挂在原资产（如"合江楼内室"）上，不产生多余的关联记录。
+   */
+  const handleNewLinkedAsset = useCallback(
+    (asset: AssetVM) => {
+      if (!asset.id || !projectId) return
+      pendingExternalAssetCreateRef.current = true
+      const editUrl =
+        asset.kind === 'prop' ? `/assets/props/${encodeURIComponent(asset.id)}/edit`
+        : asset.kind === 'costume' ? `/assets/costumes/${encodeURIComponent(asset.id)}/edit`
+        : asset.kind === 'actor' ? `/projects/${encodeURIComponent(projectId)}/roles/${encodeURIComponent(asset.id)}/edit`
+        : `/assets/scenes/${encodeURIComponent(asset.id)}/edit`
+      window.open(editUrl, '_blank', 'noopener,noreferrer')
+    },
+    [projectId],
+  )
+
   const ignoreCandidate = useCallback(
     async (asset: AssetVM) => {
       if (!asset.candidateId) return
@@ -1583,6 +1602,7 @@ export function ChapterShotEditPage() {
             onToggleExpanded={toggleExpanded}
             onIgnoreCandidate={(asset) => void ignoreCandidate(asset)}
             onHandleNewAsset={(asset) => void handleNewAsset(asset)}
+            onNewLinkedAsset={handleNewLinkedAsset}
             onReplaceAsset={openReplaceDrawer}
             onUnlinkAsset={(asset) => void doUnlinkAsset(asset)}
             unlinkingIds={unlinkingIds}
