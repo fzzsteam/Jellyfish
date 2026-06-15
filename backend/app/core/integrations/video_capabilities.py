@@ -23,7 +23,7 @@ class VideoModelCapability:
     """供应商/模型能力约束。"""
 
     supports_seed: bool = True
-    supports_watermark: bool = True
+    supports_watermark: bool = False
     allowed_ratios: set[str] | None = None
     default_ratio: str | None = None
     ratio_to_size_mapping: dict[str, str] | None = None
