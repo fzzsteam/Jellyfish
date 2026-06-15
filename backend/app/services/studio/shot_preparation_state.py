@@ -99,6 +99,7 @@ async def link_existing_asset_for_preparation(
     if entity_type_value == ShotPreparationLinkEntityType.character:
         links = await list_shot_character_links(db, shot_id=shot_id)
         max_index = max((int(link.index or 0) for link in links), default=-1)
+        # 追加语义：即使 index 因竞态/可见性算重了，也只顺延而不删除已关联的其它角色
         await upsert_shot_character_link(
             db,
             body=ShotCharacterLinkCreate(
@@ -106,6 +107,7 @@ async def link_existing_asset_for_preparation(
                 character_id=linked_entity_id,
                 index=max_index + 1,
             ),
+            reassign_index_on_conflict=True,
         )
     else:
         await create_project_asset_link(
@@ -220,8 +222,9 @@ async def replace_asset_for_preparation(
             ShotCharacterLink.character_id == old_entity_id,
         )
         old_link = (await db.execute(stmt)).scalars().one_or_none()
-        old_index = int(old_link.index or 0) if old_link is not None else 0
+        old_index: int | None = None
         if old_link is not None:
+            old_index = int(old_link.index or 0)
             await db.execute(
                 delete(ShotCharacterLink).where(ShotCharacterLink.id == old_link.id)
             )
@@ -233,15 +236,30 @@ async def replace_asset_for_preparation(
             candidate_type="character",
             entity_id=old_entity_id,
         )
-        # 复用旧 index 插入新角色关联，保持位置稳定
-        await upsert_shot_character_link(
-            db,
-            body=ShotCharacterLinkCreate(
-                shot_id=shot_id,
-                character_id=new_entity_id,
-                index=old_index,
-            ),
-        )
+        if old_index is not None:
+            # 有实际 ShotCharacterLink：旧 index 已释放，复用该槽位（重排语义）
+            await upsert_shot_character_link(
+                db,
+                body=ShotCharacterLinkCreate(
+                    shot_id=shot_id,
+                    character_id=new_entity_id,
+                    index=old_index,
+                ),
+            )
+        else:
+            # 旧角色仅通过候选 linked_entity_id 显示为"已关联"，无实际 ShotCharacterLink；
+            # 追加语义插入，避免以 index=0 踢走其他已关联角色导致它们退回"新提取"
+            existing_links = await list_shot_character_links(db, shot_id=shot_id)
+            safe_index = max((int(link.index or 0) for link in existing_links), default=-1) + 1
+            await upsert_shot_character_link(
+                db,
+                body=ShotCharacterLinkCreate(
+                    shot_id=shot_id,
+                    character_id=new_entity_id,
+                    index=safe_index,
+                ),
+                reassign_index_on_conflict=True,
+            )
     else:
         # 删除旧资产关联：不回退候选为 pending，而是级联标记为 ignored
         # 替换操作表达"不再需要旧资产"，旧候选不应重新出现在待确认区

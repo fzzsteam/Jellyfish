@@ -202,8 +202,10 @@ async def create_entity(
             .limit(1)
         )
         max_index = (await db.execute(existing_indexes_stmt)).scalars().first()
+        # 追加语义：新建角色挂到镜头时只顺延 index，不踢掉镜头内已关联的其它角色
         await upsert_shot_character_link(
             db,
+            reassign_index_on_conflict=True,
             body=ShotCharacterLinkCreate(
                 shot_id=link_shot_id,
                 character_id=obj.id,

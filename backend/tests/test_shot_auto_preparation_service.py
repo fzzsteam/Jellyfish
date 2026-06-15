@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy import create_engine
 
@@ -511,6 +511,59 @@ def test_auto_prepare_links_character_to_matching_actor_and_project_actor_link()
                 ProjectActorLink.actor_id == "actor-green",
             )
         ) is not None
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_auto_prepare_links_to_existing_cross_project_character() -> None:
+    """角色全局共享：资产库已有同名角色（归属其它项目）时应直接关联，不新建重复角色。"""
+    db, engine = _build_session()
+    try:
+        _seed_project_graph(db)
+        # 资产库里已存在带图角色"苏东坡"，但归属另一个项目 project-2
+        db.add_all(
+            [
+                Project(
+                    id="project-2",
+                    name="其它项目",
+                    style=ProjectStyle.guoman,
+                    visual_style=ProjectVisualStyle.anime,
+                ),
+                FileItem(id="file-sdp", type=FileType.image, name="sdp.png", storage_key="files/sdp.png"),
+                Character(
+                    id="char-sudongpo",
+                    project_id="project-2",
+                    name="苏东坡",
+                    description="",
+                    style=ProjectStyle.guoman,
+                    visual_style=ProjectVisualStyle.anime,
+                ),
+                CharacterImage(character_id="char-sudongpo", file_id="file-sdp"),
+                ShotExtractedCandidate(
+                    shot_id="shot-1",
+                    candidate_type=ShotCandidateType.character,
+                    candidate_name="苏东坡",
+                ),
+            ]
+        )
+        db.flush()
+        before_count = db.scalar(select(func.count()).select_from(Character))
+
+        auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
+
+        candidate = db.scalar(
+            select(ShotExtractedCandidate).where(ShotExtractedCandidate.shot_id == "shot-1")
+        )
+        assert candidate is not None
+        assert candidate.candidate_status == ShotCandidateStatus.linked
+        # 关联到资产库中已有的跨项目角色，而非新建
+        assert candidate.linked_entity_id == "char-sudongpo"
+        after_count = db.scalar(select(func.count()).select_from(Character))
+        assert after_count == before_count
+        link = db.scalar(select(ShotCharacterLink).where(ShotCharacterLink.shot_id == "shot-1"))
+        assert link is not None
+        assert link.character_id == "char-sudongpo"
     finally:
         db.close()
         engine.dispose()

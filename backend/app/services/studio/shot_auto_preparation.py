@@ -179,11 +179,31 @@ def _pick_unique_match(candidate_name: str, options: list[_AssetOption]) -> _Ass
     return top_option
 
 
-def _load_asset_options(db: Session, *, project_id: str) -> dict[ShotCandidateType, list[_AssetOption]]:
+def _dedupe_named_options(options: list[_AssetOption]) -> list[_AssetOption]:
+    """按归一化名去重：同名多实体（如跨项目重复角色）合并为单一代表。
+
+    角色已改为全局共享，资产库可能存在历史重复同名角色（如多个"苏东坡"）。
+    若不去重，_pick_unique_match 会因多个等分匹配判定为歧义而放弃关联，
+    反而漏掉本应自动关联的资产。去重时优先保留有图片的实体作为代表。
+    """
+
+    by_name: dict[str, _AssetOption] = {}
+    for opt in options:
+        key = _normalize_name(opt.name)
+        if not key:
+            continue
+        existing = by_name.get(key)
+        if existing is None or (opt.has_image and not existing.has_image):
+            by_name[key] = opt
+    return list(by_name.values())
+
+
+def _load_asset_options(db: Session) -> dict[ShotCandidateType, list[_AssetOption]]:
     """加载每种候选类型的可匹配资产，并标记是否已有可用 file_id 图片。
 
-    角色类型使用 LEFT JOIN：项目内所有角色均纳入匹配候选（含无图片角色），
-    has_image=False 的角色在第一轮匹配成功后会额外调度图片生成任务。
+    角色类型使用 LEFT JOIN 且全局加载（不限项目）：角色为全局共享资产，
+    分镜可关联资产库中任意角色；含无图片角色，has_image=False 的角色在
+    第一轮匹配成功后会额外调度图片生成任务。同名角色会按归一化名去重。
     场景/道具/服装仍使用 INNER JOIN，只匹配已有图片的资产。
     """
 
@@ -193,7 +213,6 @@ def _load_asset_options(db: Session, *, project_id: str) -> dict[ShotCandidateTy
             CharacterImage,
             (CharacterImage.character_id == Character.id) & CharacterImage.file_id.is_not(None),
         )
-        .where(Character.project_id == project_id)
         .group_by(Character.id, Character.name)
     ).all()
     scene_rows = db.execute(
@@ -215,10 +234,10 @@ def _load_asset_options(db: Session, *, project_id: str) -> dict[ShotCandidateTy
         .group_by(Costume.id, Costume.name)
     ).all()
     return {
-        ShotCandidateType.character: [
+        ShotCandidateType.character: _dedupe_named_options([
             _AssetOption(entity_id=str(row[0]), name=str(row[1]), has_image=bool(row[2]))
             for row in character_rows
-        ],
+        ]),
         ShotCandidateType.scene: [
             _AssetOption(entity_id=str(row[0]), name=str(row[1]), has_image=bool(row[2]))
             for row in scene_rows
@@ -474,8 +493,18 @@ def _find_entity_by_name_sync(
         return None
 
     if candidate_type == ShotCandidateType.character:
-        rows = db.execute(select(Character.id, Character.name).where(Character.project_id == project_id)).all()
-    elif candidate_type == ShotCandidateType.scene:
+        # 角色全局共享：跨项目查找同名角色；同名多个时优先归属当前项目者，
+        # 否则复用任意一个全局同名角色，避免重复新建。
+        rows = db.execute(select(Character.id, Character.name, Character.project_id)).all()
+        matches = [(str(r[0]), str(r[2])) for r in rows if _normalize_name(str(r[1])) == norm]
+        if not matches:
+            return None
+        for cid, pid in matches:
+            if pid == project_id:
+                return cid
+        return matches[0][0]
+
+    if candidate_type == ShotCandidateType.scene:
         rows = db.execute(select(Scene.id, Scene.name)).all()
     elif candidate_type == ShotCandidateType.prop:
         rows = db.execute(select(Prop.id, Prop.name)).all()
@@ -737,7 +766,8 @@ def _auto_create_and_link_sync(
         # If so, the candidate is likely an abbreviated reference to an existing entity,
         # not a genuinely new asset — leave it pending for manual resolution.
         if candidate_type == ShotCandidateType.character:
-            existing_names = [str(r[0]) for r in db.execute(select(Character.name).where(Character.project_id == project_id)).all()]
+            # 角色全局共享：重叠检测纳入全部角色名（跨项目），避免新建与库内已有角色重名/近似
+            existing_names = [str(r[0]) for r in db.execute(select(Character.name)).all()]
         elif candidate_type == ShotCandidateType.scene:
             existing_names = [str(r[0]) for r in db.execute(select(Scene.name)).all()]
         elif candidate_type == ShotCandidateType.prop:
@@ -815,7 +845,7 @@ def auto_prepare_chapter_shots_sync(
     proj_style = project.style if project is not None else ProjectStyle.real_people_city
     proj_visual_style = project.visual_style if project is not None else ProjectVisualStyle.live_action
 
-    options_by_type = _load_asset_options(db, project_id=project_id)
+    options_by_type = _load_asset_options(db)
     candidates = list(
         db.execute(
             select(ShotExtractedCandidate)
