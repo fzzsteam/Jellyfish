@@ -4381,25 +4381,25 @@ function Inspector(props: {
                             />
                           </div>
                           <div>
-                            <div className="text-gray-500 text-xs mb-1">时长（1–30s，整数）</div>
+                            <div className="text-gray-500 text-xs mb-1">时长（3–30s，整数）</div>
                             <div className="flex items-center gap-2">
                               <Slider
-                                min={1}
+                                min={3}
                                 max={30}
                                 step={1}
-                                value={Math.max(1, Math.min(30, Math.round(shotDetail.duration ?? 1)))}
+                                value={Math.max(3, Math.min(30, Math.round(shotDetail.duration ?? 3)))}
                                 style={{ flex: 1 }}
                                 onChange={(v) => void onPatchShotDetailImmediate({ duration: Math.round(Number(v)) })}
                                 disabled={cameraUpdating}
                               />
                               <Input
                                 size="small"
-                                value={`${Math.max(1, Math.min(30, Math.round(shotDetail.duration ?? 1)))}`}
+                                value={`${Math.max(3, Math.min(30, Math.round(shotDetail.duration ?? 3)))}`}
                                 style={{ width: 72 }}
                                 onChange={(e) => {
                                   const raw = Number(e.target.value)
                                   if (!Number.isFinite(raw)) return
-                                  const n = Math.max(1, Math.min(30, Math.round(raw)))
+                                  const n = Math.max(3, Math.min(30, Math.round(raw)))
                                   void onPatchShotDetailImmediate({ duration: n })
                                 }}
                                 disabled={cameraUpdating}
