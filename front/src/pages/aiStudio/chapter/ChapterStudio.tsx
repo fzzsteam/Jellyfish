@@ -56,6 +56,7 @@ import {
   LlmService,
   StudioChaptersService,
   StudioEntitiesService,
+  StudioFilesService,
   StudioImageTasksService,
   StudioProjectsService,
   StudioShotCharacterLinksService,
@@ -165,11 +166,13 @@ function GeneratedVideoGrid({
   videos,
   selectedVideosByShot,
   onSelectVideo,
+  onDeleteVideo,
 }: {
   selectedShot: StudioShot | null
   videos: GeneratedVideoItem[]
   selectedVideosByShot: Record<string, string>
   onSelectVideo: (shotId: string, fileId: string) => void
+  onDeleteVideo: (item: GeneratedVideoItem) => void
 }) {
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({})
 
@@ -236,6 +239,14 @@ function GeneratedVideoGrid({
                   size="small"
                   icon={<DownloadOutlined />}
                   onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
+                />
+              </Tooltip>
+              <Tooltip title="删除视频">
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => onDeleteVideo(item)}
                 />
               </Tooltip>
             </Space>
@@ -978,6 +989,40 @@ const ChapterStudio: React.FC = () => {
       canceled = true
     }
   }, [selectedShot?.id, selectedShot?.generated_video_file_id, videoResultsRefreshKey])
+
+  const handleDeleteVideo = useCallback(
+    (item: GeneratedVideoItem) => {
+      Modal.confirm({
+        title: '删除视频',
+        content: '确认删除该视频？此操作不可撤销。',
+        okText: '删除',
+        okButtonProps: { danger: true },
+        cancelText: '取消',
+        onOk: async () => {
+          try {
+            if (item.linkId !== -1) {
+              await FilmService.deleteTaskLinkApiV1FilmTaskLinksLinkIdDelete({ linkId: item.linkId })
+            }
+            await StudioFilesService.deleteFileApiApiV1StudioFilesFileIdDelete({ fileId: item.fileId })
+            // 若被删除的视频正好是当前已选中项，清除选中状态
+            if (selectedShot && selectedVideosByShot[selectedShot.id] === item.fileId) {
+              setSelectedVideosByShot((prev) => {
+                const next = { ...prev }
+                delete next[selectedShot.id]
+                return next
+              })
+            }
+            setVideoResultsRefreshKey((k) => k + 1)
+            message.success('视频已删除')
+          } catch {
+            message.error('删除失败，请稍后重试')
+          }
+        },
+      })
+    },
+    [selectedShot, selectedVideosByShot],
+  )
+
   const refreshPromptAssetLinks = async (shotId: string) => {
     const [scenes, props, costumes] = await Promise.all([
       StudioShotLinksService.listProjectEntityLinksApiV1StudioShotLinksEntityTypeGet({
@@ -2113,8 +2158,6 @@ const ChapterStudio: React.FC = () => {
                   { label: `待确认 ${shotFilterCounts.pendingConfirm}`, value: 'pendingConfirm' },
                   { label: `生成中 ${shotFilterCounts.generating}`, value: 'generating' },
                   { label: `已就绪 ${shotFilterCounts.ready}`, value: 'ready' },
-                  { label: `隐藏 ${shotFilterCounts.hidden}`, value: 'hidden' },
-                  { label: `有问题 ${shotFilterCounts.problem}`, value: 'problem' },
                 ]}
               />
             </div>
@@ -2360,6 +2403,7 @@ const ChapterStudio: React.FC = () => {
                     return { ...prev, [shotId]: fileId }
                   })
                 }
+                onDeleteVideo={handleDeleteVideo}
               />
             </div>
           </Card>
