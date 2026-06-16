@@ -796,28 +796,187 @@ git commit -m "feat: add image model picker to keyframe generation panel"
 
 ---
 
-## Task 8：前端 —— ChapterStudio 集成视频模型选择
+## Task 8：前端 —— ChapterStudio 视频生成面板改造
+
+**背景变更（相对初始计划）：**
+- "参考"一栏（关键帧类型选择器，4942–4956 行）**整体删除**，视频生成固定走 `text_only` 文生视频模式
+- "参数"一栏（mock ControlNet/Slider，4958–4978 行）**整体删除**
+- "生成"一栏（4981–4991 行）**新增"选择模型"按钮**：点击弹出 Popover，列出所有已配置的视频模型供选择
+- `noUnusedLocals: true` 严格开启，需同步删除仅服务于已删 UI 的状态声明
 
 **Files:**
 - Modify: `front/src/pages/aiStudio/chapter/ChapterStudio.tsx`
 
-本任务处理**视频生成**的模型选择集成，替换现有的 mock Select。
+---
 
 - [ ] **Step 8.1：添加视频模型 hook 和状态**
 
 在 Task 7.2 添加的状态之后，紧接着追加：
 
 ```tsx
-// 视频模型选择
+// 视频模型选择（文生视频）
 const { models: videoModels, loading: videoModelsLoading } = useGenerationModels('video')
 const [selectedVideoModelId, setSelectedVideoModelId] = useState<string | null>(null)
+const [videoModelPickerOpen, setVideoModelPickerOpen] = useState(false)
 ```
 
-- [ ] **Step 8.2：替换视频参数面板中的 mock Select**
+---
 
-找到 ChapterStudio.tsx 约第 4958-4978 行的参数面板：
+- [ ] **Step 8.2：删除"参考"相关状态声明和辅助函数**
+
+以下状态/函数全部由"参考"UI 驱动，删除后避免 `noUnusedLocals` 报错。
+
+**删除 2712–2714 行的三行声明**（状态声明区）：
 
 ```tsx
+  const [refImageType, setRefImageType] = useState<string | undefined>(undefined)
+  const [refFrameTypeSelectLoading, setRefFrameTypeSelectLoading] = useState(false)
+  const [useBoneDepth, setUseBoneDepth] = useState(false)
+```
+
+**删除 2955 行的单行声明**：
+
+```tsx
+  const showGenRefParams = false
+```
+
+**删除 3813–3824 行 `handleRefFrameTypeDropdownVisibleChange` 函数**：
+
+```tsx
+  const handleRefFrameTypeDropdownVisibleChange = useCallback(
+    async (open: boolean) => {
+      if (!open || !onRefreshShotFrameImages) return
+      setRefFrameTypeSelectLoading(true)
+      try {
+        await onRefreshShotFrameImages()
+      } finally {
+        setRefFrameTypeSelectLoading(false)
+      }
+    },
+    [onRefreshShotFrameImages],
+  )
+```
+
+**删除 3826–3834 行 `refFrameTypeOptions` useMemo**：
+
+```tsx
+  const refFrameTypeOptions = useMemo(() => {
+    const kinds = new Set((frameImages ?? []).map((x) => x.frame_type))
+    const opts: Array<{ value: string; label: string }> = []
+    if (kinds.has('first')) opts.push({ value: 'first', label: '首帧' })
+    if (kinds.has('last')) opts.push({ value: 'last', label: '尾帧' })
+    if (kinds.has('first') && kinds.has('last')) opts.push({ value: 'first_last', label: '首尾帧' })
+    if (kinds.has('key')) opts.push({ value: 'key', label: '关键帧' })
+    return opts
+  }, [frameImages])
+```
+
+**删除 3836–3839 行的 useEffect**（依赖 refFrameTypeOptions/setRefImageType）：
+
+```tsx
+  useEffect(() => {
+    const allowed = new Set(refFrameTypeOptions.map((x) => x.value))
+    setRefImageType((prev) => (prev && allowed.has(prev) ? prev : undefined))
+  }, [refFrameTypeOptions])
+```
+
+**删除 3841–3857 行 `buildVideoRefSelection` 函数**：
+
+```tsx
+  const buildVideoRefSelection = () => {
+    const first = frameImages.find((x) => x.frame_type === 'first')?.file_id ?? null
+    const last = frameImages.find((x) => x.frame_type === 'last')?.file_id ?? null
+    const key = frameImages.find((x) => x.frame_type === 'key')?.file_id ?? null
+
+    const s = refImageType
+    if (s === 'first_last') {
+      return {
+        referenceMode: 'first_last' as const,
+        images: [first, last].filter((x): x is string => Boolean(x)),
+      }
+    }
+    if (s === 'key') return { referenceMode: 'key' as const, images: key ? [key] : [] }
+    if (s === 'first') return { referenceMode: 'first' as const, images: first ? [first] : [] }
+    if (s === 'last') return { referenceMode: 'last' as const, images: last ? [last] : [] }
+    return { referenceMode: 'text_only' as const, images: [] }
+  }
+```
+
+---
+
+- [ ] **Step 8.3：内联 `buildVideoRefSelection()` 调用改为 text_only**
+
+找到 `openVideoPromptPreview` 函数（约 3859 行），将：
+
+```tsx
+    const { referenceMode, images } = buildVideoRefSelection()
+    const nextContext = { referenceMode, images }
+    videoPromptDraft.hydrate({
+      base: { prompt: '' },
+      context: nextContext,
+    })
+```
+
+替换为：
+
+```tsx
+    const nextContext = { referenceMode: 'text_only' as const, images: [] as string[] }
+    videoPromptDraft.hydrate({
+      base: { prompt: '' },
+      context: nextContext,
+    })
+```
+
+同一函数内 `referenceMode` 被另外引用的地方（约第 3882 行）：
+
+```tsx
+        videoPromptDraft.hydrate({
+          base: { prompt: derived.prompt },
+          context: {
+            referenceMode,
+            images: derived.images,
+          },
+          derived,
+        })
+```
+
+替换为：
+
+```tsx
+        videoPromptDraft.hydrate({
+          base: { prompt: derived.prompt },
+          context: {
+            referenceMode: 'text_only' as const,
+            images: derived.images,
+          },
+          derived,
+        })
+```
+
+---
+
+- [ ] **Step 8.4：删除 gen_ref tab 内的"参考"和"参数"UI 区块**
+
+找到 gen_ref tab 内容（约 4942–4978 行），删除以下两个 `cs-group` div：
+
+```tsx
+                  <div className="cs-group">
+                    <div className="cs-group-title">
+                      <LinkOutlined /> 参考
+                    </div>
+                    <Select
+                      allowClear
+                      placeholder="按已有关键帧类型选择"
+                      className="w-full"
+                      value={refImageType}
+                      onChange={(v) => setRefImageType(v === undefined || v === null ? undefined : String(v))}
+                      options={refFrameTypeOptions}
+                      loading={refFrameTypeSelectLoading}
+                      onDropdownVisibleChange={handleRefFrameTypeDropdownVisibleChange}
+                    />
+                  </div>
+
+                  {showGenRefParams && (
                     <div className="cs-group">
                       <div className="cs-group-title">
                         <ToolOutlined /> 参数
@@ -838,30 +997,124 @@ const [selectedVideoModelId, setSelectedVideoModelId] = useState<string | null>(
                         <Slider min={3} max={12} defaultValue={5} />
                       </Space>
                     </div>
+                  )}
+```
+
+---
+
+- [ ] **Step 8.5：在"生成"区块添加"选择模型"Popover 按钮**
+
+找到 gen_ref tab 内的"生成"cs-group（约 4981–4991 行）：
+
+```tsx
+                  <div className="cs-group">
+                    <div className="cs-group-title">
+                      <ThunderboltOutlined /> 生成
+                    </div>
+                    <Space wrap>
+                      <Button type="primary" icon={<VideoCameraOutlined />} loading={videoPromptPreviewSubmitting || videoTaskPolling} onClick={() => void openVideoPromptPreview()}>
+                        生成视频
+                      </Button>
+                      {videoTaskStatus ? <span className="text-xs text-gray-500">任务状态：{videoTaskStatus}</span> : null}
+                    </Space>
+                  </div>
 ```
 
 替换为：
 
 ```tsx
-                    <div className="cs-group">
-                      <div className="cs-group-title">
-                        <ToolOutlined /> 选择视频模型
-                      </div>
-                      <ModelPickerGrid
-                        models={videoModels}
-                        loading={videoModelsLoading}
-                        selectedId={selectedVideoModelId}
-                        onChange={setSelectedVideoModelId}
-                        hint="不选则使用系统默认视频模型"
-                      />
+                  <div className="cs-group">
+                    <div className="cs-group-title">
+                      <ThunderboltOutlined /> 生成
                     </div>
+                    <Space direction="vertical" className="w-full" size="small">
+                      {/* 选择模型 */}
+                      <Popover
+                        open={videoModelPickerOpen}
+                        onOpenChange={setVideoModelPickerOpen}
+                        trigger="click"
+                        placement="leftTop"
+                        title={<span className="text-sm font-medium">选择视频模型</span>}
+                        content={
+                          <div style={{ width: 240 }}>
+                            {videoModelsLoading ? (
+                              <div className="py-3 text-center text-xs text-gray-400">加载中…</div>
+                            ) : videoModels.length === 0 ? (
+                              <div className="py-3 text-center text-xs text-gray-400">
+                                未配置可用视频模型，请前往「模型管理」添加
+                              </div>
+                            ) : (
+                              <div className="space-y-1">
+                                {videoModels.map((m) => (
+                                  <div
+                                    key={m.id}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => {
+                                      setSelectedVideoModelId(m.id === selectedVideoModelId ? null : m.id)
+                                      setVideoModelPickerOpen(false)
+                                    }}
+                                    onKeyDown={(e) => {
+                                      if (e.key === 'Enter' || e.key === ' ') {
+                                        setSelectedVideoModelId(m.id === selectedVideoModelId ? null : m.id)
+                                        setVideoModelPickerOpen(false)
+                                      }
+                                    }}
+                                    className={[
+                                      'flex cursor-pointer items-start gap-2 rounded-lg px-3 py-2 transition-colors select-none',
+                                      selectedVideoModelId === m.id
+                                        ? 'bg-blue-50 ring-1 ring-blue-400'
+                                        : 'hover:bg-gray-50',
+                                    ].join(' ')}
+                                  >
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-sm font-medium text-gray-800 truncate">{m.name}</span>
+                                        {m.is_default && (
+                                          <Tag color="orange" className="text-[10px] leading-4 px-1 py-0 m-0 flex-shrink-0">默认</Tag>
+                                        )}
+                                      </div>
+                                      <div className="text-xs text-gray-400 mt-0.5">{m.provider_name}</div>
+                                    </div>
+                                    {selectedVideoModelId === m.id && (
+                                      <CheckOutlined className="text-blue-500 mt-0.5 flex-shrink-0" />
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        }
+                      >
+                        <Button size="small" loading={videoModelsLoading} className="w-full" style={{ textAlign: 'left' }}>
+                          <AppstoreOutlined />
+                          {selectedVideoModelId
+                            ? (videoModels.find((m) => m.id === selectedVideoModelId)?.name ?? '已选模型')
+                            : '选择模型（默认）'}
+                        </Button>
+                      </Popover>
+                      {/* 生成 */}
+                      <Button
+                        type="primary"
+                        block
+                        icon={<VideoCameraOutlined />}
+                        loading={videoPromptPreviewSubmitting || videoTaskPolling}
+                        onClick={() => void openVideoPromptPreview()}
+                      >
+                        生成视频
+                      </Button>
+                      {videoTaskStatus ? <span className="text-xs text-gray-500">任务状态：{videoTaskStatus}</span> : null}
+                    </Space>
+                  </div>
 ```
 
-（ControlNet 和 Slider 为旧的 mock 占位 UI，随 mock Select 一并移除）
+> **注意**：`Popover` 已在 Ant Design 5 的 import 中（文件顶部 `import { ..., Popover, ... } from 'antd'`）；如尚未引入，需在 antd import 行新增 `Popover`。
 
-- [ ] **Step 8.3：视频生成调用传入 `model_id`**
+---
 
-找到 ChapterStudio.tsx 约第 2820 行的 `createVideoGenerationTaskApiV1FilmTasksVideoPost` 调用：
+- [ ] **Step 8.6：视频生成调用传入 `model_id`，硬编码 `text_only`**
+
+找到约第 2820 行 `videoPromptDraft` 的 `submit` 函数内的调用：
 
 ```tsx
       const created = await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
@@ -881,16 +1134,16 @@ const [selectedVideoModelId, setSelectedVideoModelId] = useState<string | null>(
       const created = await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
         requestBody: {
           shot_id: selectedShot.id,
-          reference_mode: context.referenceMode,
+          reference_mode: 'text_only',
           prompt: (derived.prompt || '').trim(),
-          images: derived.images,
+          images: [],
           ratio,
           model_id: selectedVideoModelId,
         } as any,
       })
 ```
 
-另外，找到约第 1212 行批量生成 `handleBatchGenerateAll` 中的同名调用：
+找到约第 1212 行 `handleBatchGenerateAll` 的调用：
 
 ```tsx
         await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
@@ -912,27 +1165,54 @@ const [selectedVideoModelId, setSelectedVideoModelId] = useState<string | null>(
             shot_id: shot.id,
             reference_mode: 'text_only',
             prompt,
-            images,
+            images: [],
             ratio,
             model_id: selectedVideoModelId,
           } as any,
         })
 ```
 
-- [ ] **Step 8.4：typecheck 验证**
+---
+
+- [ ] **Step 8.7：检查并补充 Popover import**
+
+检查文件顶部 antd import 行（约第 2 行）是否包含 `Popover`：
+
+```tsx
+import {
+  Button,
+  Card,
+  Divider,
+  Dropdown,
+  Image,
+  Input,
+  Layout,
+  Modal,
+  Popover,
+  Radio,
+  ...
+```
+
+若没有 `Popover`，在现有 antd import 中追加它。
+
+---
+
+- [ ] **Step 8.8：typecheck 验证**
 
 ```bash
 cd front
 pnpm run typecheck
 ```
 
-期望输出：无错误
+期望输出：无错误（若有 `noUnusedLocals` 报错，按报错信息定位并删除对应声明）
 
-- [ ] **Step 8.5：commit**
+---
+
+- [ ] **Step 8.9：commit**
 
 ```bash
 git add front/src/pages/aiStudio/chapter/ChapterStudio.tsx
-git commit -m "feat: add video model picker to video generation panel"
+git commit -m "feat: video gen panel — remove reference selector, add model picker popover (text_only mode)"
 ```
 
 ---
@@ -968,6 +1248,169 @@ pnpm run typecheck
 
 ---
 
+## Task 10：前端 —— 资产编辑页模型选择器
+
+在所有资产编辑页（角色/演员/场景/道具/服装）的"基础信息展示"面板中，在"标签"字段下方插入巨日禄风格的图片模型卡片选择器，所选 model_id 随图片生成请求下发。
+
+**代码定位（基于 `AssetEditPageBase.tsx`）：**
+- `front/src/pages/aiStudio/assets/components/AssetEditPageBase.tsx`
+  - "标签"字段 JSX：约第 769–772 行（`<div className="text-gray-600 ...">标签...</div>` + Input）
+  - `createGenerationTask` prop 类型声明：第 96 行
+  - `createGenerationTask` 调用：第 537 行（`createGenerationTask(assetId, image.id, { prompt, images: mentionedFileIds })`）
+- `front/src/pages/aiStudio/assets/assetAdapters.ts`
+  - 5 处 `createGenerationTask` 实现（character/actor/scene/prop/costume），约第 61、105、149、194、239 行，均已传 `model_id: null`（`as any`）
+
+**后端**：`AssetImageTaskRequest`（`backend/app/api/v1/routes/studio/image_tasks.py:65`）已有 `model_id: str | None` 字段，无需修改。
+
+**注意**：`ModelPickerGrid` 和 `useGenerationModels` 位于 `chapter/` 子目录。从 `assets/components/` 引用时需用跨目录相对路径（`../../chapter/...`）。
+
+**Files:**
+- Modify: `front/src/pages/aiStudio/assets/components/AssetEditPageBase.tsx`
+- Modify: `front/src/pages/aiStudio/assets/assetAdapters.ts`
+
+---
+
+- [ ] **Step 10.1：更新 `AssetEditPageBase.tsx` —— 导入 hook 和组件**
+
+在文件顶部 import 区域追加（在现有 import 之后）：
+
+```tsx
+import { useGenerationModels } from '../../chapter/hooks/useGenerationModels'
+import { ModelPickerGrid } from '../../chapter/components/ModelPickerGrid'
+```
+
+---
+
+- [ ] **Step 10.2：更新 `createGenerationTask` prop 类型，加入 `model_id`**
+
+找到第 96 行：
+
+```typescript
+  createGenerationTask: (assetId: string, imageId: number, payload: { prompt: string; images: string[] }) => Promise<string | null>
+```
+
+改为：
+
+```typescript
+  createGenerationTask: (assetId: string, imageId: number, payload: { prompt: string; images: string[]; model_id: string | null }) => Promise<string | null>
+```
+
+---
+
+- [ ] **Step 10.3：添加 `selectedImageModelId` 状态和 hook 调用**
+
+在组件函数体内，`const [savingBase, setSavingBase] = useState(false)` 之后，追加：
+
+```tsx
+  const { models: imageModels, loading: imageModelsLoading } = useGenerationModels('image')
+  const [selectedImageModelId, setSelectedImageModelId] = useState<string | null>(null)
+```
+
+---
+
+- [ ] **Step 10.4：在"标签"字段后插入 `ModelPickerGrid`**
+
+找到约第 769–772 行的"标签"div：
+
+```tsx
+                <div>
+                  <div className="text-gray-600 text-sm mb-1">标签（逗号分隔）</div>
+                  <Input value={formTags} onChange={(e) => setFormTags(e.target.value)} disabled={smartDetectBusy || savingBase} />
+                </div>
+```
+
+在其之后（约第 773 行，`</div>` 闭合基础信息 section 之前），插入：
+
+```tsx
+                <div>
+                  <div className="text-gray-600 text-sm mb-1">选择模型</div>
+                  <ModelPickerGrid
+                    models={imageModels}
+                    loading={imageModelsLoading}
+                    selectedId={selectedImageModelId}
+                    onChange={setSelectedImageModelId}
+                    hint="不选则使用系统默认图片模型"
+                  />
+                </div>
+```
+
+---
+
+- [ ] **Step 10.5：更新 `createGenerationTask` 调用，传入 `model_id`**
+
+找到约第 537 行：
+
+```tsx
+      const taskId = await createGenerationTask(assetId, image.id, {
+        prompt,
+        images: mentionedFileIds,
+      })
+```
+
+改为：
+
+```tsx
+      const taskId = await createGenerationTask(assetId, image.id, {
+        prompt,
+        images: mentionedFileIds,
+        model_id: selectedImageModelId,
+      })
+```
+
+---
+
+- [ ] **Step 10.6：更新 `assetAdapters.ts`，5 处实现传入 `payload.model_id`**
+
+对 `character`（约第 61–67 行）、`actor`（约第 105 行）、`scene`（约第 149 行）、`prop`（约第 194 行）、`costume`（约第 239 行）的 `createGenerationTask` 实现，将各处签名和请求体同步更新，以 character 为例：
+
+找到：
+
+```typescript
+    createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
+      const res = await StudioImageTasksService.createCharacterImageGenerationTaskApiV1StudioImageTasksCharactersCharacterIdImageTasksPost({
+        characterId: id,
+        requestBody: { image_id: imageId, model_id: null, prompt: payload.prompt, images: payload.images } as any,
+      })
+      return res.data?.task_id ?? null
+    },
+```
+
+改为：
+
+```typescript
+    createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[]; model_id: string | null }) => {
+      const res = await StudioImageTasksService.createCharacterImageGenerationTaskApiV1StudioImageTasksCharactersCharacterIdImageTasksPost({
+        characterId: id,
+        requestBody: { image_id: imageId, model_id: payload.model_id, prompt: payload.prompt, images: payload.images } as any,
+      })
+      return res.data?.task_id ?? null
+    },
+```
+
+对 actor / scene / prop / costume 的同名字段做相同改法（签名加 `model_id: string | null`，请求体 `model_id: payload.model_id`）。
+
+---
+
+- [ ] **Step 10.7：typecheck 验证**
+
+```bash
+cd front
+pnpm run typecheck
+```
+
+期望输出：无 TypeScript 错误
+
+---
+
+- [ ] **Step 10.8：commit**
+
+```bash
+git add front/src/pages/aiStudio/assets/components/AssetEditPageBase.tsx front/src/pages/aiStudio/assets/assetAdapters.ts
+git commit -m "feat: add image model picker to asset edit page below tags field"
+```
+
+---
+
 ## Self-Review Checklist
 
 ### Spec coverage
@@ -976,11 +1419,13 @@ pnpm run typecheck
 |------|---------|
 | 图片生成界面新增模型选择 | Task 7 |
 | 视频生成界面新增模型选择 | Task 8 |
+| 资产编辑页新增模型选择 | Task 10 |
 | 参考巨日禄卡片风格 | Task 6（ModelPickerGrid 卡片宫格） |
 | 仅接入百炼系列模型 | 不影响代码；接口自动按 DB 已配置模型返回 |
 | 后端接受前端传来的 model_id（视频） | Task 1+2 |
 | 后端接受前端传来的 model_id（图片） | 已有，Task 7 传参修正 |
-| 前端 typecheck 通过 | Task 4, 5, 6, 7, 8 均含验证步骤 |
+| 资产图片生成传 model_id | Task 10（后端已有字段，适配器已用 as any 传 null，本任务传真实选择） |
+| 前端 typecheck 通过 | Task 4, 5, 6, 7, 8, 10 均含验证步骤 |
 | openapi:update 同步 | Task 4 |
 
 ### 风险点
@@ -992,3 +1437,5 @@ pnpm run typecheck
 3. **`selectedImageModelId` 跨分镜切换不重置**：当前设计中，用户切换分镜时图片模型选择不重置（是预期行为：用户设定一次后批量生成复用同一模型）。若需要分镜级别隔离，可改为 `Record<shotId, modelId>` 存储，本期不做此复杂化。
 
 4. **批量生成函数（`runBatchGenerate`）**：此函数在 Task 7.4 中已更新传 `selectedImageModelId`。该函数在组件闭包中引用状态，天然跟随当前选择，无需额外处理。
+
+5. **跨目录 import（Task 10）**：`AssetEditPageBase.tsx` 从 `chapter/` 引用共享组件，路径为 `../../chapter/hooks/useGenerationModels` 和 `../../chapter/components/ModelPickerGrid`。若将来重构为共享目录，将两个文件移到 `front/src/pages/aiStudio/shared/` 并更新所有 import 即可。
