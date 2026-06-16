@@ -21,7 +21,7 @@ from app.core.integrations.video_capabilities import VideoModelCapability
 # 基于 2026-05-29 官方 API 示例确认的规格
 DEFAULT_BAILIAN_VIDEO_CAPABILITY = VideoModelCapability(
     supports_seed=True,
-    supports_watermark=False,
+    supports_watermark=True,
     # 官方支持的比例（仅3种）
     allowed_ratios={
         "16:9",  # 横屏 (1280×720 @720P) - 默认，适合电影感
@@ -44,7 +44,7 @@ DEFAULT_BAILIAN_VIDEO_CAPABILITY = VideoModelCapability(
 # 可选：480P 标清模式（节省成本或加快速度）
 STANDARD_DEFINITION_CAPABILITY = VideoModelCapability(
     supports_seed=True,
-    supports_watermark=False,
+    supports_watermark=True,
     allowed_ratios={"16:9", "9:16", "1:1"},
     default_ratio="16:9",
     ratio_to_size_mapping={

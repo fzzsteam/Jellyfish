@@ -201,6 +201,9 @@ class BailianVideoApiAdapter:
         parameters: dict[str, Any] = {
             "resolution": self._resolve_resolution(input_),
         }
+        # watermark=False 可关闭百炼视频水印；None 表示未指定，不传参（沿用平台默认）
+        if input_.watermark is not None:
+            parameters["watermark"] = input_.watermark
 
         model_name = input_.model or "happyhorse-1.0-t2v"
         mode = self._detect_mode(model_name, input_)

@@ -19,6 +19,7 @@ from app.models.task_links import GenerationTaskLink
 from app.models.studio import FileItem, Shot, ShotDetail, ShotFrameType
 from app.models.types import FileUsageKind
 from app.services.common import entity_not_found
+from app.core.integrations.video_capabilities import resolve_video_capability
 from app.services.llm.provider_resolver import resolve_provider_config_by_model
 from app.services.studio.file_usages import sync_usage_from_shot_context
 from app.services.studio.generation.video import (
@@ -174,20 +175,26 @@ async def build_run_args(
     frame_data_urls = [await file_id_to_data_url(db, file_id=file_id) for file_id in submission.images]
     frame_map = {ft: frame_data_urls[i] for i, ft in enumerate(required_frames)}
 
+    # 按供应商能力决定是否传 watermark=False，避免生成带水印的视频
+    cap = resolve_video_capability(provider=provider_cfg.provider, model=model.name)
+    input_dict: dict = {
+        "prompt": final_prompt,
+        "first_frame_base64": frame_map.get(ShotFrameType.first),
+        "last_frame_base64": frame_map.get(ShotFrameType.last),
+        "key_frame_base64": frame_map.get(ShotFrameType.key),
+        "model": model.name,
+        "ratio": resolved_ratio,
+        "seconds": shot_detail.duration,
+    }
+    if cap.supports_watermark:
+        input_dict["watermark"] = False
+
     run_args = {
         "shot_id": shot_id,
         "provider": provider_cfg.provider,
         "api_key": provider_cfg.api_key,
         "base_url": provider_cfg.base_url,
-        "input": {
-            "prompt": final_prompt,
-            "first_frame_base64": frame_map.get(ShotFrameType.first),
-            "last_frame_base64": frame_map.get(ShotFrameType.last),
-            "key_frame_base64": frame_map.get(ShotFrameType.key),
-            "model": model.name,
-            "ratio": resolved_ratio,
-            "seconds": shot_detail.duration,
-        },
+        "input": input_dict,
     }
     prompt_preview_payload = submission.extra.get("prompt_preview")
     if isinstance(prompt_preview_payload, dict):
