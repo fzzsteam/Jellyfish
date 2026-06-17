@@ -48,6 +48,8 @@ from app.services.studio import (
     ignore_shot_extracted_candidate,
     ignore_shot_extracted_dialogue_candidate,
     link_existing_asset_for_preparation,
+    replace_asset_for_preparation,
+    unlink_asset_for_preparation,
     link_shot_extracted_candidate,
     list_shot_extracted_candidates,
     list_shot_extracted_dialogue_candidates,
@@ -91,6 +93,8 @@ from app.schemas.studio.shots import (
     ShotExtractedDialogueCandidateRead,
     ShotPreparationMutationAction,
     ShotPreparationLinkRequest,
+    ShotPreparationReplaceRequest,
+    ShotPreparationUnlinkRequest,
     ShotPreparationMutationResultRead,
     ShotPreparationStateRead,
     ShotSkipExtractionUpdate,
@@ -253,6 +257,60 @@ async def link_existing_asset_for_preparation_api(
     return success_response(
         ShotPreparationMutationResultRead(
             action=ShotPreparationMutationAction.link_asset_candidate,
+            state=data,
+        )
+    )
+
+
+@router.post(
+    "/{shot_id}/preparation-replace",
+    response_model=ApiResponse[ShotPreparationMutationResultRead],
+    summary="准备页替换已关联实体并返回最新聚合状态",
+)
+async def replace_asset_for_preparation_api(
+    shot_id: str,
+    body: ShotPreparationReplaceRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[ShotPreparationMutationResultRead]:
+    """解除 old_entity_id 关联，关联 new_entity_id，保持分镜状态一致性。"""
+    data = await replace_asset_for_preparation(
+        db,
+        project_id=body.project_id,
+        chapter_id=body.chapter_id,
+        shot_id=shot_id,
+        entity_type=body.entity_type,
+        old_entity_id=body.old_entity_id,
+        new_entity_id=body.new_entity_id,
+    )
+    return success_response(
+        ShotPreparationMutationResultRead(
+            action=ShotPreparationMutationAction.link_asset_candidate,
+            state=data,
+        )
+    )
+
+
+@router.post(
+    "/{shot_id}/preparation-unlink",
+    response_model=ApiResponse[ShotPreparationMutationResultRead],
+    summary="准备页解除已关联实体并返回最新聚合状态",
+)
+async def unlink_asset_for_preparation_api(
+    shot_id: str,
+    body: ShotPreparationUnlinkRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[ShotPreparationMutationResultRead]:
+    """移除镜头与 entity_id 的关联，恢复候选为 pending 状态。"""
+    data = await unlink_asset_for_preparation(
+        db,
+        shot_id=shot_id,
+        entity_type=body.entity_type,
+        entity_id=body.entity_id,
+        candidate_id=body.candidate_id,
+    )
+    return success_response(
+        ShotPreparationMutationResultRead(
+            action=ShotPreparationMutationAction.ignore_asset_candidate,
             state=data,
         )
     )

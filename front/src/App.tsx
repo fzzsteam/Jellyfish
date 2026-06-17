@@ -12,6 +12,7 @@ import ActorAssetEditPage from './pages/aiStudio/assets/ActorAssetEditPage.tsx'
 import SceneAssetEditPage from './pages/aiStudio/assets/SceneAssetEditPage.tsx'
 import PropAssetEditPage from './pages/aiStudio/assets/PropAssetEditPage.tsx'
 import CostumeAssetEditPage from './pages/aiStudio/assets/CostumeAssetEditPage.tsx'
+import CharacterAssetEditPage from './pages/aiStudio/assets/CharacterAssetEditPage.tsx'
 import PromptTemplateManager from './pages/aiStudio/prompts/PromptTemplateManager'
 import FileManager from './pages/aiStudio/files/FileManager'
 import VideoEditor from './pages/aiStudio/editor/VideoEditor'
@@ -28,32 +29,35 @@ const App: React.FC = () => {
   return (
     <BrowserRouter>
       <Routes>
+
         <Route path="/login" element={<LoginPage />} />
         <Route element={<PrivateRoute />}>
-          <Route path="/" element={<MainLayout />}>
-            <Route index element={<Navigate to="/projects" replace />} />
-            <Route path="projects" element={<ProjectLobby />} />
-            <Route path="projects/:projectId" element={<ProjectWorkbench />} />
-            <Route path="projects/:projectId/roles/:characterId/edit" element={<RoleDetailPage />} />
-            <Route path="projects/:projectId/chapters/:chapterId/prep/*" element={<Navigate to="../shots" replace />} />
-            <Route path="projects/:projectId/chapters/:chapterId/studio" element={<ChapterStudio />} />
-            <Route path="projects/:projectId/chapters/:chapterId/shots/:shotId/edit" element={<ChapterShotEditPage />} />
-            <Route path="projects/:projectId/chapters/:chapterId/shots" element={<ChapterShotsPage />} />
-            <Route path="projects/:projectId/chapters/:chapterId/prep-drafts" element={<Navigate to="../shots" replace />} />
-            <Route path="projects/:projectId/editor" element={<VideoEditor />} />
-            <Route path="assets" element={<AssetManager />} />
-            <Route path="assets/actors/:actorImageId/edit" element={<ActorAssetEditPage />} />
-            <Route path="assets/scenes/:sceneId/edit" element={<SceneAssetEditPage />} />
-            <Route path="assets/props/:propId/edit" element={<PropAssetEditPage />} />
-            <Route path="assets/costumes/:costumeId/edit" element={<CostumeAssetEditPage />} />
-            <Route path="prompts" element={<PromptTemplateManager />} />
-            <Route path="files" element={<FileManager />} />
-            <Route path="agents/:id/edit" element={<AgentEdit />} />
-            <Route path="agents" element={<AgentManagement />} />
-            <Route path="models" element={<ModelManagement />} />
-            <Route path="settings" element={<Settings />} />
-            <Route path="*" element={<NotFound />} />
-          </Route>
+
+        <Route path="/" element={<MainLayout />}>
+          <Route index element={<Navigate to="/projects" replace />} />
+          <Route path="projects" element={<ProjectLobby />} />
+          <Route path="projects/:projectId" element={<ProjectWorkbench />} />
+          <Route path="projects/:projectId/roles/:characterId/edit" element={<RoleDetailPage />} />
+          <Route path="projects/:projectId/chapters/:chapterId/prep/*" element={<Navigate to="../shots" replace />} />
+          <Route path="projects/:projectId/chapters/:chapterId/studio" element={<ChapterStudio />} />
+          <Route path="projects/:projectId/chapters/:chapterId/shots/:shotId/edit" element={<ChapterShotEditPage />} />
+          <Route path="projects/:projectId/chapters/:chapterId/shots" element={<ChapterShotsPage />} />
+          <Route path="projects/:projectId/chapters/:chapterId/prep-drafts" element={<Navigate to="../shots" replace />} />
+          <Route path="projects/:projectId/editor" element={<VideoEditor />} />
+          <Route path="assets" element={<AssetManager />} />
+          <Route path="assets/actors/:actorImageId/edit" element={<ActorAssetEditPage />} />
+          <Route path="assets/scenes/:sceneId/edit" element={<SceneAssetEditPage />} />
+          <Route path="assets/props/:propId/edit" element={<PropAssetEditPage />} />
+          <Route path="assets/costumes/:costumeId/edit" element={<CostumeAssetEditPage />} />
+          <Route path="assets/characters/:characterId/edit" element={<CharacterAssetEditPage />} />
+          <Route path="prompts" element={<PromptTemplateManager />} />
+          <Route path="files" element={<FileManager />} />
+          <Route path="agents/:id/edit" element={<AgentEdit />} />
+          <Route path="agents" element={<AgentManagement />} />
+          <Route path="models" element={<ModelManagement />} />
+          <Route path="settings" element={<Settings />} />
+          <Route path="*" element={<NotFound />} />
+
         </Route>
       </Routes>
     </BrowserRouter>

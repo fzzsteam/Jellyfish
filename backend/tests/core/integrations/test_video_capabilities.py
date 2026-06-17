@@ -50,9 +50,61 @@ def test_validate_video_options_rejects_capability_mismatch() -> None:
         capability=VideoModelCapability(supports_seed=False),
     )
     try:
-        inp = VideoGenerationInput(prompt="test", model="seedream-video-v1", seed=7)
+        inp = VideoGenerationInput(prompt="test", model="seedream-video-v1", ratio="16:9", seed=7)
         with pytest.raises(ValueError) as exc_info:
             validate_video_options(provider="volcengine", model=inp.model, input_=inp)
         assert "seed is not supported" in str(exc_info.value)
     finally:
         clear_video_model_capability_overrides(provider="volcengine")
+
+
+def test_vidu_video_capability_rejects_watermark_and_allows_reference_ratio() -> None:
+    cap = resolve_video_capability(provider="vidu", model="viduq3")
+    assert cap.supports_watermark is False
+    assert "3:4" in (cap.allowed_ratios or set())
+    assert cap.default_ratio == "3:4"
+
+    inp = VideoGenerationInput(prompt="test", model="viduq3", ratio="3:4", seconds=8, watermark=False)
+    with pytest.raises(ValueError) as exc_info:
+        validate_video_options(provider="vidu", model=inp.model, input_=inp)
+    assert "watermark is not supported" in str(exc_info.value)
+
+
+def test_vidu_mix_video_capability_uses_720p_mapping() -> None:
+    cap = resolve_video_capability(provider="vidu", model="viduq3-mix")
+    assert cap.supports_watermark is False
+    assert cap.default_ratio == "3:4"
+    assert cap.ratio_to_size_mapping
+    assert cap.ratio_to_size_mapping["3:4"] == "720p"
+
+
+def test_vidu_text_video_capability_uses_540p_mapping() -> None:
+    cap = resolve_video_capability(provider="vidu", model="viduq3-pro")
+    assert cap.supports_watermark is False
+    assert cap.default_ratio == "4:3"
+    assert cap.ratio_to_size_mapping
+    assert cap.ratio_to_size_mapping["4:3"] == "540p"
+
+
+def test_vidu_multiframe_video_capability_uses_1080p_mapping() -> None:
+    cap = resolve_video_capability(provider="vidu", model="viduq2-turbo")
+    assert cap.supports_watermark is False
+    assert cap.default_ratio == "4:3"
+    assert cap.ratio_to_size_mapping
+    assert cap.ratio_to_size_mapping["4:3"] == "1080p"
+
+
+def test_vidu_template_video_capability_uses_1080p_mapping() -> None:
+    cap = resolve_video_capability(provider="vidu", model="template:hugging")
+    assert cap.supports_watermark is False
+    assert cap.default_ratio == "4:3"
+    assert cap.ratio_to_size_mapping
+    assert cap.ratio_to_size_mapping["4:3"] == "1080p"
+
+
+def test_vidu_template_story_video_capability_uses_1080p_mapping() -> None:
+    cap = resolve_video_capability(provider="vidu", model="story:choose_one_accept_value")
+    assert cap.supports_watermark is False
+    assert cap.default_ratio == "4:3"
+    assert cap.ratio_to_size_mapping
+    assert cap.ratio_to_size_mapping["4:3"] == "1080p"

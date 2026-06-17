@@ -54,6 +54,7 @@ export class StudioEntitiesService {
         page = 1,
         pageSize = 10,
         authorization,
+        projectId,
     }: {
         entityType: string,
         /**
@@ -73,6 +74,12 @@ export class StudioEntitiesService {
         page?: number,
         pageSize?: number,
         authorization?: (string | null),
+
+        /**
+         * 按项目过滤（仅对 character 类型有效）
+         */
+        projectId?: (string | null),
+
     }): CancelablePromise<ApiResponse_PaginatedData_dict_str__Any___> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -91,6 +98,7 @@ export class StudioEntitiesService {
                 'is_desc': isDesc,
                 'page': page,
                 'page_size': pageSize,
+                'project_id': projectId,
             },
             errors: {
                 422: `Validation Error`,

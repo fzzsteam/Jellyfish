@@ -55,5 +55,9 @@ export type ShotAssetOverviewItem = {
      * 当前是否已关联到镜头
      */
     is_linked: boolean;
+    /**
+     * 是否存在活跃的图片生成任务（pending/running），图片尚未落库
+     */
+    is_generating?: boolean;
 };
 

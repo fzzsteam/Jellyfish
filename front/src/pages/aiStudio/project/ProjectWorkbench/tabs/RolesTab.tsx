@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Card, Button, Empty, Modal, Input, message, Space, Select, Pagination } from 'antd'
-import { EditOutlined, PlusOutlined, UserOutlined } from '@ant-design/icons'
+import { EditOutlined, LinkOutlined, PlusOutlined, UserOutlined } from '@ant-design/icons'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   StudioProjectsService,
@@ -16,6 +16,7 @@ import {
   type ProjectVisualStyleChoice,
 } from '../../../project/ProjectVisualStyleAndStyleFields'
 import { useProjectStyleOptions } from '../../../project/useProjectStyleOptions'
+import { encodeWorkbenchAssetEditReturnTo } from '../utils/workbenchAssetReturnTo'
 
 type ActorLike = {
   id: string
@@ -29,6 +30,14 @@ type CostumeLike = {
   name: string
   description?: string | null
   thumbnail?: string
+}
+
+type CharacterLike = {
+  id: string
+  name: string
+  description?: string | null
+  thumbnail?: string
+  project_id?: string | null
 }
 
 function notifyShotAssetCreatedAndLinked(payload: {
@@ -82,6 +91,13 @@ export function RolesTab() {
   const [formVisualStyle, setFormVisualStyle] = useState<ProjectVisualStyleChoice>(defaultVisualStyle as ProjectVisualStyleChoice)
   const [formStyle, setFormStyle] = useState<string>(getDefaultStyle(defaultVisualStyle))
 
+  // 从资产库关联相关状态
+  const [linkModalOpen, setLinkModalOpen] = useState(false)
+  const [libraryCharacters, setLibraryCharacters] = useState<CharacterLike[]>([])
+  const [libraryLoading, setLibraryLoading] = useState(false)
+  const [librarySearch, setLibrarySearch] = useState('')
+  const [linkingId, setLinkingId] = useState<string | null>(null)
+
   useEffect(() => {
     const create = searchParams.get('create')
     const name = searchParams.get('name') ?? ''
@@ -119,17 +135,22 @@ export function RolesTab() {
     }
   }, [getDefaultStyle, projectStyle, projectVisualStyle, searchParams, setSearchParams])
 
-  const openNormalRoleCreate = useCallback(() => {
-    setPendingShotLinkShotId(null)
-    setPendingShotLinkChapterId(null)
-    setFormName('')
-    setFormDesc('')
-    setFormActorId(undefined)
-    setFormCostumeId(undefined)
-    setFormVisualStyle(projectVisualStyle)
-    setFormStyle(projectStyle)
-    setCreateOpen(true)
-  }, [projectStyle, projectVisualStyle])
+
+  const [creatingBlank, setCreatingBlank] = useState(false)
+  const handleCreateBlank = async () => {
+    if (!projectId || creatingBlank) return
+    setCreatingBlank(true)
+    try {
+      const id = newId('char')
+      const res = await StudioEntitiesApi.create('character', { id, project_id: projectId, name: '未命名角色' })
+      const createdId = (res.data as { id?: string } | undefined)?.id ?? id
+      navigate(`/assets/characters/${createdId}/edit?returnTo=${encodeWorkbenchAssetEditReturnTo(projectId, 'roles')}`)
+    } catch {
+      message.error('新建角色失败')
+    } finally {
+      setCreatingBlank(false)
+    }
+  }
 
   const loadProjectLinks = async () => {
     if (!projectId) return
@@ -276,6 +297,51 @@ export function RolesTab() {
     }
   }
 
+  const currentCharacterIds = useMemo(() => new Set(characters.map((c) => c.id)), [characters])
+
+  // 加载资产库中未关联到本项目的角色
+  const loadLibraryCharacters = async (searchQuery?: string) => {
+    setLibraryLoading(true)
+    try {
+      const q = (searchQuery !== undefined ? searchQuery : librarySearch).trim()
+      const res = await StudioEntitiesApi.list('character', {
+        q: q ? q : null,
+        order: 'updated_at',
+        isDesc: true,
+        page: 1,
+        pageSize: 100,
+      })
+      const all = (res.data?.items ?? []) as CharacterLike[]
+      setLibraryCharacters(all.filter((c) => c.project_id !== projectId))
+    } catch {
+      message.error('加载角色资产库失败')
+      setLibraryCharacters([])
+    } finally {
+      setLibraryLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (linkModalOpen) void loadLibraryCharacters('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linkModalOpen])
+
+  // 关联角色到项目（更新 project_id）
+  const handleLinkCharacter = async (character: CharacterLike) => {
+    if (!projectId) return
+    setLinkingId(character.id)
+    try {
+      await StudioEntitiesApi.update('character', character.id, { project_id: projectId })
+      message.success(`已关联角色「${character.name}」到项目`)
+      setLinkModalOpen(false)
+      await refresh()
+    } catch {
+      message.error('关联失败')
+    } finally {
+      setLinkingId(null)
+    }
+  }
+
   const roleCards = useMemo(() => {
     return characters.map((c) => {
       const actor = actorsById[c.actor_id]
@@ -325,6 +391,12 @@ export function RolesTab() {
     })
   }, [costumesById, projectCostumeLinks])
 
+  // 资产库中过滤掉已关联到本项目的角色
+  const availableLibraryCharacters = useMemo(
+    () => libraryCharacters.filter((c) => !currentCharacterIds.has(c.id)),
+    [libraryCharacters, currentCharacterIds],
+  )
+
   if (!projectId) {
     return null
   }
@@ -335,20 +407,33 @@ export function RolesTab() {
         title="项目角色"
         extra={
           <Space>
-            <Button type="primary" icon={<PlusOutlined />} onClick={openNormalRoleCreate}>
-              新建角色
+            <Button type="primary" icon={<PlusOutlined />} loading={creatingBlank} onClick={handleCreateBlank}>
+              新建
+            </Button>
+            <Button
+              type="primary"
+              icon={<LinkOutlined />}
+              onClick={() => {
+                setLibrarySearch('')
+                setLinkModalOpen(true)
+              }}
+            >
+              从资产库关联
+            </Button>
+            <Button icon={<PlusOutlined />} onClick={() => navigate('/assets?tab=character')}>
+              前往资产管理
             </Button>
           </Space>
         }
       >
         {characters.length === 0 && !loading ? (
           <Empty
-            description="暂无项目角色"
+            description="暂无项目角色，可从资产库关联角色到本项目"
             image={Empty.PRESENTED_IMAGE_SIMPLE}
           >
             <Space>
-              <Button type="primary" icon={<PlusOutlined />} onClick={openNormalRoleCreate}>
-                新建角色
+              <Button type="primary" icon={<PlusOutlined />} loading={creatingBlank} onClick={handleCreateBlank}>
+                新建
               </Button>
             </Space>
           </Empty>
@@ -380,23 +465,24 @@ export function RolesTab() {
                       danger
                       onClick={() => {
                         Modal.confirm({
-                          title: `删除角色「${c.name}」？`,
-                          okText: '删除',
+                          title: `取消关联角色「${c.name}」？`,
+                          content: '取消关联后该角色将从本项目中移除。',
+                          okText: '取消关联',
                           cancelText: '取消',
                           okButtonProps: { danger: true },
                           onOk: async () => {
                             try {
                               await StudioEntitiesApi.remove('character', c.id)
-                              message.success('已删除')
+                              message.success('已取消关联')
                               await refresh()
                             } catch {
-                              message.error('删除失败')
+                              message.error('操作失败')
                             }
                           },
                         })
                       }}
                     >
-                      删除
+                      取消关联
                     </Button>
                   </Space>
                 }
@@ -494,6 +580,74 @@ export function RolesTab() {
               filterOption={(input, option) => String(option?.searchLabel ?? '').toLowerCase().includes(input.toLowerCase())}
             />
           </div>
+        </div>
+      </Modal>
+
+      {/* 从资产库关联角色弹窗 */}
+      <Modal
+        title="从资产库关联角色"
+        open={linkModalOpen}
+        onCancel={() => setLinkModalOpen(false)}
+        footer={null}
+        width={560}
+      >
+        <div className="mb-3">
+          <Input.Search
+            placeholder="搜索角色名称"
+            allowClear
+            value={librarySearch}
+            onChange={(e) => setLibrarySearch(e.target.value)}
+            onSearch={(value) => loadLibraryCharacters(value)}
+          />
+        </div>
+        <div className="max-h-[60vh] overflow-y-auto">
+          {libraryLoading ? (
+            <div className="py-8 text-center text-gray-500">加载中...</div>
+          ) : availableLibraryCharacters.length === 0 ? (
+            <Empty
+              description={
+                libraryCharacters.length === 0
+                  ? '暂无可关联的角色，请先在资产管理中创建角色'
+                  : '当前项目已关联全部搜索结果'
+              }
+            />
+          ) : (
+            <div className="space-y-2">
+              {availableLibraryCharacters.map((character) => {
+                const thumbUrl = resolveAssetUrl(character.thumbnail)
+                return (
+                  <div
+                    key={character.id}
+                    className="flex items-center justify-between gap-3 rounded border border-gray-200 p-2 hover:bg-gray-50"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      {thumbUrl ? (
+                        <img src={thumbUrl} alt="" className="w-10 h-10 rounded object-cover shrink-0" />
+                      ) : (
+                        <div className="w-10 h-10 rounded bg-gray-100 flex items-center justify-center text-gray-400 shrink-0">
+                          <UserOutlined />
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{character.name}</div>
+                        {character.description && (
+                          <div className="text-xs text-gray-500 truncate">{character.description}</div>
+                        )}
+                      </div>
+                    </div>
+                    <Button
+                      type="primary"
+                      size="small"
+                      loading={linkingId === character.id}
+                      onClick={() => handleLinkCharacter(character)}
+                    >
+                      关联到项目
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </Modal>
     </div>

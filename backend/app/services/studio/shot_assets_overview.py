@@ -4,9 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.studio import Shot, ShotCandidateStatus
+from app.models.studio import (
+    CharacterImage,
+    CostumeImage,
+    PropImage,
+    SceneImage,
+    Shot,
+    ShotCandidateStatus,
+)
+from app.models.task import GenerationTask, GenerationTaskStatus
+from app.models.task_links import GenerationTaskLink
 from app.schemas.studio.shots import (
     ShotAssetOverviewItem,
     ShotAssetsOverviewRead,
@@ -15,6 +25,92 @@ from app.schemas.studio.shots import (
 from app.services.common import entity_not_found, require_entity
 from app.services.studio.shot_assets import list_shot_linked_assets
 from app.services.studio.shot_extracted_candidates import list_by_shot
+
+
+_ACTIVE_TASK_STATUSES = (GenerationTaskStatus.pending.value, GenerationTaskStatus.running.value)
+
+
+async def _detect_generating_entity_keys(
+    db: AsyncSession,
+    items: list[ShotAssetOverviewItem],
+) -> set[str]:
+    """批量检测哪些资产实体当前有活跃（pending/running）的图片生成任务。
+
+    返回形如 '{type}:{entity_id}' 的键集合，供调用方快速判断 is_generating 状态。
+    character 类型通过 relation_type='character' 直接匹配 entity_id；
+    scene/prop/costume 先查对应图片表的 image_id，再关联 GenerationTaskLink。
+    """
+    # 只检测已关联但尚无图片的条目（file_id 为空时才可能处于生成中）
+    candidates = [
+        item for item in items
+        if item.is_linked and not item.file_id and item.linked_entity_id
+    ]
+    if not candidates:
+        return set()
+
+    generating: set[str] = set()
+
+    # ---------- character：relation_type='character', relation_entity_id=entity_id ----------
+    char_ids = [item.linked_entity_id for item in candidates if item.type == "character"]
+    if char_ids:
+        stmt = (
+            select(GenerationTaskLink.relation_entity_id)
+            .join(GenerationTask, GenerationTask.id == GenerationTaskLink.task_id)
+            .where(
+                GenerationTaskLink.relation_type == "character",
+                GenerationTaskLink.relation_entity_id.in_(char_ids),
+                GenerationTask.status.in_(_ACTIVE_TASK_STATUSES),
+            )
+        )
+        for eid in (await db.execute(stmt)).scalars().all():
+            generating.add(f"character:{eid}")
+
+    # ---------- 辅助：按 entity_id 批量查活跃 image 任务 ----------
+    async def _check_image_type(
+        entity_type: str,
+        image_model: type,
+        parent_field: str,
+        relation_type_str: str,
+        entity_ids: list[str],
+    ) -> None:
+        if not entity_ids:
+            return
+        # step 1: 查出所有 image_id → entity_id 映射
+        image_rows = (
+            await db.execute(
+                select(image_model.id, getattr(image_model, parent_field))  # type: ignore[attr-defined]
+                .where(getattr(image_model, parent_field).in_(entity_ids))  # type: ignore[attr-defined]
+            )
+        ).all()
+        if not image_rows:
+            return
+        image_id_to_entity = {str(row[0]): str(row[1]) for row in image_rows}
+        # step 2: 查哪些 image_id 有活跃任务
+        active_rows = (
+            await db.execute(
+                select(GenerationTaskLink.relation_entity_id)
+                .join(GenerationTask, GenerationTask.id == GenerationTaskLink.task_id)
+                .where(
+                    GenerationTaskLink.relation_type == relation_type_str,
+                    GenerationTaskLink.relation_entity_id.in_(list(image_id_to_entity.keys())),
+                    GenerationTask.status.in_(_ACTIVE_TASK_STATUSES),
+                )
+            )
+        ).scalars().all()
+        for image_id_str in active_rows:
+            entity_id = image_id_to_entity.get(image_id_str)
+            if entity_id:
+                generating.add(f"{entity_type}:{entity_id}")
+
+    scene_ids = [item.linked_entity_id for item in candidates if item.type == "scene"]
+    prop_ids = [item.linked_entity_id for item in candidates if item.type == "prop"]
+    costume_ids = [item.linked_entity_id for item in candidates if item.type == "costume"]
+
+    await _check_image_type("scene", SceneImage, "scene_id", "scene_image", scene_ids)
+    await _check_image_type("prop", PropImage, "prop_id", "prop_image", prop_ids)
+    await _check_image_type("costume", CostumeImage, "costume_id", "costume_image", costume_ids)
+
+    return generating
 
 
 def _normalize_name(name: str) -> str:
@@ -110,8 +206,66 @@ async def get_shot_assets_overview(
             }
         )
 
+    # 去重：多个候选指向同一实体时，合并为一张卡片
+    # 优先保留有图片的条目；显示名取脚本提取的候选名（与实体名不同时），而非实体名
+    # 例："荔枝"候选 + "青荔枝"候选均关联到"荔枝"实体 → 显示"青荔枝"并附"荔枝"图片
+    _entity_to_keys: dict[str, list[str]] = {}
+    for _k, _item in list(item_by_key.items()):
+        if _item.linked_entity_id:
+            _entity_to_keys.setdefault(
+                f"{_item.type}:{_item.linked_entity_id}", []
+            ).append(_k)
+
+    for _dup_keys in _entity_to_keys.values():
+        if len(_dup_keys) <= 1:
+            continue
+        _dup_items = [item_by_key[k] for k in _dup_keys if k in item_by_key]
+        if len(_dup_items) <= 1:
+            continue
+
+        # 主条目：有实际图片数据的优先（来自 linked_assets）
+        _primary = next(
+            (i for i in _dup_items if i.file_id or i.thumbnail),
+            _dup_items[0],
+        )
+        # 备选名：名称与实体名不同的候选项（脚本原文更具体）
+        _alt = next(
+            (
+                i for i in _dup_items
+                if i.name != _primary.name and i.source in ("candidate", "both")
+            ),
+            None,
+        )
+
+        for _k in _dup_keys:
+            item_by_key.pop(_k, None)
+
+        if _alt is not None:
+            _merged = _primary.model_copy(update={
+                "name": _alt.name,
+                "key": f"{_primary.type}:{_normalize_name(_alt.name)}",
+                "candidate_id": _alt.candidate_id,
+                "candidate_status": _alt.candidate_status,
+            })
+        else:
+            _merged = _primary
+
+        item_by_key[_merged.key] = _merged
+
+    items_unsorted = list(item_by_key.values())
+
+    # 标记正在生成中的资产（已关联但图片尚未落库且有活跃任务）
+    generating_keys = await _detect_generating_entity_keys(db, items_unsorted)
+    if generating_keys:
+        items_unsorted = [
+            item.model_copy(update={"is_generating": True})
+            if f"{item.type}:{item.linked_entity_id}" in generating_keys
+            else item
+            for item in items_unsorted
+        ]
+
     items = sorted(
-        item_by_key.values(),
+        items_unsorted,
         key=lambda item: (
             0
             if item.candidate_status == ShotCandidateStatus.pending.value

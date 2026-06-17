@@ -1,4 +1,4 @@
-export type WorkbenchAssetTabParam = 'actors' | 'scenes' | 'props' | 'costumes'
+export type WorkbenchAssetTabParam = 'actors' | 'scenes' | 'props' | 'costumes' | 'roles'
 
 export function encodeWorkbenchAssetEditReturnTo(projectId: string, tab: WorkbenchAssetTabParam): string {
   return encodeURIComponent(`/projects/${projectId}?tab=${tab}`)

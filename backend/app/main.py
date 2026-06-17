@@ -99,14 +99,24 @@ async def health():
 
 
 class _SPAStaticFiles(_StaticFiles):
+    """为 React SPA 提供静态文件，并确保入口文件不会被浏览器错误缓存。"""
+
+    _NO_STORE = "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0"
+
     async def get_response(self, path: str, scope):
+        """返回静态资源；前端路由 fallback 到 index.html 时禁用缓存。"""
         try:
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
         except Exception as exc:
             from starlette.exceptions import HTTPException as _HTTPException
             if isinstance(exc, _HTTPException) and exc.status_code == 404:
-                return await super().get_response("index.html", scope)
+                response = await super().get_response("index.html", scope)
+                response.headers["Cache-Control"] = self._NO_STORE
+                return response
             raise
+        if path == "index.html" or path == "env.js" or response.headers.get("content-type", "").startswith("text/html"):
+            response.headers["Cache-Control"] = self._NO_STORE
+        return response
 
 
 _dist_dir = Path(__file__).resolve().parent.parent / "dist"

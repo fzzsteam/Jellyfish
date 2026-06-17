@@ -26,6 +26,7 @@ import { executeAsyncTaskCreate, executeTaskCancel, notifyExistingTask } from '.
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { getChapterShotEditPath, getChapterShotsPath, getChapterStudioPath } from '../project/ProjectWorkbench/routes'
 import { DisplayImageCard } from '../assets/components/DisplayImageCard'
+import { AssetPickerDrawer } from './components/AssetPickerDrawer'
 import { ChapterShotAssetConfirmation } from './components/ChapterShotAssetConfirmation'
 import { ChapterShotBasicInfoSection } from './components/ChapterShotBasicInfoSection'
 import { ChapterShotDialogueConfirmation } from './components/ChapterShotDialogueConfirmation'
@@ -48,7 +49,12 @@ type AssetKind = 'scene' | 'actor' | 'prop' | 'costume'
 type NamedDraft = { name: string; thumbnail?: string | null; id?: string | null; file_id?: string | null; description?: string | null }
 type AssetVM = NamedDraft & {
   kind: AssetKind
-  status: 'linked' | 'new'
+  /**
+   * linked     = 已关联（无论是否有图片）
+   * generating = 已关联，图片生成任务进行中
+   * new        = 待确认候选
+   */
+  status: 'linked' | 'generating' | 'new'
   candidateId?: number
   candidateStatus?: ShotAssetOverviewItem['candidate_status']
 }
@@ -209,6 +215,19 @@ export function ChapterShotEditPage() {
   const [selectedShotIds, setSelectedShotIds] = useState<string[]>(shotId ? [shotId] : [])
   const pendingExternalAssetCreateRef = useRef(false)
 
+  // 资产替换 Drawer 状态：选中的待替换资产、抽屉开关、提交中标记
+  const [replaceDrawerOpen, setReplaceDrawerOpen] = useState(false)
+  const [replaceDrawerAsset, setReplaceDrawerAsset] = useState<AssetVM | null>(null)
+  const [replaceDrawerLoading, setReplaceDrawerLoading] = useState(false)
+
+  // 添加关联资产 Drawer 状态
+  const [addDrawerOpen, setAddDrawerOpen] = useState(false)
+  const [addDrawerKind, setAddDrawerKind] = useState<AssetKind>('scene')
+  const [addDrawerLoading, setAddDrawerLoading] = useState(false)
+
+  // 资产解关联（忽略）状态：正在提交中的实体 ID → loading 标记
+  const [unlinkingIds, setUnlinkingIds] = useState<Record<string, boolean>>({})
+
   const [linkingOpen, setLinkingOpen] = useState(false)
   const [linkingLoading, setLinkingLoading] = useState(false)
   const [linkingActionLoading, setLinkingActionLoading] = useState(false)
@@ -308,7 +327,11 @@ export function ChapterShotEditPage() {
         id: item.linked_entity_id ?? null,
         file_id: item.file_id ?? null,
         description: item.description ?? null,
-        status: item.is_linked ? 'linked' : 'new',
+        status: item.is_generating
+          ? 'generating'
+          : item.is_linked
+            ? 'linked'
+            : 'new',
         candidateId: item.candidate_id ?? undefined,
         candidateStatus: item.candidate_status ?? undefined,
       })
@@ -1103,6 +1126,25 @@ export function ChapterShotEditPage() {
     [openLinkingModal, chapterId, projectId, projectStyle, projectVisualStyle, shotId],
   )
 
+  /**
+   * 点击已关联资产卡片下方的"新建"按钮：
+   * 直接在新标签页打开该已关联资产的编辑页，供用户为其新建/生成图片。
+   * 不创建新草稿资产，图片会挂在原资产（如"合江楼内室"）上，不产生多余的关联记录。
+   */
+  const handleNewLinkedAsset = useCallback(
+    (asset: AssetVM) => {
+      if (!asset.id || !projectId) return
+      pendingExternalAssetCreateRef.current = true
+      const editUrl =
+        asset.kind === 'prop' ? `/assets/props/${encodeURIComponent(asset.id)}/edit`
+        : asset.kind === 'costume' ? `/assets/costumes/${encodeURIComponent(asset.id)}/edit`
+        : asset.kind === 'actor' ? `/projects/${encodeURIComponent(projectId)}/roles/${encodeURIComponent(asset.id)}/edit`
+        : `/assets/scenes/${encodeURIComponent(asset.id)}/edit`
+      window.open(editUrl, '_blank', 'noopener,noreferrer')
+    },
+    [projectId],
+  )
+
   const ignoreCandidate = useCallback(
     async (asset: AssetVM) => {
       if (!asset.candidateId) return
@@ -1127,6 +1169,117 @@ export function ChapterShotEditPage() {
     [applyPreparationState, candidateActionIds, loadPreparationState],
   )
 
+
+  /** 打开替换抽屉：记录待替换的资产 VM，打开抽屉。 */
+  const openReplaceDrawer = useCallback((asset: AssetVM) => {
+    setReplaceDrawerAsset(asset)
+    setReplaceDrawerOpen(true)
+  }, [])
+
+  /** 打开添加关联资产抽屉：记录当前类别，打开抽屉。 */
+  const openAddDrawer = useCallback((kind: AssetKind) => {
+    setAddDrawerKind(kind)
+    setAddDrawerOpen(true)
+  }, [])
+
+  /** 提交添加关联：调用 preparation-link 接口将选中实体关联到当前镜头。 */
+  const doAddLink = useCallback(
+    async (entityId: string, entityName: string) => {
+      if (!projectId || !chapterId || !shotId) return
+      setAddDrawerLoading(true)
+      try {
+        const res = await StudioShotsService.linkExistingAssetForPreparationApiApiV1StudioShotsShotIdPreparationLinkPost({
+          shotId,
+          requestBody: {
+            project_id: projectId,
+            chapter_id: chapterId,
+            entity_type: addDrawerKind === 'actor' ? 'character' : addDrawerKind,
+            linked_entity_id: entityId,
+          },
+        })
+        message.success(`已关联「${entityName}」`)
+        if (res.data?.state) {
+          applyPreparationState(res.data.state)
+        } else {
+          await loadPreparationState({ silent: true })
+        }
+        setAddDrawerOpen(false)
+      } catch {
+        message.error('关联失败，请重试')
+      } finally {
+        setAddDrawerLoading(false)
+      }
+    },
+    [addDrawerKind, applyPreparationState, chapterId, loadPreparationState, projectId, shotId],
+  )
+
+  /**
+   * 提交替换请求：调用 preparation-replace 接口，以新实体 ID 替换旧实体关联。
+   * 完成后刷新准备状态并关闭抽屉。
+   */
+  const doReplace = useCallback(
+    async (newEntityId: string, newEntityName: string) => {
+      if (!projectId || !chapterId || !shotId || !replaceDrawerAsset?.id) return
+      setReplaceDrawerLoading(true)
+      try {
+        const res = await StudioShotsService.replaceAssetForPreparationApiV1StudioShotsShotIdPreparationReplacePost({
+          shotId,
+          requestBody: {
+            project_id: projectId,
+            chapter_id: chapterId,
+            entity_type: replaceDrawerAsset.kind === 'actor' ? 'character' : replaceDrawerAsset.kind,
+            old_entity_id: replaceDrawerAsset.id,
+            new_entity_id: newEntityId,
+          },
+        })
+        message.success(`已替换为「${newEntityName}」`)
+        if (res.data?.state) {
+          applyPreparationState(res.data.state)
+        } else {
+          await loadPreparationState({ silent: true })
+        }
+        setReplaceDrawerOpen(false)
+        setReplaceDrawerAsset(null)
+      } catch {
+        message.error('替换失败，请重试')
+      } finally {
+        setReplaceDrawerLoading(false)
+      }
+    },
+    [applyPreparationState, chapterId, loadPreparationState, projectId, replaceDrawerAsset, shotId],
+  )
+
+  /**
+   * 解除资产关联（"忽略"确认后触发）：
+   * 调用 preparation-unlink 接口，移除该实体与当前镜头的关联，刷新准备状态。
+   */
+  const doUnlinkAsset = useCallback(
+    async (asset: AssetVM) => {
+      if (!shotId || !asset.id) return
+      setUnlinkingIds((prev) => ({ ...prev, [asset.id!]: true }))
+      try {
+        const res = await StudioShotsService.unlinkAssetForPreparationApiV1StudioShotsShotIdPreparationUnlinkPost({
+          shotId,
+          requestBody: {
+            entity_type: asset.kind === 'actor' ? 'character' : asset.kind,
+            entity_id: asset.id,
+            candidate_id: asset.candidateId ?? null,
+          },
+        })
+        message.success(`已忽略「${asset.name}」的关联`)
+        if (res.data?.state) {
+          applyPreparationState(res.data.state)
+        } else {
+          await loadPreparationState({ silent: true })
+        }
+      } catch {
+        message.error('忽略失败，请重试')
+      } finally {
+        setUnlinkingIds((prev) => ({ ...prev, [asset.id!]: false }))
+      }
+    },
+    [applyPreparationState, loadPreparationState, shotId],
+  )
 
   const prefetchExistenceForNewAssets = useCallback(
     async (kind: AssetKind, items: AssetVM[]) => {
@@ -1449,6 +1602,11 @@ export function ChapterShotEditPage() {
             onToggleExpanded={toggleExpanded}
             onIgnoreCandidate={(asset) => void ignoreCandidate(asset)}
             onHandleNewAsset={(asset) => void handleNewAsset(asset)}
+            onNewLinkedAsset={handleNewLinkedAsset}
+            onReplaceAsset={openReplaceDrawer}
+            onUnlinkAsset={(asset) => void doUnlinkAsset(asset)}
+            unlinkingIds={unlinkingIds}
+            onAddAsset={openAddDrawer}
           />
 
           <Divider className="!my-1" />
@@ -1799,6 +1957,31 @@ export function ChapterShotEditPage() {
           />
         </div>
       </Modal>
+
+      {/* 资产替换选择抽屉：从已关联资产卡片右下角"替换"按钮触发 */}
+      <AssetPickerDrawer
+        open={replaceDrawerOpen}
+        kind={replaceDrawerAsset?.kind ?? 'scene'}
+        currentEntityId={replaceDrawerAsset?.id}
+        projectId={projectId}
+        loading={replaceDrawerLoading}
+        onSelect={(newId, newName) => void doReplace(newId, newName)}
+        onClose={() => {
+          setReplaceDrawerOpen(false)
+          setReplaceDrawerAsset(null)
+        }}
+      />
+
+      {/* 添加关联资产抽屉：从各类别 header "添加关联资产" 按钮触发 */}
+      <AssetPickerDrawer
+        mode="add"
+        open={addDrawerOpen}
+        kind={addDrawerKind}
+        projectId={projectId}
+        loading={addDrawerLoading}
+        onSelect={(entityId, entityName) => void doAddLink(entityId, entityName)}
+        onClose={() => setAddDrawerOpen(false)}
+      />
     </Layout>
   )
 }

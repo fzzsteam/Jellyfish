@@ -35,6 +35,12 @@ jellyfish/
 - 管理数据库模型、文件存储与任务状态
 - 通过 `chains / services / core.tasks` 接入 AI 能力
 
+## SPA 静态入口缓存
+
+- SAE / combined 镜像当前由 FastAPI 挂载 `dist` 并为 React Router 路由 fallback 到 `index.html`。
+- `index.html` 与 `env.js` 是运行时入口文件，必须返回 `Cache-Control: no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0`。
+- 带 hash 的 `/assets/*` 构建产物可以由浏览器按 ETag/Last-Modified 校验；入口 HTML 不允许长期复用旧缓存，避免部署后旧 HTML 引用已替换的 JS bundle 导致白屏。
+
 ## 生成能力分层约束
 
 - 通用生成契约（输入/输出 DTO、供应商配置等）统一放在 `app/core/contracts`。

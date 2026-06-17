@@ -2,7 +2,7 @@ import { StudioFilesService } from '../../../services/generated'
 import { StudioEntitiesApi } from '../../../services/studioEntities'
 import { generateUUID } from '../../../utils'
 
-type EntityType = 'actor' | 'scene' | 'prop' | 'costume'
+type EntityType = 'actor' | 'character' | 'scene' | 'prop' | 'costume'
 
 type BulkUploadOptions = {
   entityType: EntityType

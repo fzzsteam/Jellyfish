@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -12,13 +12,15 @@ import {
   Spin,
   Tag,
   Typography,
+  Upload,
   message,
 } from 'antd'
-import { ArrowLeftOutlined, CloseCircleOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
-import { FilmService, ScriptProcessingService } from '../../../../services/generated'
-import type { AssetImageCandidateRead, TaskStatus } from '../../../../services/generated'
+import { ArrowLeftOutlined, CheckOutlined, CloseCircleOutlined, EditOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
+import { FilmService, LlmService, ScriptProcessingService, StudioFilesService } from '../../../../services/generated'
+import type { AssetImageCandidateRead, ModelRead, ProviderRead, TaskStatus } from '../../../../services/generated'
 import { buildFileDownloadUrl } from '../utils'
 import { AssetImageCandidateGallery } from './AssetImageCandidateGallery'
+import { MentionEditor } from './MentionEditor'
 import { DisplayImageCard } from './DisplayImageCard'
 import { defaultTaskActionErrorMessage, executeAsyncTaskCreate, executeTaskCancel, notifyExistingTask } from '../../components/taskActionHelpers'
 import { handleTaskResultSafely } from '../../components/taskResultHelpers'
@@ -77,6 +79,16 @@ export type BaseAssetImage = {
   format?: string | null
 }
 
+type ImageGenerationPayload = {
+  prompt: string
+  images: string[]
+  model_id: string | null
+}
+
+type ImageModelOption = ModelRead & {
+  provider_name: string
+}
+
 export type AssetEditPageBaseProps<TAsset extends BaseAsset, TImage extends BaseAssetImage> = {
   assetId?: string
   missingAssetIdText: string
@@ -91,7 +103,8 @@ export type AssetEditPageBaseProps<TAsset extends BaseAsset, TImage extends Base
   listImageCandidates: (assetId: string, imageId: number) => Promise<AssetImageCandidateRead[]>
   adoptImageCandidate: (assetId: string, imageId: number, candidateId: number) => Promise<void>
   deleteImageCandidate: (assetId: string, imageId: number, candidateId: number) => Promise<void>
-  createGenerationTask: (assetId: string, imageId: number, payload: { prompt: string; images: string[] }) => Promise<string | null>
+  createGenerationTask: (assetId: string, imageId: number, payload: ImageGenerationPayload) => Promise<string | null>
+  attachImageCandidates?: (assetId: string, imageId: number, fileIds: string[]) => Promise<void>
   onNavigate: (to: string, replace?: boolean) => void
 }
 
@@ -161,10 +174,19 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   adoptImageCandidate,
   deleteImageCandidate,
   createGenerationTask,
+  attachImageCandidates,
   onNavigate,
 }: AssetEditPageBaseProps<TAsset, TImage>) {
   const taskCopy = TASK_COPY.smartDetect
   const location = useLocation()
+  // 从 URL 读取一次性预填名称（由分镜准备"新建"按钮传入）。
+  // 用 window.location.search 直接读取（而非 useSearchParams），避免清除时触发 React Router 重渲染链。
+  const prefillNameRef = useRef<string | null>(
+    new URLSearchParams(window.location.search).get('prefillName')?.trim() || null,
+  )
+  // onNavigate 来自父组件内联函数，每次渲染都是新引用；用 ref 稳定化以避免 loadData 被重建重跑。
+  const onNavigateRef = useRef(onNavigate)
+  onNavigateRef.current = onNavigate
   const [loading, setLoading] = useState(true)
   const [asset, setAsset] = useState<TAsset | null>(null)
   const [images, setImages] = useState<TImage[]>([])
@@ -173,6 +195,9 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   const [formDesc, setFormDesc] = useState('')
   const [formTags, setFormTags] = useState('')
   const [savingBase, setSavingBase] = useState(false)
+  const [imageModelsLoading, setImageModelsLoading] = useState(false)
+  const [imageModels, setImageModels] = useState<ImageModelOption[]>([])
+  const [selectedImageModelId, setSelectedImageModelId] = useState<string | null>(null)
 
   const [smartDetectLoading, setSmartDetectLoading] = useState(false)
   const [smartDetectOpen, setSmartDetectOpen] = useState(false)
@@ -189,6 +214,9 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   const [editingSlotImage, setEditingSlotImage] = useState<TImage | null>(null)
   const [adoptingImageId, setAdoptingImageId] = useState<number | null>(null)
   const [deletingCandidateId, setDeletingCandidateId] = useState<number | null>(null)
+  const [uploadingCandidates, setUploadingCandidates] = useState(false)
+  const [mentionedFileIds, setMentionedFileIds] = useState<string[]>([])
+
   const smartDetectRelationType = useMemo(() => getSmartDetectRelationType(relationType), [relationType])
   const smartDetectRelationEntityId = useMemo(
     () => (assetId && smartDetectRelationType ? `${relationType}:${assetId}` : null),
@@ -198,6 +226,65 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     () => getAssetNavigateRelationType(relationType),
     [relationType],
   )
+
+  // Loads selectable image models so asset image generation can target a concrete model.
+  useEffect(() => {
+    let active = true
+    setImageModelsLoading(true)
+    void (async () => {
+      try {
+        const [modelsRes, providersRes] = await Promise.all([
+          LlmService.listModelsApiV1LlmModelsGet({
+            category: 'image',
+            order: 'name',
+            isDesc: false,
+            page: 1,
+            pageSize: 100,
+          }),
+          LlmService.listProvidersApiV1LlmProvidersGet({
+            order: 'name',
+            isDesc: false,
+            page: 1,
+            pageSize: 100,
+          }),
+        ])
+        if (!active) return
+        const providers = (providersRes.data?.items ?? []) as ProviderRead[]
+        const activeProviderIds = new Set(
+          providers
+            .filter((provider) => provider.status !== 'disabled')
+            .map((provider) => provider.id),
+        )
+        const providerNameById = new Map(providers.map((provider) => [provider.id, provider.name]))
+        const items = ((modelsRes.data?.items ?? []) as ModelRead[])
+          .filter((model) => model.category === 'image')
+          .filter((model) => activeProviderIds.size === 0 || activeProviderIds.has(model.provider_id))
+          .map((model) => ({
+            ...model,
+            provider_name: providerNameById.get(model.provider_id) ?? model.provider_id,
+          }))
+        setImageModels(items)
+        setSelectedImageModelId((prev) => {
+          if (prev && items.some((item) => item.id === prev)) return prev
+          return items[0]?.id ?? null
+        })
+      } catch {
+        if (active) {
+          setImageModels([])
+          setSelectedImageModelId(null)
+        }
+      } finally {
+        if (active) {
+          setImageModelsLoading(false)
+        }
+      }
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [])
+
   const applySmartDetectResult = useCallback(async (taskId: string) => {
     await handleTaskResultSafely(taskId, {
       readErrorMessage: '读取智能检测结果失败',
@@ -283,12 +370,21 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       const nextAsset = await getAsset(assetId)
       if (!nextAsset) {
         message.error(`未找到${assetDisplayName}资产`)
-        onNavigate(backTo, true)
+        onNavigateRef.current(backTo, true)
         return
       }
 
       setAsset(nextAsset)
-      setFormName(nextAsset.name)
+      const prefillName = prefillNameRef.current
+      prefillNameRef.current = null  // 消费一次后清空，防止 reload 时重复覆盖
+      setFormName(prefillName ?? nextAsset.name)
+      // prefillName 已消费，用 replaceState 清除 URL 参数。
+      // 不用 setSearchParams 是因为它会触发父组件重渲染，导致 loadData 被重建重跑，覆盖掉刚设置的预填名称。
+      if (prefillName) {
+        const cleanUrl = new URL(window.location.href)
+        cleanUrl.searchParams.delete('prefillName')
+        window.history.replaceState(null, '', cleanUrl.toString())
+      }
       setFormDesc(nextAsset.description ?? '')
       setFormTags((nextAsset.tags ?? []).join(', '))
       const targetCount = clampViewCount(nextAsset.view_count)
@@ -299,7 +395,8 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     } finally {
       setLoading(false)
     }
-  }, [assetId, assetDisplayName, backTo, ensureImageSlots, getAsset, onNavigate])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assetId, assetDisplayName, backTo, ensureImageSlots, getAsset])
 
   useEffect(() => {
     void loadData()
@@ -511,7 +608,8 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
 
       const taskId = await createGenerationTask(assetId, image.id, {
         prompt,
-        images: [],
+        images: mentionedFileIds,
+        model_id: selectedImageModelId,
       })
       if (!taskId) {
         message.error('生成任务创建失败：缺少任务 ID')
@@ -611,6 +709,50 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     }
   }
 
+  const handleCandidateUpload = async (files: File[]) => {
+    if (!assetId || !editingSlotImage || files.length === 0 || !attachImageCandidates) return
+    setUploadingCandidates(true)
+    try {
+      const fileIds: string[] = []
+      for (const file of files) {
+        const res = await StudioFilesService.uploadFileApiApiV1StudioFilesUploadPost({
+          formData: { file } as any,
+          name: file.name,
+        })
+        const fileId = res.data?.id
+        if (fileId) fileIds.push(String(fileId))
+      }
+      if (fileIds.length > 0) {
+        await attachImageCandidates(assetId, editingSlotImage.id, fileIds)
+        const candidates = await listImageCandidates(assetId, editingSlotImage.id)
+        setHistoryCandidates(candidates)
+        message.success(`已上传 ${fileIds.length} 张图片到候选池`)
+      }
+    } catch {
+      message.error('上传候选图片失败')
+    } finally {
+      setUploadingCandidates(false)
+    }
+  }
+
+  // Loads all image candidates from every slot and deduplicates by file_id, for MentionEditor.
+  const loadMentionCandidates = useCallback(async (): Promise<AssetImageCandidateRead[]> => {
+    if (!assetId) return []
+    const all: AssetImageCandidateRead[] = []
+    for (const item of slotItems) {
+      if (item.image) {
+        const cands = await listImageCandidates(assetId, item.image.id)
+        all.push(...cands)
+      }
+    }
+    const seen = new Set<string>()
+    return all.filter((c) => {
+      if (!c.file_id || seen.has(c.file_id)) return false
+      seen.add(c.file_id)
+      return true
+    })
+  }, [assetId, slotItems, listImageCandidates])
+
   if (!assetId) {
     return (
       <Card>
@@ -686,16 +828,64 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                         </>
                       ) : null}
                     </div>
-                  <Input.TextArea
-                    rows={4}
+                  <MentionEditor
                     value={formDesc}
-                    onChange={(e) => setFormDesc(e.target.value)}
+                    onChange={(text, fileIds) => {
+                      setFormDesc(text)
+                      setMentionedFileIds(fileIds)
+                    }}
                     disabled={smartDetectBusy || savingBase}
+                    placeholder="支持输入 @ 选择候选池图片作为参考"
+                    loadCandidates={loadMentionCandidates}
                   />
                 </div>
                 <div>
-                  <div className="text-gray-600 text-sm mb-1">标签（逗号分隔）</div>
-                  <Input value={formTags} onChange={(e) => setFormTags(e.target.value)} disabled={smartDetectBusy || savingBase} />
+                  <div className="text-gray-600 text-sm mb-2">模型选择</div>
+                  {imageModelsLoading ? (
+                    <div className="h-28 flex items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50">
+                      <Spin size="small" />
+                    </div>
+                  ) : imageModels.length === 0 ? (
+                    <div className="h-28 flex items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-400">
+                      暂无可用图片模型
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {imageModels.map((model) => {
+                        const selected = model.id === selectedImageModelId
+                        return (
+                          <div
+                            key={model.id}
+                            role="button"
+                            tabIndex={0}
+                            className={[
+                              'flex cursor-pointer items-start gap-2 rounded px-3 py-2 transition-colors select-none',
+                              selected ? 'bg-blue-50 ring-1 ring-blue-400' : 'hover:bg-gray-50',
+                              (savingBase || smartDetectBusy) ? 'pointer-events-none opacity-50' : '',
+                            ].join(' ')}
+                            onClick={() => setSelectedImageModelId(model.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setSelectedImageModelId(model.id)
+                              }
+                            }}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate text-sm font-medium text-gray-800">{model.name}</div>
+                              <div className="mt-0.5 flex items-center gap-1.5">
+                                <Tag className="m-0 flex-shrink-0 px-1 py-0 text-[10px] leading-4">{model.provider_name}</Tag>
+                                {model.description ? (
+                                  <span className="truncate text-xs text-gray-500">{model.description}</span>
+                                ) : null}
+                              </div>
+                            </div>
+                            {selected ? <CheckOutlined className="mt-0.5 flex-shrink-0 text-blue-500" /> : null}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             ),
@@ -745,7 +935,28 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       />
 
       <Modal
-        title="图片候选池"
+        title={
+          <div className="flex items-center justify-between pr-8">
+            <span>图片候选池</span>
+            {attachImageCandidates && (
+              <Upload
+                accept="image/*"
+                multiple
+                showUploadList={false}
+                disabled={uploadingCandidates}
+                beforeUpload={(file, fileList) => {
+                  const isLast = file.uid === fileList[fileList.length - 1]?.uid
+                  if (isLast) void handleCandidateUpload(fileList)
+                  return Upload.LIST_IGNORE
+                }}
+              >
+                <Button size="small" icon={<UploadOutlined />} loading={uploadingCandidates}>
+                  本地上传
+                </Button>
+              </Upload>
+            )}
+          </div>
+        }
         open={historyOpen}
         onCancel={() => {
           setHistoryOpen(false)

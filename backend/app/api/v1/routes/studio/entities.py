@@ -58,6 +58,7 @@ async def list_entities(
     is_desc: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
+    project_id: str | None = Query(None, description="按项目过滤（仅对 character 类型有效）"),
 ) -> ApiResponse[PaginatedData[dict[str, Any]]]:
     service = StudioEntitiesService(db)
     payload, total = await service.list_entities(
@@ -69,6 +70,7 @@ async def list_entities(
         is_desc=is_desc,
         page=page,
         page_size=page_size,
+        project_id=project_id,
     )
     return paginated_response(payload, page=page, page_size=page_size, total=total)
 

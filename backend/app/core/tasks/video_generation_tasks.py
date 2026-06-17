@@ -12,6 +12,7 @@ from typing import Any, AsyncIterator
 from app.core.integrations.openai.video import OpenAIVideoApiAdapter
 from app.core.integrations.volcengine.video import VolcengineVideoApiAdapter
 from app.core.integrations.bailian.video import BailianVideoApiAdapter
+from app.core.integrations.vidu.video import ViduVideoApiAdapter
 from app.core.contracts.provider import ProviderConfig
 from app.core.tasks.registry import resolve_task_adapter
 from app.core.contracts.video_generation import VideoGenerationInput, VideoGenerationResult
@@ -24,6 +25,7 @@ __all__ = [
     "OpenAIVideoGenerationTask",
     "VolcengineVideoGenerationTask",
     "BailianVideoGenerationTask",
+    "ViduVideoGenerationTask",
     "VideoGenerationTask",
 ]
 
@@ -247,6 +249,39 @@ class BailianVideoGenerationTask(AbstractVideoGenerationTask):
         return self._deferred
 
 
+class ViduVideoGenerationTask(AbstractVideoGenerationTask):
+    """Vidu reference2video task wrapper around the Vidu HTTP adapter."""
+
+    def __init__(
+        self,
+        *,
+        adapter: ViduVideoApiAdapter | None = None,
+        provider_config: ProviderConfig,
+        input_: VideoGenerationInput,
+        poll_interval_s: float = 3.0,
+        timeout_s: float = 600.0,
+    ) -> None:
+        super().__init__(
+            provider_config=provider_config,
+            input_=input_,
+            poll_interval_s=poll_interval_s,
+            timeout_s=timeout_s,
+        )
+        self._adapter = adapter or ViduVideoApiAdapter()
+        self._deferred: VideoGenerationResult | None = None
+
+    async def _create_task(self) -> None:
+        self._deferred = await self._adapter.generate(
+            cfg=self._cfg,
+            inp=self._input,
+            timeout_s=self._timeout_s,
+        )
+
+    async def _poll_and_get_result(self) -> VideoGenerationResult:
+        assert self._deferred is not None
+        return self._deferred
+
+
 class VideoGenerationTask(BaseTask):
     """按 provider 分派到 OpenAI / 火山实现；对外构造函数签名保持不变。"""
 
@@ -308,6 +343,21 @@ class VideoGenerationTask(BaseTask):
         timeout_s: float = 600.0,
     ) -> AbstractVideoGenerationTask:
         return BailianVideoGenerationTask(
+            provider_config=provider_config,
+            input_=input_,
+            poll_interval_s=poll_interval_s,
+            timeout_s=timeout_s,
+        )
+
+    @staticmethod
+    def _build_vidu_impl(
+        *,
+        provider_config: ProviderConfig,
+        input_: VideoGenerationInput,
+        poll_interval_s: float = 3.0,
+        timeout_s: float = 600.0,
+    ) -> AbstractVideoGenerationTask:
+        return ViduVideoGenerationTask(
             provider_config=provider_config,
             input_=input_,
             poll_interval_s=poll_interval_s,

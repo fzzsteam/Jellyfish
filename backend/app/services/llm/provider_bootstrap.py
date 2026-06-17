@@ -32,5 +32,12 @@ def bootstrap_builtin_providers() -> None:
                 supported_categories=(ModelCategoryKey.text, ModelCategoryKey.image, ModelCategoryKey.video),
                 default_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             ),
+            ProviderSpec(
+                key="vidu",
+                display_name="Vidu",
+                aliases=("vidu",),
+                supported_categories=(ModelCategoryKey.image, ModelCategoryKey.video),
+                default_base_url="https://api.vidu.cn",
+            ),
         ]
     )

@@ -67,11 +67,15 @@ async def list_entities_paginated(
     is_desc: bool,
     page: int,
     page_size: int,
+    project_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     entity_type_norm = normalize_entity_type(entity_type)
     spec = entity_spec(entity_type_norm)
     stmt = select(spec.model)
     stmt = apply_keyword_filter(stmt, q=q, fields=[spec.model.name, spec.model.description])
+    # character 是项目级实体，可按 project_id 过滤以只展示当前项目的角色
+    if project_id and entity_type_norm in {"actor", "character"} and hasattr(spec.model, "project_id"):
+        stmt = stmt.where(getattr(spec.model, "project_id") == project_id)
     if style:
         stmt = stmt.where(getattr(spec.model, "style") == style)
     if visual_style:
@@ -168,7 +172,9 @@ async def create_entity(
     await db.flush()
     await db.refresh(obj)
 
-    if entity_type_norm in {"actor", "scene", "prop", "costume"}:
+    # character 也创建正面视角图片槽位，与 actor/scene/prop/costume 保持一致；
+    # view_count 在角色上未使用，固定创建 1 个正面槽位即可
+    if entity_type_norm in {"actor", "character", "scene", "prop", "costume"}:
         count = int(getattr(obj, "view_count", 1) or 1)
         angles = list(DEFAULT_VIEW_ANGLES[: min(max(count, 0), len(DEFAULT_VIEW_ANGLES))])
         for angle in angles:
@@ -196,8 +202,10 @@ async def create_entity(
             .limit(1)
         )
         max_index = (await db.execute(existing_indexes_stmt)).scalars().first()
+        # 追加语义：新建角色挂到镜头时只顺延 index，不踢掉镜头内已关联的其它角色
         await upsert_shot_character_link(
             db,
+            reassign_index_on_conflict=True,
             body=ShotCharacterLinkCreate(
                 shot_id=link_shot_id,
                 character_id=obj.id,

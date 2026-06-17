@@ -9,12 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.utils import apply_keyword_filter, apply_order, paginate
 from app.models.studio import (
+    CameraAngle,
+    CameraMovement,
+    CameraShotType,
     Chapter,
     Shot,
     ShotCandidateStatus,
+    ShotDetail,
     ShotDialogueCandidateStatus,
     ShotExtractedCandidate,
     ShotExtractedDialogueCandidate,
+    VFXType,
 )
 from app.schemas.common import ApiResponse, PaginatedData, paginated_response
 from app.schemas.studio.shots import ShotCreate, ShotExtractionSummaryRead, ShotRead, ShotUpdate
@@ -204,10 +209,23 @@ async def create(
     *,
     body: ShotCreate,
 ) -> Shot:
-    """创建镜头。"""
+    """创建镜头，并同步创建默认 ShotDetail（与分镜流程保持一致）。"""
     await ensure_not_exists(db, Shot, body.id, detail=entity_already_exists("Shot"))
     await require_entity(db, Chapter, body.chapter_id, detail=entity_not_found("Chapter"), status_code=400)
-    return await create_and_refresh(db, Shot(**body.model_dump()))
+    shot = Shot(**body.model_dump())
+    db.add(shot)
+    db.add(ShotDetail(
+        id=shot.id,
+        camera_shot=CameraShotType.ms,
+        angle=CameraAngle.eye_level,
+        movement=CameraMovement.static,
+        follow_atmosphere=True,
+        vfx_type=VFXType.none,
+        duration=4,
+    ))
+    await db.flush()
+    await db.refresh(shot)
+    return shot
 
 
 async def get(
