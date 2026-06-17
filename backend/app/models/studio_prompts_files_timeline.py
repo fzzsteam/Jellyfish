@@ -4,11 +4,11 @@ from sqlalchemy import Boolean, JSON, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
-from app.models.base import TimestampMixin
+from app.models.base import TimestampMixin, UserOwnedMixin
 from app.models.types import FileType, PromptCategory, TimelineClipType
 
 
-class PromptTemplate(Base,TimestampMixin):
+class PromptTemplate(Base, UserOwnedMixin, TimestampMixin):
     """提示词模板表。
 
     应用层保证：
@@ -32,7 +32,7 @@ class PromptTemplate(Base,TimestampMixin):
     )
 
 
-class FileItem(Base, TimestampMixin):
+class FileItem(Base, UserOwnedMixin, TimestampMixin):
     """素材文件表。"""
 
     __tablename__ = "files"
