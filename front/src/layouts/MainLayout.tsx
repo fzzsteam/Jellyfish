@@ -27,7 +27,6 @@ const MainLayout: React.FC = () => {
   const toggleCollapsed = useAppStore((state) => state.toggleSider)
   const authUser = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
-  const user = useAppStore((state) => state.user)
 
   const selectedKeys = useMemo(() => {
     if (location.pathname === '/projects' || location.pathname.startsWith('/projects/')) return ['projects']
