@@ -48,7 +48,7 @@ class Scene(Base, UserOwnedMixin, TimestampMixin):
 
     __table_args__ = (
         Index("ix_scenes_name", "name"),
-        UniqueConstraint("name", name="uq_scenes_name"),
+        UniqueConstraint("user_id", "name", name="uq_scenes_user_name"),
     )
 
 
@@ -97,7 +97,7 @@ class Prop(Base, UserOwnedMixin, TimestampMixin):
 
     __table_args__ = (
         Index("ix_props_name", "name"),
-        UniqueConstraint("name", name="uq_props_name"),
+        UniqueConstraint("user_id", "name", name="uq_props_user_name"),
     )
 
 
@@ -142,7 +142,7 @@ class Costume(Base, UserOwnedMixin, TimestampMixin):
 
     __table_args__ = (
         Index("ix_costumes_name", "name"),
-        UniqueConstraint("name", name="uq_costumes_name"),
+        UniqueConstraint("user_id", "name", name="uq_costumes_user_name"),
     )
 
 
@@ -192,7 +192,7 @@ class Actor(Base, UserOwnedMixin, TimestampMixin):
 
     __table_args__ = (
         Index("ix_actors_name", "name"),
-        UniqueConstraint("name", name="uq_actors_name"),
+        UniqueConstraint("user_id", "name", name="uq_actors_user_name"),
     )
 
 
