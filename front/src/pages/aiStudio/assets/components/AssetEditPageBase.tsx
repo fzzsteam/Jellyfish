@@ -15,9 +15,9 @@ import {
   Upload,
   message,
 } from 'antd'
-import { ArrowLeftOutlined, CloseCircleOutlined, EditOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
-import { FilmService, ScriptProcessingService, StudioFilesService } from '../../../../services/generated'
-import type { AssetImageCandidateRead, TaskStatus } from '../../../../services/generated'
+import { ArrowLeftOutlined, CheckOutlined, CloseCircleOutlined, EditOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
+import { FilmService, LlmService, ScriptProcessingService, StudioFilesService } from '../../../../services/generated'
+import type { AssetImageCandidateRead, ModelRead, ProviderRead, TaskStatus } from '../../../../services/generated'
 import { buildFileDownloadUrl } from '../utils'
 import { AssetImageCandidateGallery } from './AssetImageCandidateGallery'
 import { MentionEditor } from './MentionEditor'
@@ -79,6 +79,16 @@ export type BaseAssetImage = {
   format?: string | null
 }
 
+type ImageGenerationPayload = {
+  prompt: string
+  images: string[]
+  model_id: string | null
+}
+
+type ImageModelOption = ModelRead & {
+  provider_name: string
+}
+
 export type AssetEditPageBaseProps<TAsset extends BaseAsset, TImage extends BaseAssetImage> = {
   assetId?: string
   missingAssetIdText: string
@@ -93,7 +103,7 @@ export type AssetEditPageBaseProps<TAsset extends BaseAsset, TImage extends Base
   listImageCandidates: (assetId: string, imageId: number) => Promise<AssetImageCandidateRead[]>
   adoptImageCandidate: (assetId: string, imageId: number, candidateId: number) => Promise<void>
   deleteImageCandidate: (assetId: string, imageId: number, candidateId: number) => Promise<void>
-  createGenerationTask: (assetId: string, imageId: number, payload: { prompt: string; images: string[] }) => Promise<string | null>
+  createGenerationTask: (assetId: string, imageId: number, payload: ImageGenerationPayload) => Promise<string | null>
   attachImageCandidates?: (assetId: string, imageId: number, fileIds: string[]) => Promise<void>
   onNavigate: (to: string, replace?: boolean) => void
 }
@@ -185,6 +195,9 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   const [formDesc, setFormDesc] = useState('')
   const [formTags, setFormTags] = useState('')
   const [savingBase, setSavingBase] = useState(false)
+  const [imageModelsLoading, setImageModelsLoading] = useState(false)
+  const [imageModels, setImageModels] = useState<ImageModelOption[]>([])
+  const [selectedImageModelId, setSelectedImageModelId] = useState<string | null>(null)
 
   const [smartDetectLoading, setSmartDetectLoading] = useState(false)
   const [smartDetectOpen, setSmartDetectOpen] = useState(false)
@@ -213,6 +226,65 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     () => getAssetNavigateRelationType(relationType),
     [relationType],
   )
+
+  // Loads selectable image models so asset image generation can target a concrete model.
+  useEffect(() => {
+    let active = true
+    setImageModelsLoading(true)
+    void (async () => {
+      try {
+        const [modelsRes, providersRes] = await Promise.all([
+          LlmService.listModelsApiV1LlmModelsGet({
+            category: 'image',
+            order: 'name',
+            isDesc: false,
+            page: 1,
+            pageSize: 100,
+          }),
+          LlmService.listProvidersApiV1LlmProvidersGet({
+            order: 'name',
+            isDesc: false,
+            page: 1,
+            pageSize: 100,
+          }),
+        ])
+        if (!active) return
+        const providers = (providersRes.data?.items ?? []) as ProviderRead[]
+        const activeProviderIds = new Set(
+          providers
+            .filter((provider) => provider.status !== 'disabled')
+            .map((provider) => provider.id),
+        )
+        const providerNameById = new Map(providers.map((provider) => [provider.id, provider.name]))
+        const items = ((modelsRes.data?.items ?? []) as ModelRead[])
+          .filter((model) => model.category === 'image')
+          .filter((model) => activeProviderIds.size === 0 || activeProviderIds.has(model.provider_id))
+          .map((model) => ({
+            ...model,
+            provider_name: providerNameById.get(model.provider_id) ?? model.provider_id,
+          }))
+        setImageModels(items)
+        setSelectedImageModelId((prev) => {
+          if (prev && items.some((item) => item.id === prev)) return prev
+          return items[0]?.id ?? null
+        })
+      } catch {
+        if (active) {
+          setImageModels([])
+          setSelectedImageModelId(null)
+        }
+      } finally {
+        if (active) {
+          setImageModelsLoading(false)
+        }
+      }
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [])
+
   const applySmartDetectResult = useCallback(async (taskId: string) => {
     await handleTaskResultSafely(taskId, {
       readErrorMessage: '读取智能检测结果失败',
@@ -537,6 +609,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       const taskId = await createGenerationTask(assetId, image.id, {
         prompt,
         images: mentionedFileIds,
+        model_id: selectedImageModelId,
       })
       if (!taskId) {
         message.error('生成任务创建失败：缺少任务 ID')
@@ -767,8 +840,52 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                   />
                 </div>
                 <div>
-                  <div className="text-gray-600 text-sm mb-1">标签（逗号分隔）</div>
-                  <Input value={formTags} onChange={(e) => setFormTags(e.target.value)} disabled={smartDetectBusy || savingBase} />
+                  <div className="text-gray-600 text-sm mb-2">模型选择</div>
+                  {imageModelsLoading ? (
+                    <div className="h-28 flex items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50">
+                      <Spin size="small" />
+                    </div>
+                  ) : imageModels.length === 0 ? (
+                    <div className="h-28 flex items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-400">
+                      暂无可用图片模型
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {imageModels.map((model) => {
+                        const selected = model.id === selectedImageModelId
+                        return (
+                          <div
+                            key={model.id}
+                            role="button"
+                            tabIndex={0}
+                            className={[
+                              'flex cursor-pointer items-start gap-2 rounded px-3 py-2 transition-colors select-none',
+                              selected ? 'bg-blue-50 ring-1 ring-blue-400' : 'hover:bg-gray-50',
+                              (savingBase || smartDetectBusy) ? 'pointer-events-none opacity-50' : '',
+                            ].join(' ')}
+                            onClick={() => setSelectedImageModelId(model.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setSelectedImageModelId(model.id)
+                              }
+                            }}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate text-sm font-medium text-gray-800">{model.name}</div>
+                              <div className="mt-0.5 flex items-center gap-1.5">
+                                <Tag className="m-0 flex-shrink-0 px-1 py-0 text-[10px] leading-4">{model.provider_name}</Tag>
+                                {model.description ? (
+                                  <span className="truncate text-xs text-gray-500">{model.description}</span>
+                                ) : null}
+                              </div>
+                            </div>
+                            {selected ? <CheckOutlined className="mt-0.5 flex-shrink-0 text-blue-500" /> : null}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             ),

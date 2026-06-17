@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from fastapi import HTTPException
 import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -143,36 +142,35 @@ async def test_list_models_paginated_returns_filtered_items() -> None:
 
 
 @pytest.mark.asyncio
-async def test_create_model_rejects_unsupported_category_for_provider() -> None:
+async def test_create_model_accepts_vidu_video_category() -> None:
     db, engine = await _build_session()
     async with db:
         await create_provider(
             db,
             body=ProviderCreate(
-                id="p-bailian",
-                name="阿里百炼",
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                id="p-vidu",
+                name="Vidu",
+                base_url="https://api.vidu.cn",
                 api_key="k",
             ),
         )
 
-        with pytest.raises(HTTPException) as exc_info:
-            await create_model(
-                db,
-                body=ModelCreate(
-                    id="m-video-invalid",
-                    name="qwen-vl-video",
-                    category=ModelCategoryKey.video,
-                    provider_id="p-bailian",
-                ),
-            )
-        assert exc_info.value.status_code == 400
-        assert "does not support category=video" in str(exc_info.value.detail)
+        created = await create_model(
+            db,
+            body=ModelCreate(
+                id="m-vidu-video",
+                name="viduq3",
+                category=ModelCategoryKey.video,
+                provider_id="p-vidu",
+            ),
+        )
+        assert created.category == ModelCategoryKey.video
+        assert created.provider_id == "p-vidu"
     await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_update_model_rejects_switch_to_unsupported_provider_category_combo() -> None:
+async def test_update_model_allows_switch_to_vidu_video_provider() -> None:
     db, engine = await _build_session()
     async with db:
         await create_provider(
@@ -187,9 +185,9 @@ async def test_update_model_rejects_switch_to_unsupported_provider_category_comb
         await create_provider(
             db,
             body=ProviderCreate(
-                id="p-bailian",
-                name="阿里百炼",
-                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+                id="p-vidu",
+                name="Vidu",
+                base_url="https://api.vidu.cn",
                 api_key="k",
             ),
         )
@@ -203,14 +201,13 @@ async def test_update_model_rejects_switch_to_unsupported_provider_category_comb
             ),
         )
 
-        with pytest.raises(HTTPException) as exc_info:
-            await update_model(
-                db,
-                model_id="m-video-ok",
-                body=ModelUpdate(provider_id="p-bailian"),
-            )
-        assert exc_info.value.status_code == 400
-        assert "does not support category=video" in str(exc_info.value.detail)
+        updated = await update_model(
+            db,
+            model_id="m-video-ok",
+            body=ModelUpdate(provider_id="p-vidu"),
+        )
+        assert updated.category == ModelCategoryKey.video
+        assert updated.provider_id == "p-vidu"
     await engine.dispose()
 
 

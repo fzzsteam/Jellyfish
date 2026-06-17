@@ -36,7 +36,7 @@ def bootstrap_builtin_providers() -> None:
                 key="vidu",
                 display_name="Vidu",
                 aliases=("vidu",),
-                supported_categories=(ModelCategoryKey.image,),
+                supported_categories=(ModelCategoryKey.image, ModelCategoryKey.video),
                 default_base_url="https://api.vidu.cn",
             ),
         ]

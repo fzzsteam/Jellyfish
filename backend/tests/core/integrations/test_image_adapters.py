@@ -9,6 +9,7 @@ import pytest
 
 from app.core.integrations.openai.images import OpenAIImageApiAdapter
 from app.core.integrations.volcengine.images import VolcengineImageApiAdapter
+from app.core.integrations.vidu.images import ViduImageApiAdapter
 from app.core.contracts.image_generation import ImageGenerationInput, InputImageRef
 from app.core.contracts.provider import ProviderConfig
 from app.core.integrations.image_capabilities import (
@@ -145,6 +146,69 @@ async def test_volcengine_image_adapter_generations(monkeypatch: pytest.MonkeyPa
     assert result.provider == "volcengine"
     assert result.provider_task_id == "task-xyz"
     assert result.images[0].url == "https://volc.example/v.mp4"
+
+
+@pytest.mark.asyncio
+async def test_vidu_image_reference2image_uses_official_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            captured["auth"] = request.headers.get("authorization")
+            body = json.loads(request.content.decode())
+            captured["body"] = body
+            assert request.url.path.endswith("/ent/v2/reference2image")
+            assert body == {
+                "model": "viduq2",
+                "images": [
+                    "https://cdn.example.com/ref-1.png",
+                    "https://cdn.example.com/ref-2.png",
+                    "https://cdn.example.com/ref-3.png",
+                ],
+                "prompt": "your_prompt",
+                "aspect_ratio": "16:9",
+                "resolution": "2K",
+                "payload": "",
+                "seed": 0,
+            }
+            return httpx.Response(200, json={"task_id": "vidu-image-task-1", "state": "created"})
+        if request.method == "GET":
+            assert request.url.path.endswith("/ent/v2/tasks/vidu-image-task-1/creations")
+            return httpx.Response(
+                200,
+                json={
+                    "task_id": "vidu-image-task-1",
+                    "state": "success",
+                    "creations": [{"url": "https://cdn.example.com/out.png"}],
+                },
+            )
+        return httpx.Response(500)
+
+    monkeypatch.setattr("asyncio.sleep", no_sleep)
+    _patch_httpx_client(monkeypatch, httpx.MockTransport(handler))
+    cfg = ProviderConfig(provider="vidu", api_key="vidu-key", base_url="https://api.vidu.cn")
+    inp = ImageGenerationInput(
+        model="viduq2",
+        prompt="your_prompt",
+        target_ratio="16:9",
+        resolution_profile="high",
+        seed=0,
+        images=[
+            InputImageRef(image_url="https://cdn.example.com/ref-1.png"),
+            InputImageRef(image_url="https://cdn.example.com/ref-2.png"),
+            InputImageRef(image_url="https://cdn.example.com/ref-3.png"),
+        ],
+    )
+
+    result = await ViduImageApiAdapter().generate(cfg=cfg, inp=inp, timeout_s=30.0)
+
+    assert captured["auth"] == "Token vidu-key"
+    assert result.provider == "vidu"
+    assert result.provider_task_id == "vidu-image-task-1"
+    assert result.images[0].url == "https://cdn.example.com/out.png"
 
 
 @pytest.mark.asyncio

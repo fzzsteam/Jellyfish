@@ -14,6 +14,12 @@ type UpdateImagePayload = {
   format?: string | null
 }
 
+type ImageGenerationPayload = {
+  prompt: string
+  images: string[]
+  model_id: string | null
+}
+
 function normalizeUpdateImagePayload(payload: UpdateImagePayload): UpdateImagePayload {
   return {
     ...payload,
@@ -58,10 +64,10 @@ export const assetAdapters = {
     attachImageCandidates: async (id: string, imageId: number, fileIds: string[]) => {
       await StudioEntitiesApi.attachImageCandidates('character', id, imageId, { file_ids: fileIds, source_type: 'upload' })
     },
-    createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
+    createGenerationTask: async (id: string, imageId: number, payload: ImageGenerationPayload) => {
       const res = await StudioImageTasksService.createCharacterImageGenerationTaskApiV1StudioImageTasksCharactersCharacterIdImageTasksPost({
         characterId: id,
-        requestBody: { image_id: imageId, model_id: null, prompt: payload.prompt, images: payload.images } as any,
+        requestBody: { image_id: imageId, model_id: payload.model_id, prompt: payload.prompt, images: payload.images },
       })
       return res.data?.task_id ?? null
     },
@@ -102,10 +108,10 @@ export const assetAdapters = {
     attachImageCandidates: async (id: string, imageId: number, fileIds: string[]) => {
       await StudioEntitiesApi.attachImageCandidates('actor', id, imageId, { file_ids: fileIds, source_type: 'upload' })
     },
-    createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
+    createGenerationTask: async (id: string, imageId: number, payload: ImageGenerationPayload) => {
       const res = await StudioImageTasksService.createActorImageGenerationTaskApiV1StudioImageTasksActorsActorIdImageTasksPost({
         actorId: id,
-        requestBody: { image_id: imageId, model_id: null, prompt: payload.prompt, images: payload.images } as any,
+        requestBody: { image_id: imageId, model_id: payload.model_id, prompt: payload.prompt, images: payload.images },
       })
       return res.data?.task_id ?? null
     },
@@ -146,11 +152,11 @@ export const assetAdapters = {
     attachImageCandidates: async (id: string, imageId: number, fileIds: string[]) => {
       await StudioEntitiesApi.attachImageCandidates('scene', id, imageId, { file_ids: fileIds, source_type: 'upload' })
     },
-    createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
+    createGenerationTask: async (id: string, imageId: number, payload: ImageGenerationPayload) => {
       const res = await StudioImageTasksService.createAssetImageGenerationTaskApiV1StudioImageTasksAssetsAssetTypeAssetIdImageTasksPost({
         assetType: 'scene',
         assetId: id,
-        requestBody: { image_id: imageId, prompt: payload.prompt, images: payload.images } as any,
+        requestBody: { image_id: imageId, model_id: payload.model_id, prompt: payload.prompt, images: payload.images },
       })
       return res.data?.task_id ?? null
     },
@@ -191,11 +197,11 @@ export const assetAdapters = {
     attachImageCandidates: async (id: string, imageId: number, fileIds: string[]) => {
       await StudioEntitiesApi.attachImageCandidates('prop', id, imageId, { file_ids: fileIds, source_type: 'upload' })
     },
-    createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
+    createGenerationTask: async (id: string, imageId: number, payload: ImageGenerationPayload) => {
       const res = await StudioImageTasksService.createAssetImageGenerationTaskApiV1StudioImageTasksAssetsAssetTypeAssetIdImageTasksPost({
         assetType: 'prop',
         assetId: id,
-        requestBody: { image_id: imageId, prompt: payload.prompt, images: payload.images } as any,
+        requestBody: { image_id: imageId, model_id: payload.model_id, prompt: payload.prompt, images: payload.images },
       })
       return res.data?.task_id ?? null
     },
@@ -236,11 +242,11 @@ export const assetAdapters = {
     attachImageCandidates: async (id: string, imageId: number, fileIds: string[]) => {
       await StudioEntitiesApi.attachImageCandidates('costume', id, imageId, { file_ids: fileIds, source_type: 'upload' })
     },
-    createGenerationTask: async (id: string, imageId: number, payload: { prompt: string; images: string[] }) => {
+    createGenerationTask: async (id: string, imageId: number, payload: ImageGenerationPayload) => {
       const res = await StudioImageTasksService.createAssetImageGenerationTaskApiV1StudioImageTasksAssetsAssetTypeAssetIdImageTasksPost({
         assetType: 'costume',
         assetId: id,
-        requestBody: { image_id: imageId, prompt: payload.prompt, images: payload.images } as any,
+        requestBody: { image_id: imageId, model_id: payload.model_id, prompt: payload.prompt, images: payload.images },
       })
       return res.data?.task_id ?? null
     },

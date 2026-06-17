@@ -15,6 +15,7 @@ TASK_ADAPTER_SPECS = (
     ("video_generation", "openai", VideoGenerationTask._build_openai_impl),
     ("video_generation", "volcengine", VideoGenerationTask._build_volcengine_impl),
     ("video_generation", "aliyun_bailian", VideoGenerationTask._build_bailian_impl),
+    ("video_generation", "vidu", VideoGenerationTask._build_vidu_impl),
 )
 
 
