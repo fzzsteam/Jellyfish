@@ -42,3 +42,30 @@ class UserRead(BaseModel):
     username: str = Field(..., description="用户名")
     is_admin: bool = Field(..., description="是否管理员")
     is_active: bool = Field(..., description="是否启用")
+
+
+class UserCreate(BaseModel):
+    """管理员创建用户的请求体。"""
+
+    username: str = Field(..., min_length=1, max_length=64, description="用户名")
+    password: str = Field(..., min_length=6, description="初始密码")
+    is_admin: bool = Field(False, description="是否管理员")
+
+
+class UserUpdate(BaseModel):
+    """管理员修改用户的请求体（字段均可选，仅更新传入项）。"""
+
+    password: str | None = Field(None, min_length=6, description="重置后的新密码")
+    is_active: bool | None = Field(None, description="启用/禁用")
+    is_admin: bool | None = Field(None, description="是否管理员")
+
+
+class UserAdminRead(BaseModel):
+    """管理员视角的用户信息。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str = Field(..., description="用户 ID")
+    username: str = Field(..., description="用户名")
+    is_admin: bool = Field(..., description="是否管理员")
+    is_active: bool = Field(..., description="是否启用")
