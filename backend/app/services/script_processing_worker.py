@@ -26,6 +26,7 @@ from app.chains.agents.script_processing_agents import (
     ScriptSimplificationResult,
 )
 from app.core.db_sync import sync_session_maker
+from app.models.studio import Chapter
 from app.services.script_extraction_cache import (
     build_script_extract_cache_key,
     get_cached_script_extract,
@@ -39,6 +40,7 @@ from app.services.studio.shot_extracted_candidates import (
 from app.services.studio.shot_extracted_dialogue_candidates import (
     sync_from_extraction_draft_sync as sync_shot_extracted_dialogue_candidates_from_draft_sync,
 )
+from app.services.studio.shot_auto_preparation import AutoPreparationSummary, auto_prepare_chapter_shots_sync
 from app.services.studio.shot_semantic_defaults import apply_shot_semantic_defaults_from_draft_sync
 from app.services.worker.task_executor import (
     AbstractLLMResultGenerator,
@@ -153,6 +155,7 @@ class DivideTaskExecutor(AbstractWorkerTaskExecutor):
     def __init__(self) -> None:
         super().__init__(session_maker=sync_session_maker)
         self._generator = DivideResultGenerator()
+        self._pending_image_task_ids: list[str] = []
 
     def execute(self, ctx: WorkerTaskContext, run_args: dict[str, Any]) -> ScriptDivisionResult:
         return self._generator.generate(ctx.db, run_args)
@@ -165,6 +168,17 @@ class DivideTaskExecutor(AbstractWorkerTaskExecutor):
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required for write_to_db=true")
         apply_division_result(ctx.db, chapter_id=chapter_id, result=result)
+        summary = apply_auto_extraction_after_division(ctx.db, chapter_id=chapter_id, result=result)
+        self._pending_image_task_ids = summary.image_task_ids if summary is not None else []
+
+    def after_apply_commit(self, task_id: str, run_args: dict[str, Any], result: Any) -> None:
+        from app.tasks.execute_task import enqueue_task_execution  # 避免循环导入
+        for image_task_id in self._pending_image_task_ids:
+            try:
+                enqueue_task_execution(image_task_id)
+            except Exception:  # noqa: BLE001
+                logger.warning("auto_prep: 图片任务入队失败 task_id=%s", image_task_id)
+        self._pending_image_task_ids = []
 
 
 class ExtractTaskExecutor(AbstractWorkerTaskExecutor):
@@ -174,6 +188,7 @@ class ExtractTaskExecutor(AbstractWorkerTaskExecutor):
     def __init__(self) -> None:
         super().__init__(session_maker=sync_session_maker)
         self._generator = ExtractResultGenerator()
+        self._pending_image_task_ids: list[str] = []
 
     def execute(self, ctx: WorkerTaskContext, run_args: dict[str, Any]) -> tuple[Any, bool]:
         return self._generator.generate(ctx.db, run_args)
@@ -192,6 +207,19 @@ class ExtractTaskExecutor(AbstractWorkerTaskExecutor):
         draft, _from_cache = result
         chapter_id = str(run_args.get("chapter_id") or "")
         apply_extraction_result(ctx.db, chapter_id=chapter_id, draft=draft)
+        project_id = str(run_args.get("project_id") or "")
+        if project_id and chapter_id:
+            summary = auto_prepare_chapter_shots_sync(ctx.db, project_id=project_id, chapter_id=chapter_id)
+            self._pending_image_task_ids = summary.image_task_ids
+
+    def after_apply_commit(self, task_id: str, run_args: dict[str, Any], result: Any) -> None:
+        from app.tasks.execute_task import enqueue_task_execution  # 避免循环导入
+        for image_task_id in self._pending_image_task_ids:
+            try:
+                enqueue_task_execution(image_task_id)
+            except Exception:  # noqa: BLE001
+                logger.warning("auto_prep: 图片任务入队失败 task_id=%s", image_task_id)
+        self._pending_image_task_ids = []
 
 
 class ConsistencyTaskExecutor(AbstractWorkerTaskExecutor):
@@ -316,6 +344,29 @@ def apply_extraction_result(
     sync_shot_extracted_candidates_from_draft_sync(db, chapter_id=chapter_id, draft=draft)
     sync_shot_extracted_dialogue_candidates_from_draft_sync(db, chapter_id=chapter_id, draft=draft)
     apply_shot_semantic_defaults_from_draft_sync(db, chapter_id=chapter_id, draft=draft)
+
+
+def apply_auto_extraction_after_division(
+    db: Session,
+    *,
+    chapter_id: str,
+    result: ScriptDivisionResult,
+) -> AutoPreparationSummary:
+    """在分镜拆分写库后，串行提取每个镜头的资产/对白并执行自动准备。返回自动准备摘要。"""
+
+    chapter = db.get(Chapter, chapter_id)
+    if chapter is None:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+    draft, _from_cache = generate_extraction_result(
+        db=db,
+        project_id=chapter.project_id,
+        chapter_id=chapter_id,
+        script_division=result.model_dump(),
+        consistency=None,
+        refresh_cache=False,
+    )
+    apply_extraction_result(db, chapter_id=chapter_id, draft=draft)
+    return auto_prepare_chapter_shots_sync(db, project_id=chapter.project_id, chapter_id=chapter_id)
 
 
 def run_divide_task_sync(task_id: str) -> None:

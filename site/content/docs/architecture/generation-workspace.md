@@ -254,3 +254,20 @@ front/src/pages/aiStudio/hooks/useGenerationDraft.ts
 3. 任务中心
 
 这些模块有独立职责，不参与当前的 `Base Draft / Context / Derived Preview / Submission Payload` 收敛。
+
+## 视频供应商适配现状
+
+当前视频生成执行层通过 `app/core/tasks/video_generation_tasks.py` 按 provider key 分派到具体供应商 adapter。
+
+- `openai`、`volcengine`、`aliyun_bailian`、`vidu` 均已注册 `video_generation` 任务适配器。
+- `vidu` 视频生成走 `app/core/integrations/vidu/video.py`，使用 Vidu 官方 `POST /ent/v2/reference2video` 创建任务，并轮询 `GET /ent/v2/tasks/{task_id}/creations` 获取结果。
+- Vidu 视频请求使用 `Authorization: Token {api_key}`，默认模型为 `viduq3`，参考帧会映射为默认主题 `subject_1` 的 `subjects[0].images`。
+- Vidu 非主体模型 `viduq3-mix` 使用同一接口，但请求体改为顶层 `images` 列表，不传 `subjects` 与 `audio`，默认分辨率映射为 `720p`。
+- Vidu 文生视频模型 `viduq3-pro` 在无参考帧时走 `POST /ent/v2/text2video`，请求体包含 `style=general`、`movement_amplitude=auto`、`off_peak=false`，默认分辨率映射为 `540p`。
+- Vidu 图生视频模型 `viduq3-pro` 在存在参考帧时走 `POST /ent/v2/img2video`，只使用第一张参考图作为 `images[0]`，请求体包含 `audio=true`、`voice_id=professional_host`、`movement_amplitude=auto`、`off_peak=false`，分辨率为 `1080p`。
+- Vidu 首尾帧生视频模型 `viduq3-pro` 在同时存在首帧和尾帧时走 `POST /ent/v2/start-end2video`，使用前两张参考图作为 `images`，请求体包含 `audio=true`、`off_peak=false`，分辨率为 `1080p`。
+- Vidu 智能多帧模型 `viduq2-turbo` 走 `POST /ent/v2/multiframe`，使用第一张参考图作为 `start_image`，后续参考图映射为 `image_settings[*].key_image`，并复用当前视频提示词与时长填充每个关键帧段落，分辨率为 `1080p`。
+- Vidu 场景特效模板通过模型名 `template:{template_name}` 触发，当前可将 `template:hugging` 配置为视频模型；执行时走 `POST /ent/v2/template`，请求体传 `template`、参考图 `images`、提示词 `prompt` 与可选 `seed`，不传普通 `model` 字段。
+- Vidu 模板成片通过模型名 `story:{story_name}` 或 `template-story:{story_name}` 触发；执行时走 `POST /ent/v2/template-story`，请求体只传 `story` 与参考图 `images`，不传普通 `model` 字段，也不依赖提示词字段。
+- Vidu 视频能力声明 `supports_watermark=False`，业务层不会向 Vidu 视频请求体传递 `watermark` 字段；当前视频生成统一以无水印为目标，只有供应商显式支持无水印参数时才传 `watermark=False`。
+- Vidu 图片生成走 `app/core/integrations/vidu/images.py`，使用 `POST /ent/v2/reference2image` 创建任务，请求体包含 `model`、`images`、`prompt`、`seed`、`aspect_ratio`、`resolution` 与空字符串 `payload`，并轮询同一套 `/ent/v2/tasks/{task_id}/creations` 结果接口。

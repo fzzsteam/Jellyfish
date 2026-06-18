@@ -363,6 +363,94 @@ async def mark_pending_by_name(
     return row
 
 
+async def mark_ignored_by_name(
+    db: AsyncSession,
+    *,
+    shot_id: str,
+    candidate_type: ShotCandidateType | str,
+    candidate_name: str,
+) -> ShotExtractedCandidate | None:
+    """按镜头、候选类型与名称将候选标记为已忽略（从 UI 彻底隐藏）。
+
+    用于"忽略"已关联资产时，使对应候选不再出现在任何区域（既不在已关联，也不在待确认）。
+    """
+    normalized_name = str(candidate_name).strip()
+    if not normalized_name:
+        return None
+    normalized_type = ShotCandidateType(str(candidate_type))
+    stmt = (
+        select(ShotExtractedCandidate)
+        .where(ShotExtractedCandidate.shot_id == shot_id)
+        .where(ShotExtractedCandidate.candidate_type == normalized_type)
+        .where(ShotExtractedCandidate.candidate_name == normalized_name)
+        .order_by(ShotExtractedCandidate.id.asc())
+        .limit(1)
+    )
+    row = (await db.execute(stmt)).scalars().first()
+    if row is None:
+        return None
+    row.candidate_status = ShotCandidateStatus.ignored
+    row.linked_entity_id = None
+    row.confirmed_at = _utc_now()
+    await _flush_refresh_candidate(db, row)
+    await recompute_shot_status(db, shot_id=row.shot_id)
+    return row
+
+
+async def mark_all_linked_ignored_for_entity(
+    db: AsyncSession,
+    *,
+    shot_id: str,
+    candidate_type: ShotCandidateType | str,
+    entity_id: str,
+) -> None:
+    """将同镜头内所有 linked 到指定实体的候选全部标记为 ignored。
+
+    多候选合并展示后，"忽略"该合并卡片时调用，确保所有指向该实体的候选均被清理。
+    """
+    normalized_type = ShotCandidateType(str(candidate_type))
+    stmt = (
+        select(ShotExtractedCandidate)
+        .where(ShotExtractedCandidate.shot_id == shot_id)
+        .where(ShotExtractedCandidate.candidate_type == normalized_type)
+        .where(ShotExtractedCandidate.linked_entity_id == entity_id)
+        .where(ShotExtractedCandidate.candidate_status == ShotCandidateStatus.linked)
+    )
+    rows = list((await db.execute(stmt)).scalars().all())
+    for row in rows:
+        row.candidate_status = ShotCandidateStatus.ignored
+        row.linked_entity_id = None
+        row.confirmed_at = _utc_now()
+    if rows:
+        await db.flush()
+        await recompute_shot_status(db, shot_id=shot_id)
+
+
+async def has_other_linked_candidates(
+    db: AsyncSession,
+    *,
+    shot_id: str,
+    candidate_type: ShotCandidateType | str,
+    entity_id: str,
+) -> bool:
+    """检查同镜头内是否还有其他处于 linked 状态且指向同一实体的候选。
+
+    用于忽略某一候选后决定是否保留对应的 ProjectPropLink：
+    若仍有其他候选引用该实体，则不应删除 link；否则可安全删除。
+    """
+    normalized_type = ShotCandidateType(str(candidate_type))
+    stmt = (
+        select(ShotExtractedCandidate.id)
+        .where(ShotExtractedCandidate.shot_id == shot_id)
+        .where(ShotExtractedCandidate.candidate_type == normalized_type)
+        .where(ShotExtractedCandidate.linked_entity_id == entity_id)
+        .where(ShotExtractedCandidate.candidate_status == ShotCandidateStatus.linked)
+        .limit(1)
+    )
+    result = (await db.execute(stmt)).scalars().first()
+    return result is not None
+
+
 async def mark_pending_by_linked_entity(
     db: AsyncSession,
     *,

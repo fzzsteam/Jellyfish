@@ -11,6 +11,8 @@ from app.models.types import FileUsageKind
 from app.models.studio import (
     Actor,
     ActorImage,
+    AssetImageCandidate,
+    AssetImageCandidateSource,
     Chapter,
     Character,
     CharacterImage,
@@ -58,6 +60,8 @@ __all__ = [
     "CharacterImage",
     "CharacterPropLink",
     "ActorImage",
+    "AssetImageCandidate",
+    "AssetImageCandidateSource",
     "Scene",
     "SceneImage",
     "Prop",

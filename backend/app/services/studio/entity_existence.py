@@ -49,9 +49,10 @@ async def check_names_existence(
             raise HTTPException(status_code=404, detail=relation_mismatch("shot_id", "project_id"))
 
     async def _find_character_id(q: str) -> str | None:
+        # 角色为全局共享资产，不限定 project_id，与 shot_auto_preparation 保持一致
         stmt = (
             select(Character.id)
-            .where(Character.project_id == project_id, Character.name.ilike(f"%{q}%"))
+            .where(Character.name.ilike(f"%{q}%"))
             .limit(1)
         )
         row = (await db.execute(stmt)).scalar_one_or_none()

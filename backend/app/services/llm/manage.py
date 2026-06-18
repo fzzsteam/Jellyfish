@@ -8,6 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.utils import apply_keyword_filter, apply_order, paginate
 from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider
+from app.core.contracts.generation_models import (
+    GenerationModelCategory,
+    list_builtin_generation_models as list_builtin_generation_model_contracts,
+)
 from app.core.integrations.image_capabilities import (
     DEFAULT_VIDEO_REFERENCE_RATIO_SIZE_MAP,
     resolve_image_capability,
@@ -15,6 +19,7 @@ from app.core.integrations.image_capabilities import (
 from app.core.integrations.video_capabilities import resolve_default_ratio, resolve_video_capability
 from app.schemas.common import ApiResponse, PaginatedData, paginated_response
 from app.schemas.llm import (
+    BuiltinGenerationModelRead,
     ImageGenerationOptionsRead,
     ModelCreate,
     ModelRead,
@@ -27,6 +32,7 @@ from app.schemas.llm import (
     ProviderUpdate,
 )
 from app.services.llm.provider_registry import (
+    get_provider_spec,
     is_provider_category_supported,
     list_registered_providers,
     resolve_provider_key_from_name,
@@ -365,6 +371,32 @@ def list_supported_providers(*, category: ModelCategoryKey | None) -> list[Provi
             is_experimental=spec.is_experimental,
         )
         for spec in specs
+    ]
+
+
+def list_builtin_generation_models(*, category: ModelCategoryKey | None) -> list[BuiltinGenerationModelRead]:
+    """Return product-owned generation models that users can select without model CRUD."""
+    bootstrap_all_registries()
+    category_value: GenerationModelCategory | None = None
+    if category == ModelCategoryKey.image:
+        category_value = "image"
+    elif category == ModelCategoryKey.video:
+        category_value = "video"
+    elif category is not None:
+        return []
+
+    return [
+        BuiltinGenerationModelRead(
+            id=item.id,
+            provider=item.provider,
+            provider_name=get_provider_spec(item.provider).display_name,
+            category=ModelCategoryKey(item.category),
+            name=item.name,
+            display_name=item.display_name,
+            description=item.description,
+            recommended=item.recommended,
+        )
+        for item in list_builtin_generation_model_contracts(category_value)
     ]
 
 

@@ -68,6 +68,7 @@ async def create_video_generation_task(
         prompt=body.prompt,
         images=body.images,
         ratio=body.ratio,
+        model_id=body.model_id,
     )
 
     task_record = await tm.create(

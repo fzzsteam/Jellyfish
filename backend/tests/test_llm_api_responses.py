@@ -205,6 +205,7 @@ def test_list_supported_providers_returns_capability_matrix(client: TestClient) 
     assert "openai" in keys
     assert "volcengine" in keys
     assert "aliyun_bailian" in keys
+    assert "vidu" in keys
 
 
 def test_list_supported_providers_text_contains_aliyun_bailian(client: TestClient) -> None:
@@ -222,8 +223,37 @@ def test_list_supported_providers_can_filter_by_category(client: TestClient) -> 
     body = response.json()
     assert body["code"] == 200
     assert isinstance(body["data"], list)
+    keys = {item["key"] for item in body["data"]}
+    assert "vidu" in keys
     for item in body["data"]:
         assert "video" in item["supported_categories"]
+
+
+def test_list_builtin_generation_models_can_filter_by_category(client: TestClient) -> None:
+    response = client.get("/api/v1/llm/builtin-models", params={"category": "image"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 200
+    ids = {item["id"] for item in body["data"]}
+    assert ids == {
+        "builtin:aliyun_bailian:image:qwen-image-2.0-pro",
+        "builtin:aliyun_bailian:image:wan2.7-image-pro",
+    }
+    assert all(item["category"] == "image" for item in body["data"])
+
+    response = client.get("/api/v1/llm/builtin-models", params={"category": "video"})
+    assert response.status_code == 200
+    body = response.json()
+    ids = {item["id"] for item in body["data"]}
+    assert ids == {
+        "builtin:aliyun_bailian:video:happyhorse-1.0-t2v",
+        "builtin:aliyun_bailian:video:happyhorse-1.0-i2v",
+        "builtin:aliyun_bailian:video:happyhorse-1.0-r2v",
+    }
+    recommended = [item for item in body["data"] if item["recommended"]]
+    assert [item["id"] for item in recommended] == ["builtin:aliyun_bailian:video:happyhorse-1.0-t2v"]
+    assert "builtin:aliyun_bailian:video:happyhorse-1.0-i2v" in ids
+    assert all(item["category"] == "video" for item in body["data"])
 
 
 def test_get_video_generation_options_returns_ratio_capability(client: TestClient) -> None:

@@ -153,7 +153,6 @@ async def upload_file(
         key=key,
         data=content,
         content_type=file.content_type,
-        extra_args={"ACL": "public-read"},
     )
 
     file_item = await create_and_refresh(
@@ -162,7 +161,7 @@ async def upload_file(
             id=str(uuid.uuid4()),
             type=file_type,
             name=display_name,
-            thumbnail=info.url,
+            thumbnail="",
             tags=[],
             storage_key=key,
         ),

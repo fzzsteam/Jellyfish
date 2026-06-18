@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.utils import apply_keyword_filter, apply_order, paginate
 from app.dependencies import get_db
-from app.models.studio import Project
+from app.models.studio import FileUsage, Project
 from app.models.types import ProjectStyle, ProjectVisualStyle
 from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, paginated_response, success_response
 from app.services.common import (
@@ -170,5 +170,26 @@ async def delete_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[None]:
+    from sqlalchemy import delete as sql_delete
+
+    # 先清理关联的 file_usages 记录，避免外键约束失败:
+    # file_usages.project_id → projects.id (ON DELETE CASCADE)
+    # 但 orphan 记录（project_id 指向不存在的 project）无法级联
+
+    # 1. 删除该 project 关联的 file_usages
+    await db.execute(
+        sql_delete(FileUsage).where(FileUsage.project_id == project_id)
+    )
+
+    # 2. 清理所有 orphan file_usages（project_id 不对应任何存在的 project）
+    await db.execute(
+        sql_delete(FileUsage).where(
+            FileUsage.project_id.notin_(
+                select(Project.id).scalar_subquery()
+            )
+        )
+    )
+
+    # 3. 再删除 project 本身
     await delete_if_exists(db, Project, project_id)
     return empty_response()

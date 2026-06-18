@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,6 +8,7 @@ from app.core.db import async_session_maker
 from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore, TaskManager
 from app.core.task_manager.types import TaskStatus
 from app.core.contracts.image_generation import ImageGenerationInput, ImageGenerationResult
+from app.core.contracts.generation_models import get_builtin_generation_model
 from app.core.contracts.provider import ProviderConfig
 from app.core.tasks import ImageGenerationTask
 from app.models.studio import (
@@ -31,7 +33,10 @@ from app.services.studio.file_usages import (
     sync_usage_from_shot_context,
     upsert_file_usage,
 )
+from app.services.studio.asset_image_candidates import attach_asset_image_candidate
 from app.services.studio.shot_status import mark_shot_generating, recompute_shot_status
+from app.models.llm import ModelCategoryKey
+from app.services.llm.provider_resolver import resolve_provider_config_by_key
 from app.services.studio.image_tasks import load_provider_config, resolve_image_model
 from app.services.worker.async_task_support import cancel_if_requested_async
 from app.services.worker.task_logging import log_task_event, log_task_failure
@@ -67,17 +72,43 @@ async def _persist_images_to_assets(
     if not images:
         return
 
-    item = images[0]
-    if not item.url:
+    target = await _resolve_generated_image_target(session, relation_type=relation_type, relation_entity_id=relation_entity_id)
+    if target is None:
         return
 
-    file_obj = await create_file_from_url_or_b64(
-        session,
-        url=item.url,
-        name=f"{relation_type}-{relation_entity_id}",
-        prefix=f"generated-images/{relation_type}/{relation_entity_id}",
-    )
-    file_id = file_obj.id
+    target_type, target_id = target
+    created_file_ids: list[str] = []
+    for index, item in enumerate(images):
+        if not item.url:
+            continue
+        file_obj = await create_file_from_url_or_b64(
+            session,
+            url=item.url,
+            name=f"{target_type}-{target_id}-{index + 1}",
+            prefix=f"generated-images/{target_type}/{target_id}",
+        )
+        file_id = file_obj.id
+        created_file_ids.append(file_id)
+        await attach_asset_image_candidate(
+            session,
+            target_type=target_type,
+            target_id=target_id,
+            file_id=file_id,
+            source_type="generation",
+            source_ref=task_id,
+            auto_adopt_if_empty=index == 0,
+        )
+        await _sync_generated_image_usage(
+            session,
+            relation_type=relation_type,
+            relation_entity_id=relation_entity_id,
+            target_type=target_type,
+            target_id=target_id,
+            file_id=file_id,
+        )
+
+    if not created_file_ids:
+        return
 
     link_stmt = (
         select(GenerationTaskLink)
@@ -90,80 +121,32 @@ async def _persist_images_to_assets(
     )
     link_row = (await session.execute(link_stmt)).scalars().first()
     if link_row is not None:
-        link_row.file_id = file_id
+        link_row.file_id = created_file_ids[0]
 
+
+async def _resolve_generated_image_target(
+    session: AsyncSession,
+    *,
+    relation_type: str,
+    relation_entity_id: str,
+) -> tuple[str, int] | None:
+    """把生成任务关联关系解析为可挂载候选图的图片槽位。"""
     if relation_type == "actor_image":
         image_row = await session.get(ActorImage, int(relation_entity_id))
-        if image_row is not None:
-            image_row.file_id = file_id
-            pid = await first_project_id_for_actor(session, image_row.actor_id)
-            if pid:
-                await upsert_file_usage(
-                    session,
-                    file_id=file_id,
-                    project_id=pid,
-                    chapter_id=None,
-                    shot_id=None,
-                    usage_kind=FileUsageKind.asset_image,
-                    source_ref=f"actor_image:{image_row.id}",
-                )
-    elif relation_type == "scene_image":
+        return ("actor_image", image_row.id) if image_row is not None else None
+    if relation_type == "scene_image":
         image_row = await session.get(SceneImage, int(relation_entity_id))
-        if image_row is not None:
-            image_row.file_id = file_id
-            pid = await first_project_id_for_scene(session, image_row.scene_id)
-            if pid:
-                await upsert_file_usage(
-                    session,
-                    file_id=file_id,
-                    project_id=pid,
-                    chapter_id=None,
-                    shot_id=None,
-                    usage_kind=FileUsageKind.asset_image,
-                    source_ref=f"scene_image:{image_row.id}",
-                )
-    elif relation_type == "prop_image":
+        return ("scene_image", image_row.id) if image_row is not None else None
+    if relation_type == "prop_image":
         image_row = await session.get(PropImage, int(relation_entity_id))
-        if image_row is not None:
-            image_row.file_id = file_id
-            pid = await first_project_id_for_prop(session, image_row.prop_id)
-            if pid:
-                await upsert_file_usage(
-                    session,
-                    file_id=file_id,
-                    project_id=pid,
-                    chapter_id=None,
-                    shot_id=None,
-                    usage_kind=FileUsageKind.asset_image,
-                    source_ref=f"prop_image:{image_row.id}",
-                )
-    elif relation_type == "costume_image":
+        return ("prop_image", image_row.id) if image_row is not None else None
+    if relation_type == "costume_image":
         image_row = await session.get(CostumeImage, int(relation_entity_id))
-        if image_row is not None:
-            image_row.file_id = file_id
-            pid = await first_project_id_for_costume(session, image_row.costume_id)
-            if pid:
-                await upsert_file_usage(
-                    session,
-                    file_id=file_id,
-                    project_id=pid,
-                    chapter_id=None,
-                    shot_id=None,
-                    usage_kind=FileUsageKind.asset_image,
-                    source_ref=f"costume_image:{image_row.id}",
-                )
-    elif relation_type == "character_image":
+        return ("costume_image", image_row.id) if image_row is not None else None
+    if relation_type == "character_image":
         image_row = await session.get(CharacterImage, int(relation_entity_id))
-        if image_row is not None:
-            image_row.file_id = file_id
-            await sync_usage_from_character(
-                session,
-                file_id=file_id,
-                character_id=image_row.character_id,
-                usage_kind=FileUsageKind.character_image,
-                source_ref=f"character_image:{image_row.id}",
-            )
-    elif relation_type == "character":
+        return ("character_image", image_row.id) if image_row is not None else None
+    if relation_type == "character":
         character_id = relation_entity_id
         stmt_ci = (
             select(CharacterImage)
@@ -176,13 +159,10 @@ async def _persist_images_to_assets(
             .limit(1)
         )
         ci = (await session.execute(stmt_ci)).scalars().first()
-        if ci is not None:
-            ci.file_id = file_id
-            ci.format = getattr(ci, "format", "") or "png"
-        else:
+        if ci is None:
             ci = CharacterImage(
                 character_id=character_id,
-                file_id=file_id,
+                file_id=None,
                 quality_level=AssetQualityLevel.low,
                 view_angle=AssetViewAngle.front,
                 width=None,
@@ -191,6 +171,8 @@ async def _persist_images_to_assets(
                 is_primary=True,
             )
             session.add(ci)
+        else:
+            ci.format = getattr(ci, "format", "") or "png"
 
         if ci is not None and getattr(ci, "is_primary", False) is True and getattr(ci, "id", None) is not None:
             stmt_clear = (
@@ -200,27 +182,106 @@ async def _persist_images_to_assets(
             )
             await session.execute(stmt_clear)
         await session.flush()
-        if ci is not None:
-            await sync_usage_from_character(
+        return ("character_image", ci.id) if ci is not None else None
+    if relation_type == "shot_frame_image":
+        image_row = await session.get(ShotFrameImage, int(relation_entity_id))
+        return ("shot_frame_image", image_row.id) if image_row is not None else None
+    return None
+
+
+async def _sync_generated_image_usage(
+    session: AsyncSession,
+    *,
+    relation_type: str,
+    relation_entity_id: str,
+    target_type: str,
+    target_id: int,
+    file_id: str,
+) -> None:
+    """为生成图同步 file_usages，便于素材库和项目文件页追踪来源。"""
+    if target_type == "actor_image":
+        image_row = await session.get(ActorImage, target_id)
+        if image_row is None:
+            return
+        pid = await first_project_id_for_actor(session, image_row.actor_id)
+        if pid:
+            await upsert_file_usage(
                 session,
                 file_id=file_id,
-                character_id=character_id,
-                usage_kind=FileUsageKind.character_image,
-                source_ref=f"character_image:{ci.id}",
+                project_id=pid,
+                chapter_id=None,
+                shot_id=None,
+                usage_kind=FileUsageKind.asset_image,
+                source_ref=f"actor_image:{image_row.id}",
             )
-    elif relation_type == "shot_frame_image":
-        image_row = await session.get(ShotFrameImage, int(relation_entity_id))
-        if image_row is not None:
-            image_row.file_id = file_id
-            detail = await session.get(ShotDetail, image_row.shot_detail_id)
-            if detail is not None:
-                await sync_usage_from_shot_context(
-                    session,
-                    file_id=file_id,
-                    shot_id=detail.id,
-                    usage_kind=FileUsageKind.shot_frame,
-                    source_ref=f"shot_frame_image:{image_row.id}",
-                )
+    elif target_type == "scene_image":
+        image_row = await session.get(SceneImage, target_id)
+        if image_row is None:
+            return
+        pid = await first_project_id_for_scene(session, image_row.scene_id)
+        if pid:
+            await upsert_file_usage(
+                session,
+                file_id=file_id,
+                project_id=pid,
+                chapter_id=None,
+                shot_id=None,
+                usage_kind=FileUsageKind.asset_image,
+                source_ref=f"scene_image:{image_row.id}",
+            )
+    elif target_type == "prop_image":
+        image_row = await session.get(PropImage, target_id)
+        if image_row is None:
+            return
+        pid = await first_project_id_for_prop(session, image_row.prop_id)
+        if pid:
+            await upsert_file_usage(
+                session,
+                file_id=file_id,
+                project_id=pid,
+                chapter_id=None,
+                shot_id=None,
+                usage_kind=FileUsageKind.asset_image,
+                source_ref=f"prop_image:{image_row.id}",
+            )
+    elif target_type == "costume_image":
+        image_row = await session.get(CostumeImage, target_id)
+        if image_row is None:
+            return
+        pid = await first_project_id_for_costume(session, image_row.costume_id)
+        if pid:
+            await upsert_file_usage(
+                session,
+                file_id=file_id,
+                project_id=pid,
+                chapter_id=None,
+                shot_id=None,
+                usage_kind=FileUsageKind.asset_image,
+                source_ref=f"costume_image:{image_row.id}",
+            )
+    elif target_type == "character_image":
+        image_row = await session.get(CharacterImage, target_id)
+        character_id = image_row.character_id if image_row is not None else relation_entity_id
+        await sync_usage_from_character(
+            session,
+            file_id=file_id,
+            character_id=character_id,
+            usage_kind=FileUsageKind.character_image,
+            source_ref=f"character_image:{target_id}",
+        )
+    elif target_type == "shot_frame_image":
+        image_row = await session.get(ShotFrameImage, target_id)
+        if image_row is None:
+            return
+        detail = await session.get(ShotDetail, image_row.shot_detail_id)
+        if detail is not None:
+            await sync_usage_from_shot_context(
+                session,
+                file_id=file_id,
+                shot_id=detail.id,
+                usage_kind=FileUsageKind.shot_frame,
+                source_ref=f"shot_frame_image:{image_row.id}",
+            )
 
 
 async def _resolve_related_shot_id(
@@ -255,8 +316,25 @@ async def create_image_task_and_link(
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
 
-    model = await resolve_image_model(db, model_id)
-    provider_cfg = await load_provider_config(db, model.provider_id)
+    builtin_model = get_builtin_generation_model(model_id)
+    if builtin_model is not None:
+        if builtin_model.category != "image":
+            raise HTTPException(status_code=400, detail=f"Built-in model is not an image model: {model_id}")
+        resolved_provider = await resolve_provider_config_by_key(
+            db,
+            provider_key=builtin_model.provider,
+            category=ModelCategoryKey.image,
+        )
+        provider_cfg = ProviderConfig(
+            provider=resolved_provider.provider_key,  # type: ignore[arg-type]
+            api_key=resolved_provider.api_key,
+            base_url=resolved_provider.base_url,
+        )
+        model_name = builtin_model.name
+    else:
+        model = await resolve_image_model(db, model_id)
+        provider_cfg = await load_provider_config(db, model.provider_id)
+        model_name = model.name
 
     run_args: dict = {
         "provider": provider_cfg.provider,
@@ -266,7 +344,7 @@ async def create_image_task_and_link(
         "relation_entity_id": relation_entity_id,
         "input": {
             "prompt": prompt,
-            "model": model.name,
+            "model": model_name,
             "target_ratio": target_ratio,
             "resolution_profile": resolution_profile,
             "purpose": purpose,

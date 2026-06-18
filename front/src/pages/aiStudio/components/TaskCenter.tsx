@@ -18,7 +18,7 @@ import {
 import { useResolvedTaskCenterTasks } from './taskCenterMeta'
 
 const TASK_CENTER_OPEN_STORAGE_KEY = 'jellyfish_task_center_open_v1'
-const TASK_CENTER_POSITION_STORAGE_KEY = 'jellyfish_task_center_position_v1'
+const TASK_CENTER_POSITION_STORAGE_KEY = 'jellyfish_task_center_position_v2'
 const TASK_CENTER_EDGE_PADDING = 24
 const TASK_CENTER_BUTTON_WIDTH = 132
 const TASK_CENTER_BUTTON_HEIGHT = 40
@@ -147,8 +147,8 @@ export function TaskCenter() {
       }
       const parsed = JSON.parse(rawPosition) as { x?: number; y?: number }
       const x = Number.isFinite(parsed?.x) ? Number(parsed.x) : defaultPosition.x
-      const y = Number.isFinite(parsed?.y) ? Number(parsed.y) : defaultPosition.y
-      setButtonPosition({ x, y })
+      // y 始终从当前视口底部计算，避免跨会话或视口尺寸变化后位置向上漂移
+      setButtonPosition({ x, y: defaultPosition.y })
     } catch {
       setOpen(false)
       setButtonPosition(defaultPosition)
@@ -168,7 +168,16 @@ export function TaskCenter() {
   useEffect(() => {
     const clampPosition = () => {
       if (typeof window === 'undefined') return
-      setButtonPosition((prev) => snapButtonPosition(clampButtonPosition(prev)))
+      // 视口大小变化时：x 保持左右吸附边缘，y 始终贴回底部
+      // 避免 DevTools 开关等导致 maxY 缩小后按钮被夹住在偏上位置，关闭后无法自动回底
+      setButtonPosition((prev) => {
+        const bounds = getButtonBounds()
+        const middleX = (bounds.minX + bounds.maxX) / 2
+        return {
+          x: prev.x <= middleX ? bounds.minX : bounds.maxX,
+          y: bounds.maxY,
+        }
+      })
     }
     clampPosition()
     window.addEventListener('resize', clampPosition)

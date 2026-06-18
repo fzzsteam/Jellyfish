@@ -22,15 +22,22 @@ def bootstrap_builtin_providers() -> None:
                 key="volcengine",
                 display_name="火山引擎",
                 aliases=("火山引擎", "volcengine", "volc", "doubao", "bytedance", "ark"),
-                supported_categories=(ModelCategoryKey.image, ModelCategoryKey.video),
+                supported_categories=(ModelCategoryKey.text, ModelCategoryKey.image, ModelCategoryKey.video),
                 default_base_url="https://ark.cn-beijing.volces.com/api/v3",
             ),
             ProviderSpec(
                 key="aliyun_bailian",
                 display_name="阿里百炼",
                 aliases=("阿里百炼", "aliyun", "bailian", "dashscope"),
-                supported_categories=(ModelCategoryKey.text,),
+                supported_categories=(ModelCategoryKey.text, ModelCategoryKey.image, ModelCategoryKey.video),
                 default_base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+            ),
+            ProviderSpec(
+                key="vidu",
+                display_name="Vidu",
+                aliases=("vidu",),
+                supported_categories=(ModelCategoryKey.image, ModelCategoryKey.video),
+                default_base_url="https://api.vidu.cn",
             ),
         ]
     )

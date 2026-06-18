@@ -9,6 +9,7 @@ from app.models.studio import (
     Chapter,
     Project,
     Prop,
+    ProjectPropLink,
     ProjectStyle,
     ProjectVisualStyle,
     PromptCategory,
@@ -35,6 +36,7 @@ from app.services.studio import (
     ignore_shot_extracted_dialogue_candidate,
     list_shot_extracted_candidates,
     list_shot_extracted_dialogue_candidates,
+    list_project_asset_links_paginated,
     replace_shot_extracted_candidates,
     replace_shot_extracted_dialogue_candidates,
     set_skip_extraction,
@@ -605,6 +607,56 @@ async def test_create_project_asset_link_marks_matching_prop_candidate_as_linked
         assert len(rows) == 1
         assert rows[0].candidate_status == ShotCandidateStatus.linked
         assert rows[0].linked_entity_id == "prop-1"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_project_asset_links_paginated_deduplicates_project_level_assets() -> None:
+    db, engine = await _build_session()
+    async with db:
+        shot = await _seed_graph(db)
+        shot_2 = Shot(id="shot-2", chapter_id="chapter-1", index=2, title="闀滃ご浜?")
+        db.add_all(
+            [
+                shot_2,
+                Prop(
+                    id="prop-1",
+                    name="荔枝",
+                    description="",
+                    style=ProjectStyle.real_people_city,
+                    view_count=1,
+                    tags=[],
+                    visual_style=ProjectVisualStyle.live_action,
+                ),
+            ]
+        )
+        await db.flush()
+        db.add_all(
+            [
+                ProjectPropLink(project_id="project-1", chapter_id="chapter-1", shot_id=shot.id, prop_id="prop-1"),
+                ProjectPropLink(project_id="project-1", chapter_id="chapter-1", shot_id=shot_2.id, prop_id="prop-1"),
+            ]
+        )
+        await db.flush()
+
+        response = await list_project_asset_links_paginated(
+            db,
+            entity_type="prop",
+            project_id="project-1",
+            chapter_id=None,
+            shot_id=None,
+            asset_id=None,
+            order=None,
+            is_desc=False,
+            page=1,
+            page_size=20,
+            allow_fields={"id", "created_at", "updated_at"},
+        )
+
+        assert response.data is not None
+        assert response.data.pagination.total == 1
+        assert len(response.data.items) == 1
+        assert response.data.items[0].prop_id == "prop-1"
     await engine.dispose()
 
 

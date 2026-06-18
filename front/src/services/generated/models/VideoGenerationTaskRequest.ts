@@ -3,28 +3,32 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * 视频生成任务请求。
+ * Request body for creating or previewing a shot video generation task.
  */
 export type VideoGenerationTaskRequest = {
     /**
-     * 镜头 ID
+     * Shot ID
      */
     shot_id: string;
     /**
-     * 参考模式：first | last | key | first_last | first_last_key | text_only
+     * Reference mode: first | last | key | first_last | first_last_key | text_only
      */
     reference_mode: 'first' | 'last' | 'key' | 'first_last' | 'first_last_key' | 'text_only';
     /**
-     * 视频提示词（text_only 必填）
+     * Video prompt; required for text_only after derivation
      */
     prompt?: (string | null);
     /**
-     * 参考图 file_id 列表，数量需与 reference_mode 严格匹配
+     * Reference image file_id list; count must match reference_mode
      */
     images?: Array<string>;
     /**
-     * 视频画幅比例，如 16:9 / 9:16
+     * Video aspect ratio, e.g. 16:9 / 9:16
      */
     ratio: '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9';
+    /**
+     * Optional built-in generation model id, e.g. builtin:vidu:video:viduq3
+     */
+    model_id?: (string | null);
 };
 

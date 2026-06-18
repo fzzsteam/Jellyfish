@@ -21,3 +21,7 @@ from app.schemas.studio.entity_existence import (
     EntityNameExistenceCheckResponse,
     EntityNameExistenceItem,
 )
+from app.schemas.studio.asset_image_candidates import (
+    AssetImageCandidateAttachRequest,
+    AssetImageCandidateRead,
+)

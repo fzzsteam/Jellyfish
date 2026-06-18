@@ -1,4 +1,4 @@
-import { Card, Button, Statistic, Row, Col, Progress, Space, Spin } from 'antd'
+import { Card, Button, Statistic, Row, Col, Progress, Spin } from 'antd'
 import {
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -8,7 +8,7 @@ import {
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import type { TabKey } from '../constants'
-import { getChapterShotsPath, getChapterStudioPath, getProjectChaptersPath, getProjectEditorPath } from '../routes'
+import { getChapterShotsPath, getChapterStudioPath } from '../routes'
 import { useProject, useChapters } from '../hooks/useProjectData'
 import { ensureHasShotsBeforeShooting } from '../ensureHasShotsBeforeShooting'
 import { getChapterPreparationState } from '../chapterPreparation'
@@ -180,17 +180,13 @@ export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => vo
                 : '暂无章节，可先创建第一章'}
             </div>
           </div>
-          <Space wrap>
-            <Button onClick={() => onSelectTab('chapters')}>进入章节管理</Button>
-            <Button onClick={() => projectId && navigate(getProjectEditorPath(projectId))}>进入后期剪辑</Button>
-            <Button
-              type="primary"
-              icon={recommendedState?.primaryIcon ?? <VideoCameraOutlined />}
-              onClick={handleRecommendedAction}
-            >
-              {recommendedChapter && recommendedState ? recommendedState.primaryAction : '创建第一章'}
-            </Button>
-          </Space>
+          <Button
+            type="primary"
+            icon={recommendedState?.primaryIcon ?? <VideoCameraOutlined />}
+            onClick={handleRecommendedAction}
+          >
+            {recommendedChapter && recommendedState ? recommendedState.primaryAction : '创建第一章'}
+          </Button>
         </div>
       </Card>
 
@@ -242,11 +238,6 @@ export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => vo
       <Card
         title="当前待办"
         size="small"
-        extra={
-          <Button type="link" onClick={() => projectId && navigate(getProjectChaptersPath(projectId))}>
-            查看全部
-          </Button>
-        }
       >
         <div className="flex gap-3 overflow-x-auto pb-2" style={{ minHeight: 140 }}>
           {chapters.length === 0 ? (

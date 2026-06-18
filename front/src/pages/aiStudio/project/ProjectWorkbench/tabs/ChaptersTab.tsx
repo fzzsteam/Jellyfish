@@ -132,9 +132,9 @@ export function ChaptersTab() {
     Modal.confirm({
       title: '章节创建成功',
       content: hasRawText
-        ? '这一章已经有原文内容，接下来更适合直接提取分镜。'
+        ? '这一章已经有原文内容，接下来更适合直接提取分镜并自动准备资产与对白。'
         : '这一章还没有原文内容，建议先补章节原文。',
-      okText: hasRawText ? '立即提取分镜' : '继续编辑原文',
+      okText: hasRawText ? '立即提取并自动准备' : '继续编辑原文',
       cancelText: '稍后处理',
       onOk: () => {
         if (hasRawText) {

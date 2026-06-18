@@ -3,6 +3,7 @@ import {
   Button,
   Card,
   Divider,
+  Dropdown,
   Empty,
   Form,
   Input,
@@ -19,7 +20,9 @@ import {
 } from 'antd'
 import type { TableColumnsType } from 'antd'
 import {
+  ArrowDownOutlined,
   ArrowLeftOutlined,
+  ArrowUpOutlined,
   CloseCircleOutlined,
   DeleteOutlined,
   EditOutlined,
@@ -39,6 +42,7 @@ import { useRelationTaskNotification } from '../components/taskNotificationHelpe
 import { useTaskPageContext } from '../components/taskPageContext'
 import { createTaskSettledReloader } from '../components/taskResultHelpers'
 import { TASK_COPY } from '../components/taskCopy'
+import { generateUUID } from '../../../utils'
 
 const { Header, Content } = Layout
 type ShotListFilter = 'all' | 'pending' | 'generating' | 'ready'
@@ -123,6 +127,9 @@ export function ChapterShotsPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [createSubmitting, setCreateSubmitting] = useState(false)
   const [createForm] = Form.useForm<{ title: string; script_excerpt?: string }>()
+  const [insertMode, setInsertMode] = useState<{ direction: 'before' | 'after'; refShot: ShotRead } | null>(null)
+  const [insertSubmitting, setInsertSubmitting] = useState(false)
+  const [insertForm] = Form.useForm<{ title: string; script_excerpt?: string }>()
   const [chapterDivisionTaskLoading, setChapterDivisionTaskLoading] = useState(false)
 
   const refresh = async () => {
@@ -256,7 +263,7 @@ export function ChapterShotsPage() {
       const nextIndex = shots.reduce((m, s) => Math.max(m, s.index), 0) + 1
       const res = await StudioShotsService.createShotApiV1StudioShotsPost({
         requestBody: {
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           chapter_id: chapterId,
           index: nextIndex,
           title: v.title.trim(),
@@ -277,6 +284,57 @@ export function ChapterShotsPage() {
       setCreateSubmitting(false)
     }
   }, [chapterId, closeCreate, createForm, shots])
+
+  const openInsert = useCallback(
+    (direction: 'before' | 'after', refShot: ShotRead) => {
+      insertForm.resetFields()
+      setInsertMode({ direction, refShot })
+    },
+    [insertForm],
+  )
+
+  const closeInsert = useCallback(() => {
+    setInsertMode(null)
+    insertForm.resetFields()
+  }, [insertForm])
+
+  const submitInsert = useCallback(async () => {
+    if (!chapterId || !insertMode) return
+    try {
+      const v = await insertForm.validateFields()
+      setInsertSubmitting(true)
+      const { direction, refShot } = insertMode
+      const targetIndex = direction === 'before' ? refShot.index : refShot.index + 1
+      // Shift all shots whose index >= targetIndex up by 1 to make room.
+      // Sort descending so each UPDATE moves a shot to an index that's already free,
+      // avoiding the unique constraint violation on (chapter_id, index).
+      const toShift = shots.filter((s) => s.index >= targetIndex).sort((a, b) => b.index - a.index)
+      for (const s of toShift) {
+        await StudioShotsService.updateShotApiV1StudioShotsShotIdPatch({
+          shotId: s.id,
+          requestBody: { index: s.index + 1 },
+        })
+      }
+      await StudioShotsService.createShotApiV1StudioShotsPost({
+        requestBody: {
+          id: generateUUID(),
+          chapter_id: chapterId,
+          index: targetIndex,
+          title: v.title.trim(),
+          script_excerpt: v.script_excerpt?.trim() ? v.script_excerpt.trim() : '',
+          status: 'pending',
+        },
+      })
+      await refresh()
+      message.success('已插入分镜')
+      closeInsert()
+    } catch (e: unknown) {
+      if (e && typeof e === 'object' && 'errorFields' in e) return
+      message.error('插入失败')
+    } finally {
+      setInsertSubmitting(false)
+    }
+  }, [chapterId, closeInsert, insertForm, insertMode, shots])
 
   const handleOneClickExtract = useCallback(async () => {
     if (!chapterId) return
@@ -467,7 +525,7 @@ export function ChapterShotsPage() {
       {
         title: '操作',
         key: 'actions',
-        width: 170,
+        width: 220,
         render: (_: unknown, r) => (
           <Space size={0} wrap>
             <Button
@@ -484,6 +542,21 @@ export function ChapterShotsPage() {
             >
               编辑
             </Button>
+            <Dropdown
+              disabled={extracting}
+              menu={{
+                items: [
+                  { key: 'before', label: '向上插入分镜', icon: <ArrowUpOutlined /> },
+                  { key: 'after', label: '向下插入分镜', icon: <ArrowDownOutlined /> },
+                ],
+                onClick: ({ key }) => openInsert(key as 'before' | 'after', r),
+              }}
+              trigger={['click']}
+            >
+              <Button type="link" size="small" icon={<PlusOutlined />} disabled={extracting}>
+                插入
+              </Button>
+            </Dropdown>
             <Popconfirm
               title="确定删除该分镜？"
               okText="删除"
@@ -507,7 +580,7 @@ export function ChapterShotsPage() {
         ),
       },
     ],
-    [chapterId, deletingId, extracting, handleDelete, navigate, projectId, shotRuntimeMap],
+    [chapterId, deletingId, extracting, handleDelete, navigate, openInsert, projectId, shotRuntimeMap],
   )
 
   const tableEmpty =
@@ -645,7 +718,7 @@ export function ChapterShotsPage() {
                     disabled={extracting || shots.length > 0 || !!chapterDivisionTask}
                     onClick={() => void handleOneClickExtract()}
                   >
-                    {chapterDivisionTask ? '分镜提取中' : shots.length === 0 ? '一键提取分镜' : '重新提取需先清空分镜'}
+                    {chapterDivisionTask ? '分镜自动准备中' : shots.length === 0 ? '一键提取分镜并自动准备' : '重新提取需先清空分镜'}
                   </Button>
                 </span>
               </Tooltip>
@@ -757,6 +830,36 @@ export function ChapterShotsPage() {
           </Form.Item>
           <Form.Item name="script_excerpt" label="剧本摘录">
             <Input.TextArea rows={8} placeholder="可选" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title={insertMode?.direction === 'before' ? '向上插入分镜' : '向下插入分镜'}
+        open={!!insertMode}
+        onCancel={insertSubmitting ? undefined : closeInsert}
+        onOk={() => void submitInsert()}
+        confirmLoading={insertSubmitting}
+        okButtonProps={{ loading: insertSubmitting }}
+        cancelButtonProps={{ disabled: insertSubmitting }}
+        closable={!insertSubmitting}
+        maskClosable={!insertSubmitting}
+        keyboard={!insertSubmitting}
+        destroyOnClose
+        width={520}
+      >
+        {insertMode && (
+          <div className="mb-3 text-sm text-gray-500">
+            将在「{insertMode.refShot.title || `分镜 ${insertMode.refShot.index}`}」
+            {insertMode.direction === 'before' ? '之前' : '之后'}插入新分镜
+          </div>
+        )}
+        <Form form={insertForm} layout="vertical" preserve={false}>
+          <Form.Item name="title" label="标题" rules={[{ required: true, message: '请填写标题' }]}>
+            <Input placeholder="分镜标题" />
+          </Form.Item>
+          <Form.Item name="script_excerpt" label="剧本摘录">
+            <Input.TextArea rows={6} placeholder="可选" />
           </Form.Item>
         </Form>
       </Modal>

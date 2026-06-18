@@ -7,8 +7,8 @@ import type { ProjectCostumeLinkRead, ProjectPropLinkRead } from '../../../../..
 import { resolveAssetUrl } from '../../../assets/utils'
 import { DisplayImageCard } from '../../../assets/components/DisplayImageCard'
 import { StudioEntitiesApi } from '../../../../../services/studioEntities'
-import { StudioAssetTypeFormModal } from '../../../assets/components/StudioAssetTypeFormModal'
 import { encodeWorkbenchAssetEditReturnTo, type WorkbenchAssetTabParam } from '../utils/workbenchAssetReturnTo'
+import { newId } from '../hooks/useProjectData'
 
 type AssetKind = 'prop' | 'costume'
 
@@ -28,7 +28,7 @@ function LinkedAssetTab({
 }) {
   const navigate = useNavigate()
   const workbenchTab: WorkbenchAssetTabParam = kind === 'prop' ? 'props' : 'costumes'
-  const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [linkModalOpen, setLinkModalOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(false)
@@ -179,13 +179,32 @@ function LinkedAssetTab({
     }
   }
 
+  const handleCreateNew = async () => {
+    if (creating) return
+    setCreating(true)
+    try {
+      const prefix = kind === 'prop' ? 'prop' : 'costume'
+      const label = kind === 'prop' ? '道具' : '服装'
+      const tab: WorkbenchAssetTabParam = kind === 'prop' ? 'props' : 'costumes'
+      const id = newId(prefix)
+      const res = await StudioEntitiesApi.create(kind, { id, name: `未命名${label}` })
+      const createdId = (res.data as { id?: string } | undefined)?.id ?? id
+      const editPath = kind === 'prop' ? `/assets/props/${createdId}/edit` : `/assets/costumes/${createdId}/edit`
+      navigate(`${editPath}?returnTo=${encodeWorkbenchAssetEditReturnTo(projectId, tab)}`)
+    } catch {
+      message.error(`新建${kind === 'prop' ? '道具' : '服装'}失败`)
+    } finally {
+      setCreating(false)
+    }
+  }
+
   return (
     <div className="h-full overflow-auto">
       <Card
         title={`项目${kind === 'prop' ? '道具' : '服装'}`}
         extra={
           <Space>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+            <Button type="primary" icon={<PlusOutlined />} loading={creating} onClick={handleCreateNew}>
               新建
             </Button>
             <Button
@@ -279,30 +298,6 @@ function LinkedAssetTab({
           </div>
         )}
       </Card>
-
-      <StudioAssetTypeFormModal
-        open={createModalOpen}
-        label={kind === 'prop' ? '道具' : '服装'}
-        entityType={kind}
-        editing={null}
-        linkProjectId={projectId}
-        createAsset={async (payload) => {
-          const entity = kind === 'prop' ? 'prop' : 'costume'
-          const res = await StudioEntitiesApi.create(entity, payload as Record<string, unknown>)
-          if (!res.data) throw new Error(`empty ${entity}`)
-          return res.data as AssetItemLike
-        }}
-        updateAsset={async (id, payload) => {
-          const entity = kind === 'prop' ? 'prop' : 'costume'
-          const res = await StudioEntitiesApi.update(entity, id, payload as Record<string, unknown>)
-          if (!res.data) throw new Error(`empty ${entity}`)
-          return res.data as AssetItemLike
-        }}
-        onCancel={() => setCreateModalOpen(false)}
-        onSaved={async () => {
-          await loadLinks()
-        }}
-      />
 
       <Modal
         title={`从资产库关联${kind === 'prop' ? '道具' : '服装'}`}

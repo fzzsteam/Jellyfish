@@ -20,7 +20,12 @@ VideoRatio = Literal["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]
 
 
 class VideoGenerationInput(BaseModel):
-    """视频生成输入：支持文本提示词 + 可选的三种帧参考图（纯 base64 或 data URL）。"""
+    """视频生成输入：支持文本提示词 + 可选的三种帧参考图（纯 base64 或 data URL）+ 可选的源视频。
+
+    适用场景:
+    - t2v / i2v / r2v: 使用 first_frame_base64 / last_frame_base64 / key_frame_base64 作为图片输入
+    - video-edit: 使用 source_video_base64 输入待编辑的视频，配合首帧/关键帧作为参考图
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -29,6 +34,12 @@ class VideoGenerationInput(BaseModel):
     first_frame_base64: Optional[str] = Field(None, description="首帧图：纯 base64 或 data:image/...;base64,...")
     last_frame_base64: Optional[str] = Field(None, description="尾帧图：纯 base64 或 data URL")
     key_frame_base64: Optional[str] = Field(None, description="关键帧图：纯 base64 或 data URL")
+
+    #: 视频编辑模式专用：源视频（base64 或 HTTP(S) URL），用于 video-edit 类模型
+    source_video_base64: Optional[str] = Field(
+        None,
+        description="源视频：用于 video-edit 模型的输入视频 (base64 或 https:// URL)",
+    )
 
     model: Optional[str] = Field(None, description="视频模型名称（可选，供应商透传）")
     ratio: VideoRatio = Field(..., description="视频宽高比，业务层唯一主参数")
@@ -49,6 +60,7 @@ class VideoGenerationInput(BaseModel):
                 _strip_optional_b64(self.first_frame_base64),
                 _strip_optional_b64(self.last_frame_base64),
                 _strip_optional_b64(self.key_frame_base64),
+                _strip_optional_b64(self.source_video_base64),
             ]
         )
         if not has_prompt and not has_ref:

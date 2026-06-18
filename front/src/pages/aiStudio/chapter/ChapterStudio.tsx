@@ -1,6 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  Badge,
   Button,
   Card,
   Divider,
@@ -9,6 +8,7 @@ import {
   Input,
   Layout,
   Modal,
+  Popover,
   Radio,
   Segmented,
   Select,
@@ -24,35 +24,29 @@ import {
 import {
   AppstoreOutlined,
   ArrowLeftOutlined,
-  CaretLeftOutlined,
-  CaretRightOutlined,
   CameraOutlined,
   CheckCircleOutlined,
+  CheckOutlined,
   ClockCircleOutlined,
   CustomerServiceOutlined,
   DeleteOutlined,
   DoubleLeftOutlined,
   DoubleRightOutlined,
-  EditOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
   FileTextOutlined,
+  FullscreenOutlined,
   LinkOutlined,
   MergeCellsOutlined,
-  PauseCircleOutlined,
   PictureOutlined,
-  PlayCircleOutlined,
-  ScissorOutlined,
   SettingOutlined,
   SoundOutlined,
   StopOutlined,
-  TagOutlined,
   ToolOutlined,
   VideoCameraOutlined,
   ThunderboltOutlined,
   UndoOutlined,
   UploadOutlined,
-  VideoCameraAddOutlined,
   PlusOutlined,
   UserOutlined,
   DownloadOutlined,
@@ -68,7 +62,6 @@ import {
   StudioProjectsService,
   StudioShotCharacterLinksService,
   StudioShotDetailsService,
-  StudioShotDialogLinesService,
   StudioShotFrameImagesService,
   StudioShotLinksService,
   StudioShotsService,
@@ -78,15 +71,13 @@ import type {
   CameraAngle,
   CameraMovement,
   CameraShotType,
+  BuiltinGenerationModelRead,
   ChapterRead,
   EntityNameExistenceItem,
   ImageGenerationOptionsRead,
-  ProjectActorLinkRead,
   ProjectCostumeLinkRead,
   ShotDetailRead,
-  ShotDialogLineRead,
   ShotExtractedCandidateRead,
-  ShotExtractedDialogueCandidateRead,
   ShotAssetsOverviewRead,
   ShotFrameImageRead,
   ShotCharacterLinkRead,
@@ -106,7 +97,6 @@ import { executeTaskCancel } from '../components/taskActionHelpers'
 import { useRelationTaskNotification } from '../components/taskNotificationHelpers'
 import { TASK_COPY } from '../components/taskCopy'
 import { ChapterStudioBatchToolbar } from './components/ChapterStudioBatchToolbar'
-import { ChapterStudioMaintenancePanel } from './components/ChapterStudioMaintenancePanel'
 import { ChapterStudioReadinessDiagnosisPanel } from './components/ChapterStudioReadinessDiagnosisPanel'
 import { ChapterStudioVideoReadinessPanel } from './components/ChapterStudioVideoReadinessPanel'
 import { useGenerationDraft, type GenerationDraftState } from '../hooks/useGenerationDraft'
@@ -118,9 +108,6 @@ import './chapterStudio.separation.css'
 
 const { Sider, Content } = Layout
 const { TextArea } = Input
-
-const FRAME_FILE_TAG_ADOPT = '采用'
-const FRAME_FILE_TAG_ABANDON = '废弃'
 
 type ShotFramePromptDebugContext = Record<string, unknown>
 type ShotFramePromptQualityChecks = {
@@ -143,17 +130,134 @@ type VideoPromptDerived = {
   images: string[]
   pack: ShotVideoPromptPackRead | null
 }
+type GeneratedVideoItem = { linkId: number; fileId: string; url: string }
+type VideoModelOption = BuiltinGenerationModelRead
 
-function normalizeFrameExclusiveTags(tags: string[]): string[] {
-  const cleaned = (tags || []).map((x) => String(x ?? '').trim()).filter(Boolean)
-  const hasAdopt = cleaned.includes(FRAME_FILE_TAG_ADOPT)
-  const hasAbandon = cleaned.includes(FRAME_FILE_TAG_ABANDON)
-  const rest = cleaned.filter((t) => t !== FRAME_FILE_TAG_ADOPT && t !== FRAME_FILE_TAG_ABANDON)
-  if (hasAdopt && !hasAbandon) return [FRAME_FILE_TAG_ADOPT, ...rest]
-  if (!hasAdopt && hasAbandon) return [FRAME_FILE_TAG_ABANDON, ...rest]
-  // 两者都没有或同时存在：同时存在时默认保留“采用”
-  if (hasAdopt && hasAbandon) return [FRAME_FILE_TAG_ADOPT, ...rest]
-  return rest
+type FullscreenCapableVideo = HTMLVideoElement & {
+  webkitRequestFullscreen?: () => Promise<void> | void
+  msRequestFullscreen?: () => Promise<void> | void
+}
+
+/** 切换单个结果卡片内的视频播放状态，让中间区域可以直接快速预览。 */
+function toggleVideoPlayback(video: HTMLVideoElement | null): void {
+  if (!video) return
+  if (video.paused) {
+    void video.play().catch(() => undefined)
+    return
+  }
+  video.pause()
+}
+
+/** 安全触发浏览器原生全屏，兼容常见旧版 WebKit/MS 前缀实现。 */
+function requestVideoFullscreen(video: HTMLVideoElement | null): void {
+  if (!video) {
+    message.warning('当前视频暂不可全屏播放')
+    return
+  }
+  const target = video as FullscreenCapableVideo
+  const request = target.requestFullscreen ?? target.webkitRequestFullscreen ?? target.msRequestFullscreen
+  if (!request) {
+    message.warning('当前浏览器不支持全屏播放')
+    return
+  }
+  void request.call(target)
+}
+
+/** 展示当前分镜已生成的视频结果，替代旧的大播放器主预览。 */
+function GeneratedVideoGrid({
+  selectedShot,
+  videos,
+  selectedVideosByShot,
+  onSelectVideo,
+  onDeleteVideo,
+}: {
+  selectedShot: StudioShot | null
+  videos: GeneratedVideoItem[]
+  selectedVideosByShot: Record<string, string>
+  onSelectVideo: (shotId: string, fileId: string) => void
+  onDeleteVideo: (item: GeneratedVideoItem) => void
+}) {
+  const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({})
+
+  if (!selectedShot) {
+    return (
+      <div className="cs-video-empty">
+        <VideoCameraOutlined className="text-2xl text-gray-300" />
+        <div className="font-medium text-gray-500">请选择一个分镜</div>
+        <div className="text-xs text-gray-400">选择左侧分镜后，这里会展示该分镜已生成的视频结果。</div>
+      </div>
+    )
+  }
+
+  if (videos.length === 0) {
+    return (
+      <div className="cs-video-empty">
+        <VideoCameraOutlined className="text-2xl text-gray-300" />
+        <div className="font-medium text-gray-500">当前分镜暂无已生成视频</div>
+        <div className="text-xs text-gray-400">请在右侧“视频生成”面板发起生成，完成后会在这里显示小视频列表。</div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
+      {videos.map((item, idx) => (
+        <div key={`${item.linkId}-${item.fileId}`} className="cs-video-result-card">
+          <div className="cs-video-thumb">
+            <video
+              ref={(node) => {
+                videoRefs.current[item.fileId] = node
+              }}
+              src={item.url}
+              className="h-full w-full object-contain bg-black"
+              preload="metadata"
+              muted
+              playsInline
+              onClick={(event) => toggleVideoPlayback(event.currentTarget)}
+            />
+          </div>
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-gray-700">视频 {idx + 1}</div>
+              <div className="truncate text-xs text-gray-400">{item.fileId}</div>
+            </div>
+            <Space size="small">
+              <Tooltip title={selectedVideosByShot[selectedShot.id] === item.fileId ? '已选择' : '选择该视频'}>
+                <Button
+                  size="small"
+                  icon={<CheckOutlined />}
+                  type={selectedVideosByShot[selectedShot.id] === item.fileId ? 'primary' : 'default'}
+                  onClick={() => onSelectVideo(selectedShot.id, item.fileId)}
+                />
+              </Tooltip>
+              <Tooltip title="全屏播放">
+                <Button
+                  size="small"
+                  icon={<FullscreenOutlined />}
+                  onClick={() => requestVideoFullscreen(videoRefs.current[item.fileId] ?? null)}
+                />
+              </Tooltip>
+              <Tooltip title="下载视频">
+                <Button
+                  size="small"
+                  icon={<DownloadOutlined />}
+                  onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
+                />
+              </Tooltip>
+              <Tooltip title="删除视频">
+                <Button
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => onDeleteVideo(item)}
+                />
+              </Tooltip>
+            </Space>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 function readDebugContextText(
@@ -274,7 +378,7 @@ type KeyframeCardState = {
 
 type KeyframeResolutionProfile = 'standard' | 'high'
 
-type InspectorTabKey = 'ops' | 'camera' | 'prompt_image' | 'dialogue' | 'keyframe_gen' | 'gen_ref'
+type InspectorTabKey = 'camera' | 'prompt_image' | 'keyframe_gen' | 'gen_ref'
 
 const LAYOUT_STORAGE_KEY = 'jellyfish_chapter_studio_layout_v1'
 type PromptFrameType = 'first' | 'key' | 'last'
@@ -503,15 +607,12 @@ const ChapterStudio: React.FC = () => {
   const locationSelectionAppliedRef = useRef(false)
   const lastSelectedIndexRef = useRef<number>(-1)
   const [shotDetail, setShotDetail] = useState<ShotDetailRead | null>(null)
-  const [dialogLines, setDialogLines] = useState<ShotDialogLineRead[]>([])
   const [frameImages, setFrameImages] = useState<ShotFrameImageRead[]>([])
   const [sceneLinks, setSceneLinks] = useState<ProjectSceneLinkRead[]>([])
-  const [actorImageLinks, setActorImageLinks] = useState<ProjectActorLinkRead[]>([])
   const [propLinks, setPropLinks] = useState<ProjectPropLinkRead[]>([])
   const [costumeLinks, setCostumeLinks] = useState<ProjectCostumeLinkRead[]>([])
   const [shotCharacterLinks, setShotCharacterLinks] = useState<ShotCharacterLinkRead[]>([])
   const [shotCandidateItems, setShotCandidateItems] = useState<ShotExtractedCandidateRead[]>([])
-  const [shotDialogueCandidateItems, setShotDialogueCandidateItems] = useState<ShotExtractedDialogueCandidateRead[]>([])
   const shotCandidatesRequestSeqRef = useRef(0)
   const [shotDurations, setShotDurations] = useState<Record<string, number>>({})
   const [loadingShots, setLoadingShots] = useState(true)
@@ -524,23 +625,21 @@ const ChapterStudio: React.FC = () => {
   const [batchVideoReadinessItems, setBatchVideoReadinessItems] = useState<
     Array<{ shot: StudioShot; readiness: ShotVideoReadinessRead | null; error?: string }>
   >([])
+  const [batchGenerating, setBatchGenerating] = useState(false)
+  const [batchGenerateProgress, setBatchGenerateProgress] = useState<{ current: number; total: number } | null>(null)
+  const [batchDownloading, setBatchDownloading] = useState(false)
+  const [batchDownloadProgress, setBatchDownloadProgress] = useState<{ current: number; total: number } | null>(null)
   const [saving, setSaving] = useState(false)
   const saveTimerRef = useRef<number | null>(null)
   const cameraPatchSeqRef = useRef(0)
   const [cameraUpdating, setCameraUpdating] = useState(false)
   const [promptAssetsUpdating, setPromptAssetsUpdating] = useState(false)
 
-  const [frameTab, setFrameTab] = useState<'head' | 'keyframes' | 'tail' | 'compare'>('keyframes')
   const [keyframeResolutionProfile, setKeyframeResolutionProfile] = useState<KeyframeResolutionProfile>('standard')
-  const [frameFileTagsMap, setFrameFileTagsMap] = useState<Record<string, string[]>>({})
-  const [frameFileTagsLoading, setFrameFileTagsLoading] = useState(false)
-  const [playbackRate, setPlaybackRate] = useState(1)
-  const [loopCurrent, setLoopCurrent] = useState(false)
-  const videoRef = useRef<HTMLVideoElement | null>(null)
-  const [previewVideoFileId, setPreviewVideoFileId] = useState<string | null>(null)
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [videoDuration, setVideoDuration] = useState(0)
-  const [videoTime, setVideoTime] = useState(0)
+  const [generatedVideos, setGeneratedVideos] = useState<GeneratedVideoItem[]>([])
+  /** shotId → 该分镜被选中的视频 fileId */
+  const [selectedVideosByShot, setSelectedVideosByShot] = useState<Record<string, string>>({})
+  const [videoResultsRefreshKey, setVideoResultsRefreshKey] = useState(0)
 
   const [filter, setFilter] = useState<ShotFilter>('all')
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null)
@@ -570,9 +669,6 @@ const ChapterStudio: React.FC = () => {
   const dragStateRef = useRef<null | { type: 'left' | 'right'; startX: number; startLeft: number; startRight: number }>(null)
   const resizeRafRef = useRef<number | null>(null)
   const pendingResizeRef = useRef<null | { leftWidth?: number; rightWidth?: number }>(null)
-  const showPreviewMinimizeButton = false
-  const showPreviewFrameSegmented = false
-  const showChapterTimeline = false
   const resolveShotVideoRatio = useCallback(
     (detail?: ShotDetailRead | null) => {
       const shotRatio = String(detail?.override_video_ratio ?? '').trim()
@@ -698,42 +794,6 @@ const ChapterStudio: React.FC = () => {
     setShots((prev) => prev.map((s) => (s.id === shotId ? { ...s, ...patch } : s)))
   }
 
-  const updateShotTitleInOps = async (shotId: string, title: string) => {
-    try {
-      const res = await StudioShotsService.updateShotApiV1StudioShotsShotIdPatch({
-        shotId,
-        requestBody: { title },
-      } as any)
-      if (res.data) patchShotInList(shotId, res.data as any)
-      message.success('标题已保存')
-    } catch {
-      message.error('保存标题失败')
-    }
-  }
-
-  const updateShotScriptExcerptInOps = async (shotId: string, script_excerpt: string) => {
-    try {
-      const res = await StudioShotsService.updateShotApiV1StudioShotsShotIdPatch({
-        shotId,
-        requestBody: { script_excerpt },
-      } as any)
-      if (res.data) patchShotInList(shotId, res.data as any)
-      message.success('备注已保存')
-    } catch {
-      message.error('保存备注失败')
-    }
-  }
-
-  const deleteShotFromOps = async (shotId: string) => {
-    try {
-      await StudioShotsService.deleteShotApiV1StudioShotsShotIdDelete({ shotId })
-      await loadShots()
-      message.success('已删除')
-    } catch {
-      message.error('删除失败')
-    }
-  }
-
   const loadChapter = async () => {
     if (!chapterId) return
     try {
@@ -774,31 +834,19 @@ const ChapterStudio: React.FC = () => {
     if (!selectedShotId) {
       shotCandidatesRequestSeqRef.current += 1
       setShotDetail(null)
-      setDialogLines([])
       setFrameImages([])
       setSceneLinks([])
-      setActorImageLinks([])
       setPropLinks([])
       setCostumeLinks([])
       setShotCharacterLinks([])
       setShotCandidateItems([])
-      setShotDialogueCandidateItems([])
       return
     }
     setLoadingDetail(true)
     const reqSeq = ++shotCandidatesRequestSeqRef.current
     setShotCandidateItems([])
-    setShotDialogueCandidateItems([])
     Promise.all([
       StudioShotDetailsService.getShotDetailApiV1StudioShotDetailsShotIdGet({ shotId: selectedShotId }).then((r: any) => r.data ?? null),
-      StudioShotDialogLinesService.listShotDialogLinesApiV1StudioShotDialogLinesGet({
-        shotDetailId: selectedShotId,
-        q: null,
-        order: 'index',
-        isDesc: false,
-        page: 1,
-        pageSize: 100,
-      }).then((r: any) => r.data?.items ?? []),
       StudioShotFrameImagesService.listShotFrameImagesApiV1StudioShotFrameImagesGet({
         shotDetailId: selectedShotId,
         order: null,
@@ -808,17 +856,6 @@ const ChapterStudio: React.FC = () => {
       }).then((r: any) => r.data?.items ?? []),
       StudioShotLinksService.listProjectEntityLinksApiV1StudioShotLinksEntityTypeGet({
         entityType: 'scene',
-        projectId: projectId ?? null,
-        chapterId: chapterId ?? null,
-        shotId: selectedShotId,
-        assetId: null,
-        order: null,
-        isDesc: false,
-        page: 1,
-        pageSize: 100,
-      }).then((r: any) => r.data?.items ?? []),
-      StudioShotLinksService.listProjectEntityLinksApiV1StudioShotLinksEntityTypeGet({
-        entityType: 'actor',
         projectId: projectId ?? null,
         chapterId: chapterId ?? null,
         shotId: selectedShotId,
@@ -856,23 +893,17 @@ const ChapterStudio: React.FC = () => {
       StudioShotsService.getShotExtractedCandidatesApiV1StudioShotsShotIdExtractedCandidatesGet({
         shotId: selectedShotId,
       }).then((r) => r.data ?? []),
-      StudioShotsService.getShotExtractedDialogueCandidatesApiV1StudioShotsShotIdExtractedDialogueCandidatesGet({
-        shotId: selectedShotId,
-      }).then((r) => r.data ?? []),
     ])
-      .then(([detail, dialogs, frames, scenes, actors, props, costumes, shotCharacters, candidates, dialogueCandidates]) => {
+      .then(([detail, frames, scenes, props, costumes, shotCharacters, candidates]) => {
         if (reqSeq !== shotCandidatesRequestSeqRef.current) return
         setShotDetail(detail)
         lastSavedDetailRef.current = detail
-        setDialogLines(dialogs)
         setFrameImages(frames)
         setSceneLinks(scenes)
-        setActorImageLinks(actors)
         setPropLinks(props)
         setCostumeLinks(costumes)
         setShotCharacterLinks(shotCharacters)
         setShotCandidateItems(candidates as ShotExtractedCandidateRead[])
-        setShotDialogueCandidateItems(dialogueCandidates as ShotExtractedDialogueCandidateRead[])
         if (detail?.duration != null) {
           setShotDurations((prev) => ({ ...prev, [selectedShotId]: detail.duration ?? 0 }))
         }
@@ -909,50 +940,94 @@ const ChapterStudio: React.FC = () => {
     () => shots.filter((shot) => selectedShotIds.includes(shot.id)),
     [selectedShotIds, shots],
   )
-  const currentPreviewVideoFileId = previewVideoFileId || selectedShot?.generated_video_file_id || null
-  const currentPreviewVideoUrl = currentPreviewVideoFileId ? buildFileDownloadUrl(currentPreviewVideoFileId) ?? '' : ''
-
   useEffect(() => {
-    // 切换分镜时：主预览区视频跟随分镜（清空手动选择的预览视频）
-    setPreviewVideoFileId(null)
-  }, [selectedShotId])
-
-  const refreshDialogLines = async (shotId: string) => {
-    const res = await StudioShotDialogLinesService.listShotDialogLinesApiV1StudioShotDialogLinesGet({
-      shotDetailId: shotId,
-      q: null,
-      order: 'index',
-      isDesc: false,
-      page: 1,
-      pageSize: 100,
-    })
-    setDialogLines(res.data?.items ?? [])
-  }
-
-  const refreshShotFrameImages = useCallback(async () => {
-    if (!selectedShotId) return
-    try {
-      const res = await StudioShotFrameImagesService.listShotFrameImagesApiV1StudioShotFrameImagesGet({
-        shotDetailId: selectedShotId,
-        order: null,
-        isDesc: false,
-        page: 1,
-        pageSize: 100,
-      })
-      setFrameImages((res.data?.items ?? []) as ShotFrameImageRead[])
-    } catch {
-      message.error('刷新关键帧类型失败')
+    if (!selectedShot?.id) {
+      setGeneratedVideos([])
+      return
     }
-  }, [selectedShotId])
+    let canceled = false
+    void (async () => {
+      try {
+        const links = await listTaskLinksNormalized({
+          resourceType: 'video',
+          relationType: 'video',
+          relationEntityId: selectedShot.id,
+          order: 'updated_at',
+          isDesc: true,
+          page: 1,
+          pageSize: 100,
+        })
+        if (canceled) return
+        const seen = new Set<string>()
+        const list = links
+          .filter((link) => Boolean(link.file_id))
+          .map((link) => ({
+            linkId: link.id,
+            fileId: String(link.file_id),
+            url: buildFileDownloadUrl(String(link.file_id)) ?? '',
+          }))
+          .filter((video) => Boolean(video.url))
+          .filter((video) => {
+            if (seen.has(video.fileId)) return false
+            seen.add(video.fileId)
+            return true
+          })
+        const currentId = selectedShot.generated_video_file_id?.trim() || ''
+        if (currentId && !list.some((video) => video.fileId === currentId)) {
+          const currentUrl = buildFileDownloadUrl(currentId) ?? ''
+          if (currentUrl) list.unshift({ linkId: -1, fileId: currentId, url: currentUrl })
+        }
+        setGeneratedVideos(list)
+        // 若该分镜尚未选中视频，默认选中第一条
+        if (list.length > 0) {
+          setSelectedVideosByShot((prev) =>
+            prev[selectedShot.id] ? prev : { ...prev, [selectedShot.id]: list[0].fileId },
+          )
+        }
+      } catch {
+        if (!canceled) setGeneratedVideos([])
+      }
+    })()
+    return () => {
+      canceled = true
+    }
+  }, [selectedShot?.id, selectedShot?.generated_video_file_id, videoResultsRefreshKey])
 
-  const deleteDialogLine = async (lineId: number) => {
-    if (!selectedShotId) return
-    await StudioShotDialogLinesService.deleteShotDialogLineApiV1StudioShotDialogLinesLineIdDelete({ lineId })
-    await refreshDialogLines(selectedShotId)
-  }
+  const handleDeleteVideo = useCallback(
+    (item: GeneratedVideoItem) => {
+      Modal.confirm({
+        title: '删除视频',
+        content: '确认删除该视频？此操作不可撤销。',
+        okText: '删除',
+        okButtonProps: { danger: true },
+        cancelText: '取消',
+        onOk: async () => {
+          try {
+            if (item.linkId !== -1) {
+              await FilmService.deleteTaskLinkApiV1FilmTaskLinksLinkIdDelete({ linkId: item.linkId })
+            }
+            await StudioFilesService.deleteFileApiApiV1StudioFilesFileIdDelete({ fileId: item.fileId })
+            // 若被删除的视频正好是当前已选中项，清除选中状态
+            if (selectedShot && selectedVideosByShot[selectedShot.id] === item.fileId) {
+              setSelectedVideosByShot((prev) => {
+                const next = { ...prev }
+                delete next[selectedShot.id]
+                return next
+              })
+            }
+            setVideoResultsRefreshKey((k) => k + 1)
+            message.success('视频已删除')
+          } catch {
+            message.error('删除失败，请稍后重试')
+          }
+        },
+      })
+    },
+    [selectedShot, selectedVideosByShot],
+  )
 
   const refreshPromptAssetLinks = async (shotId: string) => {
-    const [scenes, actors, props, costumes] = await Promise.all([
+    const [scenes, props, costumes] = await Promise.all([
       StudioShotLinksService.listProjectEntityLinksApiV1StudioShotLinksEntityTypeGet({
         entityType: 'scene',
         projectId: projectId ?? null,
@@ -964,17 +1039,6 @@ const ChapterStudio: React.FC = () => {
         page: 1,
         pageSize: 100,
       }).then((r: any) => (r.data?.items ?? []) as ProjectSceneLinkRead[]),
-      StudioShotLinksService.listProjectEntityLinksApiV1StudioShotLinksEntityTypeGet({
-        entityType: 'actor',
-        projectId: projectId ?? null,
-        chapterId: chapterId ?? null,
-        shotId,
-        assetId: null,
-        order: null,
-        isDesc: false,
-        page: 1,
-        pageSize: 100,
-      }).then((r: any) => (r.data?.items ?? []) as ProjectActorLinkRead[]),
       StudioShotLinksService.listProjectEntityLinksApiV1StudioShotLinksEntityTypeGet({
         entityType: 'prop',
         projectId: projectId ?? null,
@@ -999,10 +1063,26 @@ const ChapterStudio: React.FC = () => {
       }).then((r: any) => (r.data?.items ?? []) as ProjectCostumeLinkRead[]),
     ])
     setSceneLinks(scenes)
-    setActorImageLinks(actors)
     setPropLinks(props)
     setCostumeLinks(costumes)
   }
+
+  /** 刷新当前分镜帧图列表，供右侧关键帧/参考图面板在展开选项前拉取最新状态。 */
+  const refreshShotFrameImages = useCallback(async () => {
+    if (!selectedShotId) return
+    try {
+      const res = await StudioShotFrameImagesService.listShotFrameImagesApiV1StudioShotFrameImagesGet({
+        shotDetailId: selectedShotId,
+        order: null,
+        isDesc: false,
+        page: 1,
+        pageSize: 100,
+      })
+      setFrameImages((res.data?.items ?? []) as ShotFrameImageRead[])
+    } catch {
+      message.error('刷新关键帧类型失败')
+    }
+  }, [selectedShotId])
 
   const loadShotCandidateItems = useCallback(async (shotId: string) => {
     try {
@@ -1012,17 +1092,6 @@ const ChapterStudio: React.FC = () => {
       setShotCandidateItems(res.data ?? [])
     } catch {
       setShotCandidateItems([])
-    }
-  }, [])
-
-  const loadShotDialogueCandidateItems = useCallback(async (shotId: string) => {
-    try {
-      const res = await StudioShotsService.getShotExtractedDialogueCandidatesApiV1StudioShotsShotIdExtractedDialogueCandidatesGet({
-        shotId,
-      })
-      setShotDialogueCandidateItems(res.data ?? [])
-    } catch {
-      setShotDialogueCandidateItems([])
     }
   }, [])
 
@@ -1052,10 +1121,7 @@ const ChapterStudio: React.FC = () => {
           }
         })
         if (selectedShotId && targetShots.some((shot) => shot.id === selectedShotId)) {
-          await Promise.all([
-            loadShotCandidateItems(selectedShotId),
-            loadShotDialogueCandidateItems(selectedShotId),
-          ])
+          await loadShotCandidateItems(selectedShotId)
         }
         message.success(
           skip
@@ -1068,7 +1134,7 @@ const ChapterStudio: React.FC = () => {
         setBatchSkipExtractionUpdating(false)
       }
     },
-    [loadShotCandidateItems, loadShotDialogueCandidateItems, patchShotInList, selectedShotId, selectedShots],
+    [loadShotCandidateItems, patchShotInList, selectedShotId, selectedShots],
   )
 
   const fetchBatchVideoReadiness = useCallback(async () => {
@@ -1111,6 +1177,134 @@ const ChapterStudio: React.FC = () => {
       setBatchVideoReadinessLoading(false)
     }
   }, [fetchBatchVideoReadiness])
+
+  /** 串行为所有可见分镜提交视频生成任务 */
+  const handleBatchGenerateAll = useCallback(async () => {
+    const ratio = resolveShotVideoRatio(null)
+    if (!ratio) {
+      message.warning('当前缺少视频比例，请先设置项目默认比例')
+      return
+    }
+    const targets = shots.filter((s) => !s.hidden)
+    if (targets.length === 0) {
+      message.warning('没有可见分镜')
+      return
+    }
+    setBatchGenerating(true)
+    setBatchGenerateProgress({ current: 0, total: targets.length })
+    let successCount = 0
+    let failCount = 0
+    for (let i = 0; i < targets.length; i++) {
+      const shot = targets[i]
+      setBatchGenerateProgress({ current: i + 1, total: targets.length })
+      try {
+        const previewRes = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
+          requestBody: {
+            shot_id: shot.id,
+            reference_mode: 'text_only',
+            prompt: null,
+            images: [],
+            ratio,
+          } as any,
+        })
+        const derived = (previewRes as any)?.data ?? null
+        const prompt = typeof derived?.prompt === 'string' ? derived.prompt : ''
+        const images: string[] = Array.isArray(derived?.images)
+          ? (derived.images as string[]).filter(Boolean)
+          : []
+        await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
+          requestBody: {
+            shot_id: shot.id,
+            reference_mode: 'text_only',
+            prompt,
+            images,
+            ratio,
+          } as any,
+        })
+        successCount++
+      } catch {
+        failCount++
+      }
+    }
+    setBatchGenerating(false)
+    setBatchGenerateProgress(null)
+    if (failCount === 0) {
+      message.success(`已成功提交 ${successCount} 个分镜的视频生成任务`)
+    } else {
+      message.warning(`提交完成：${successCount} 成功，${failCount} 失败`)
+    }
+  }, [resolveShotVideoRatio, shots, setBatchGenerating, setBatchGenerateProgress])
+
+  /** 将所有已生成视频下载到用户选择的本地文件夹 */
+  /** 下载每个分镜中被选中的视频到用户指定的本地文件夹 */
+  const handleBatchDownloadAll = useCallback(async () => {
+    // 收集所有已选中的视频：{ shot, fileId, url }
+    const targets = shots
+      .filter((s) => !s.hidden && selectedVideosByShot[s.id])
+      .map((s) => ({
+        shot: s,
+        fileId: selectedVideosByShot[s.id],
+        url: buildFileDownloadUrl(selectedVideosByShot[s.id]) ?? '',
+      }))
+      .filter((t) => Boolean(t.url))
+
+    if (targets.length === 0) {
+      message.warning('没有已选中的视频，请先在各分镜中点击"√"选择视频')
+      return
+    }
+
+    setBatchDownloading(true)
+    setBatchDownloadProgress({ current: 0, total: targets.length })
+    try {
+      // 优先使用 File System Access API（Chrome/Edge 86+），支持选择本地文件夹
+      if (typeof (window as any).showDirectoryPicker === 'function') {
+        let dirHandle: FileSystemDirectoryHandle
+        try {
+          dirHandle = await (window as any).showDirectoryPicker({ mode: 'readwrite' })
+        } catch {
+          // 用户取消选择文件夹
+          return
+        }
+        for (let i = 0; i < targets.length; i++) {
+          const { shot, fileId, url } = targets[i]
+          setBatchDownloadProgress({ current: i + 1, total: targets.length })
+          try {
+            const resp = await fetch(url)
+            const blob = await resp.blob()
+            const idx = String(shot.index ?? i + 1).padStart(2, '0')
+            const title = (shot.title ?? '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 30)
+            const filename = `${idx}_${title}_${fileId.slice(0, 8)}.mp4`
+            const fileHandle: FileSystemFileHandle = await dirHandle.getFileHandle(filename, { create: true })
+            const writable = await fileHandle.createWritable()
+            await writable.write(blob)
+            await writable.close()
+          } catch {
+            // 单个文件失败不中断整体流程
+          }
+        }
+        message.success(`已下载 ${targets.length} 个视频到所选文件夹`)
+      } else {
+        // 降级：逐个触发 <a download>
+        for (let i = 0; i < targets.length; i++) {
+          const { shot, fileId, url } = targets[i]
+          setBatchDownloadProgress({ current: i + 1, total: targets.length })
+          const idx = String(shot.index ?? i + 1).padStart(2, '0')
+          const title = (shot.title ?? '').replace(/[\\/:*?"<>|]/g, '_').slice(0, 30)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = `${idx}_${title}_${fileId.slice(0, 8)}.mp4`
+          document.body.appendChild(a)
+          a.click()
+          document.body.removeChild(a)
+          await new Promise((r) => setTimeout(r, 300))
+        }
+        message.success(`已触发 ${targets.length} 个视频下载`)
+      }
+    } finally {
+      setBatchDownloading(false)
+      setBatchDownloadProgress(null)
+    }
+  }, [shots, selectedVideosByShot])
 
   const runBatchGenerate = useCallback(
     async (targetShotIds: string[]) => {
@@ -1292,11 +1486,7 @@ const ChapterStudio: React.FC = () => {
 
   const generateFrameImageTask = async () => {
     if (!selectedShotId) return
-    const target =
-      (frameTab === 'head' && frameImages.find((x) => x.frame_type === 'first')) ||
-      (frameTab === 'tail' && frameImages.find((x) => x.frame_type === 'last')) ||
-      frameImages.find((x) => x.frame_type === 'key') ||
-      frameImages[0]
+    const target = frameImages.find((x) => x.frame_type === 'key') || frameImages[0]
     if (!target) {
       message.warning('请先添加一张分镜帧图（frame image）')
       return
@@ -1368,71 +1558,6 @@ const ChapterStudio: React.FC = () => {
       setGenerating(false)
     }
   }
-
-  const currentFrameSlot = useMemo(() => {
-    if (frameTab === 'head') return frameImages.find((x) => x.frame_type === 'first') ?? null
-    if (frameTab === 'tail') return frameImages.find((x) => x.frame_type === 'last') ?? null
-    return frameImages.find((x) => x.frame_type === 'key') ?? frameImages[0] ?? null
-  }, [frameImages, frameTab])
-
-  const currentFrameFileId = useMemo(() => {
-    const fid = currentFrameSlot?.file_id ?? null
-    return fid ? String(fid) : null
-  }, [currentFrameSlot?.file_id])
-
-  const currentFrameFileTags = useMemo(() => {
-    if (!currentFrameFileId) return []
-    return frameFileTagsMap[currentFrameFileId] ?? []
-  }, [currentFrameFileId, frameFileTagsMap])
-
-  useEffect(() => {
-    if (!currentFrameFileId) return
-    if (frameFileTagsMap[currentFrameFileId]) return
-    let canceled = false
-    setFrameFileTagsLoading(true)
-    void (async () => {
-      try {
-        const res = await StudioFilesService.getFileDetailApiV1StudioFilesFileIdGet({ fileId: currentFrameFileId })
-        if (canceled) return
-        const tagsRaw = Array.isArray((res.data as any)?.tags) ? ((res.data as any).tags as string[]).filter(Boolean) : []
-        setFrameFileTagsMap((prev) => ({ ...prev, [currentFrameFileId]: normalizeFrameExclusiveTags(tagsRaw) }))
-      } catch {
-        if (!canceled) setFrameFileTagsMap((prev) => ({ ...prev, [currentFrameFileId]: [] }))
-      } finally {
-        if (!canceled) setFrameFileTagsLoading(false)
-      }
-    })()
-    return () => {
-      canceled = true
-    }
-  }, [currentFrameFileId, frameFileTagsMap])
-
-  const updateCurrentFrameFileTags = useCallback(
-    async (nextTags: string[]) => {
-      if (!currentFrameFileId) return
-      const cleaned = Array.from(
-        new Set(
-          (nextTags || [])
-            .map((x) => String(x ?? '').trim())
-            .filter((x) => x.length > 0),
-        ),
-      )
-      const normalized = normalizeFrameExclusiveTags(cleaned)
-      setFrameFileTagsLoading(true)
-      setFrameFileTagsMap((prev) => ({ ...prev, [currentFrameFileId]: normalized }))
-      try {
-        await StudioFilesService.updateFileMetaApiV1StudioFilesFileIdPatch({
-          fileId: currentFrameFileId,
-          requestBody: { tags: normalized } as any,
-        })
-      } catch {
-        message.error('更新标签失败')
-      } finally {
-        setFrameFileTagsLoading(false)
-      }
-    },
-    [currentFrameFileId],
-  )
 
   // 选中分镜后若开启自动展开属性面板：默认展开（尤其是未就绪分镜）
   useEffect(() => {
@@ -1537,48 +1662,7 @@ const ChapterStudio: React.FC = () => {
     }
   }, [selectedShotId, shotDetail])
 
-  // 播放器：同步时间与状态
-  useEffect(() => {
-    const v = videoRef.current
-    if (!v) return
-    const onPlay = () => setIsPlaying(true)
-    const onPause = () => setIsPlaying(false)
-    const onTimeUpdate = () => setVideoTime(v.currentTime || 0)
-    const onLoaded = () => setVideoDuration(v.duration || 0)
-    v.addEventListener('play', onPlay)
-    v.addEventListener('pause', onPause)
-    v.addEventListener('timeupdate', onTimeUpdate)
-    v.addEventListener('loadedmetadata', onLoaded)
-    return () => {
-      v.removeEventListener('play', onPlay)
-      v.removeEventListener('pause', onPause)
-      v.removeEventListener('timeupdate', onTimeUpdate)
-      v.removeEventListener('loadedmetadata', onLoaded)
-    }
-  }, [selectedShotId])
-
-  useEffect(() => {
-    const v = videoRef.current
-    if (!v) return
-    v.playbackRate = playbackRate
-  }, [playbackRate])
-
-  useEffect(() => {
-    const v = videoRef.current
-    if (!v) return
-    v.loop = loopCurrent
-  }, [loopCurrent])
-
-  useEffect(() => {
-    const v = videoRef.current
-    if (!v || !currentPreviewVideoUrl) return
-    v.load()
-    void v.play().catch(() => {
-      // 浏览器策略可能阻止自动播放，保留静默失败
-    })
-  }, [currentPreviewVideoUrl])
-
-  // 快捷键：←/→ 切换分镜，Space 播放暂停，P/Ctrl+I 面板，H 隐藏，M 合并，Ctrl/Cmd+Enter 保存并生成
+  // 快捷键：←/→ 切换分镜，P/Ctrl+I 面板，H 隐藏，M 合并，Ctrl/Cmd+Enter 保存并生成
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (isTypingTarget(e.target)) return
@@ -1587,15 +1671,6 @@ const ChapterStudio: React.FC = () => {
       if (key === 'p' || (key === 'i' && (e.ctrlKey || e.metaKey))) {
         e.preventDefault()
         setPrefs((p) => ({ ...p, inspectorOpen: !p.inspectorOpen }))
-        return
-      }
-
-      if (key === ' ') {
-        e.preventDefault()
-        const v = videoRef.current
-        if (!v) return
-        if (v.paused) void v.play()
-        else v.pause()
         return
       }
 
@@ -1866,25 +1941,6 @@ const ChapterStudio: React.FC = () => {
 
   const shotContextMenu = (shot: StudioShot) => ([
     {
-      key: 'copy',
-      icon: <LinkOutlined />,
-      label: '复制分镜',
-      onClick: () => message.success('已复制（Mock）'),
-    },
-    {
-      key: 'insert_after',
-      icon: <VideoCameraAddOutlined />,
-      label: '在后插入新分镜',
-      onClick: () => message.success('已插入（Mock）'),
-    },
-    {
-      key: 'transition',
-      icon: <ScissorOutlined />,
-      label: '设为转场点',
-      onClick: () => message.success('已设置（Mock）'),
-    },
-    { type: 'divider' as const },
-    {
       key: 'toggle_hide',
       icon: shot.hidden ? <EyeOutlined /> : <EyeInvisibleOutlined />,
       label: shot.hidden ? '取消隐藏' : '隐藏',
@@ -2030,60 +2086,6 @@ const ChapterStudio: React.FC = () => {
 
   const batchMaintenanceMenuItems = batchMenuItems.filter((item) => item.key !== 'generate')
 
-  const toolbarSettingsItems = [
-    {
-      key: 'mode',
-      icon: <AppstoreOutlined />,
-      label: (
-        <div className="flex items-center justify-between gap-3">
-          <span>属性面板模式</span>
-          <Select
-            size="small"
-            value={prefs.inspectorMode}
-            style={{ width: 120 }}
-            onChange={(v) => setPrefs((p) => ({ ...p, inspectorMode: v }))}
-            options={[
-              { value: 'push', label: '推挤模式' },
-              { value: 'overlay', label: '覆盖模式' },
-            ]}
-          />
-        </div>
-      ),
-    },
-    {
-      key: 'autoOpen',
-      icon: <SettingOutlined />,
-      label: (
-        <div className="flex items-center justify-between gap-3">
-          <span>选中分镜自动展开</span>
-          <Switch
-            size="small"
-            checked={prefs.autoOpenInspector}
-            onChange={(v) => setPrefs((p) => ({ ...p, autoOpenInspector: v }))}
-          />
-        </div>
-      ),
-    },
-  ]
-
-  const subtitleLines = useMemo(() => {
-    if (!selectedShot || dialogLines.length === 0) return []
-    const dur = Math.max(1, shotDetail?.duration ?? shotDurations[selectedShot.id] ?? 1)
-    const per = dur / dialogLines.length
-    return dialogLines.map((d, i) => ({
-      key: `${selectedShot.id}-${d.id}`,
-      role: d.speaker_character_id ?? '—',
-      text: d.text,
-      start: i * per,
-      end: (i + 1) * per,
-    }))
-  }, [dialogLines, selectedShot, shotDetail?.duration, shotDurations])
-
-  const activeSubtitleIndex = useMemo(() => {
-    if (!selectedShot || subtitleLines.length === 0) return -1
-    const t = videoTime
-    return subtitleLines.findIndex((l) => t >= l.start && t < l.end)
-  }, [selectedShot, subtitleLines, videoTime])
 
   return (
     <div className={['cs-studio w-full h-full min-h-0 flex flex-col', isResizing ? 'cs-resizing' : ''].join(' ')} ref={containerRef}>
@@ -2122,20 +2124,6 @@ const ChapterStudio: React.FC = () => {
 
         <div className="flex-1 min-w-0" />
 
-        <div className="flex items-center gap-2 shrink-0">
-          <Dropdown menu={{ items: toolbarSettingsItems }} trigger={['click']}>
-            <Tooltip title="工作台设置">
-              <Button size="small" icon={<SettingOutlined />} />
-            </Tooltip>
-          </Dropdown>
-          <Tooltip title={prefs.inspectorOpen ? '收起属性面板（P / Ctrl/Cmd+I）' : '展开属性面板（P / Ctrl/Cmd+I）'}>
-            <Button
-              size="small"
-              icon={prefs.inspectorOpen ? <DoubleRightOutlined /> : <DoubleLeftOutlined />}
-              onClick={() => setPrefs((p) => ({ ...p, inspectorOpen: !p.inspectorOpen }))}
-            />
-          </Tooltip>
-        </div>
       </div>
 
       {/* 三栏动态布局 */}
@@ -2173,8 +2161,6 @@ const ChapterStudio: React.FC = () => {
                   { label: `待确认 ${shotFilterCounts.pendingConfirm}`, value: 'pendingConfirm' },
                   { label: `生成中 ${shotFilterCounts.generating}`, value: 'generating' },
                   { label: `已就绪 ${shotFilterCounts.ready}`, value: 'ready' },
-                  { label: `隐藏 ${shotFilterCounts.hidden}`, value: 'hidden' },
-                  { label: `有问题 ${shotFilterCounts.problem}`, value: 'problem' },
                 ]}
               />
             </div>
@@ -2189,14 +2175,6 @@ const ChapterStudio: React.FC = () => {
               onBatchInspectVideoReadiness={() => void batchInspectVideoReadiness()}
               onBatchGenerate={() => batchMenuItems.find((item) => item.key === 'generate')?.onClick?.()}
             />
-          )}
-
-          {!multiToolbarVisible && selectedShotIds.length === 1 && (
-            <div className="cs-group m-3 mt-0 mb-2">
-              <div className="rounded-lg border border-solid border-gray-200 bg-white/80 px-3 py-2 text-xs text-gray-600">
-                已选 1 项，继续按 <span className="font-medium text-gray-700">Command/Ctrl + 点击</span> 可加入多选
-              </div>
-            </div>
           )}
 
           <div className="cs-left-scroll px-3 pb-3">
@@ -2248,33 +2226,23 @@ const ChapterStudio: React.FC = () => {
                         borderRadius: 8,
                       }}
                     >
-                      <Tooltip
-                        title={
-                          selectedShotIds.length === 0
-                            ? 'Command/Ctrl + 点击可多选'
-                            : selectedShotIds.length === 1 && !isSelected
-                              ? '继续按 Command/Ctrl 点击可加入多选'
-                              : undefined
-                        }
-                        placement="right"
-                      >
-                        <Dropdown menu={{ items: shotContextMenu(s) }} trigger={['contextMenu']}>
-                          <Card
-                            size="small"
-                            className={[
-                              'cs-shot-item mb-2 cursor-pointer transition-colors',
-                              isSelected ? 'cs-shot-selected' : '',
-                              isActive ? 'cs-shot-active' : '',
-                            ].filter(Boolean).join(' ')}
-                            style={{
-                              opacity: s.hidden ? 0.55 : 1,
-                            }}
-                            onClick={(e) => handleSelectShot(s.id, i, e)}
-                            onDoubleClick={() => {
-                              setEditingTitleId(s.id)
-                              setEditingTitleValue(s.title)
-                            }}
-                          >
+                      <Dropdown menu={{ items: shotContextMenu(s) }} trigger={['contextMenu']}>
+                        <Card
+                          size="small"
+                          className={[
+                            'cs-shot-item mb-2 cursor-pointer transition-colors',
+                            isSelected ? 'cs-shot-selected' : '',
+                            isActive ? 'cs-shot-active' : '',
+                          ].filter(Boolean).join(' ')}
+                          style={{
+                            opacity: s.hidden ? 0.55 : 1,
+                          }}
+                          onClick={(e) => handleSelectShot(s.id, i, e)}
+                          onDoubleClick={() => {
+                            setEditingTitleId(s.id)
+                            setEditingTitleValue(s.title)
+                          }}
+                        >
                             <div className="flex gap-2">
                             <div className="w-16 h-10 rounded bg-gray-200 flex-shrink-0 flex items-center justify-center text-gray-400 text-xs overflow-hidden">
                               <span>16:9</span>
@@ -2354,13 +2322,11 @@ const ChapterStudio: React.FC = () => {
                                 {s.hasMusic && <Tag icon={<SoundOutlined />} className="m-0" color="default">音乐</Tag>}
                                 {statusTag(s.status)}
                                 {s.hidden && <Tag icon={<EyeInvisibleOutlined />} className="m-0">隐藏</Tag>}
-                                {s.hasProblem && <Tag color="error" className="m-0">有问题</Tag>}
                               </div>
                             </div>
                             </div>
-                          </Card>
-                        </Dropdown>
-                      </Tooltip>
+                        </Card>
+                      </Dropdown>
                     </div>
                   )
                 })}
@@ -2383,12 +2349,12 @@ const ChapterStudio: React.FC = () => {
           title="拖拽调整左侧宽度"
         />
 
-        {/* 中央：主预览区 */}
+        {/* 中央：视频结果区 */}
         <Content className="cs-main min-w-0 min-h-0 flex flex-col" style={{ padding: 16, position: 'relative', overflow: 'hidden' }}>
           <Card
             title={
               <div className="flex items-center gap-3 min-w-0">
-                <span className="font-medium">主预览区</span>
+                <span className="font-medium">视频结果区</span>
                 {selectedShot && (
                   <span className="text-xs text-gray-500 truncate">
                     当前分镜：{String(selectedShot.index).padStart(2, '0')} · {selectedShot.title}
@@ -2397,256 +2363,52 @@ const ChapterStudio: React.FC = () => {
               </div>
             }
             extra={
-              <Space size="small">
-                {showPreviewMinimizeButton && (
-                  <Tooltip title="最小化预览（占位）">
-                    <Button size="small" icon={<DoubleRightOutlined />} onClick={() => message.info('最小化预览（Mock）')} />
-                  </Tooltip>
-                )}
-                <Tooltip title="截取当前帧（Mock）">
-                  <Button size="small" icon={<ScissorOutlined />} onClick={() => message.success('已截取当前帧（Mock）')} />
-                </Tooltip>
-                <Tooltip title={currentPreviewVideoFileId ? '下载当前预览视频' : '暂无可下载视频'}>
-                  <Button
-                    size="small"
-                    icon={<DownloadOutlined />}
-                    disabled={!currentPreviewVideoFileId || !currentPreviewVideoUrl}
-                    onClick={() => {
-                      if (!currentPreviewVideoUrl) return
-                      window.open(currentPreviewVideoUrl, '_blank', 'noopener,noreferrer')
-                    }}
-                  />
-                </Tooltip>
-              </Space>
+              <div className="flex items-center gap-2">
+                <Button
+                  size="small"
+                  loading={batchGenerating}
+                  onClick={handleBatchGenerateAll}
+                >
+                  {batchGenerating && batchGenerateProgress
+                    ? `生成中 ${batchGenerateProgress.current}/${batchGenerateProgress.total}`
+                    : '一键全部生成'}
+                </Button>
+                <Button
+                  size="small"
+                  loading={batchDownloading}
+                  disabled={generatedVideos.length === 0}
+                  onClick={handleBatchDownloadAll}
+                >
+                  {batchDownloading && batchDownloadProgress
+                    ? `下载中 ${batchDownloadProgress.current}/${batchDownloadProgress.total}`
+                    : '一键全部下载'}
+                </Button>
+                <Tag className="m-0" color={generatedVideos.length > 0 ? 'blue' : 'default'}>
+                  已生成 {generatedVideos.length}
+                </Tag>
+              </div>
             }
             className="cs-preview-card flex-1 min-h-0"
             bodyStyle={{ height: '100%', minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 12 }}
           >
-            <div className="flex items-center justify-between gap-2">
-              {showPreviewFrameSegmented ? (
-                <Segmented
-                  size="small"
-                  value={frameTab}
-                  onChange={(v) => setFrameTab(v as typeof frameTab)}
-                  options={[
-                    { label: '首帧', value: 'head' },
-                    { label: '关键帧列表', value: 'keyframes' },
-                    { label: '尾帧', value: 'tail' },
-                    { label: '参考对比', value: 'compare' },
-                  ]}
-                />
-              ) : (
-                <div />
-              )}
-              <Space size="small">
-                <Select
-                  size="small"
-                  value={playbackRate}
-                  style={{ width: 86 }}
-                  onChange={(v) => setPlaybackRate(v)}
-                  options={[0.5, 1, 1.25, 1.5, 2].map((v) => ({ label: `${v}x`, value: v }))}
-                />
-                <Tooltip title="循环当前分镜">
-                  <Switch size="small" checked={loopCurrent} onChange={setLoopCurrent} />
-                </Tooltip>
-                <Space size={4} className="max-w-[320px]">
-                  <Radio.Group
-                    size="small"
-                    buttonStyle="solid"
-                    disabled={!currentFrameFileId || frameFileTagsLoading}
-                    value={currentFrameFileTags.includes(FRAME_FILE_TAG_ADOPT) ? FRAME_FILE_TAG_ADOPT : currentFrameFileTags.includes(FRAME_FILE_TAG_ABANDON) ? FRAME_FILE_TAG_ABANDON : ''}
-                    onChange={(e) => {
-                      const v = String(e?.target?.value ?? '')
-                      const base = currentFrameFileTags.filter((t) => t !== FRAME_FILE_TAG_ADOPT && t !== FRAME_FILE_TAG_ABANDON)
-                      if (!v) void updateCurrentFrameFileTags(base)
-                      else void updateCurrentFrameFileTags([v, ...base])
-                    }}
-                  >
-                    <Radio.Button value={FRAME_FILE_TAG_ADOPT}>采用</Radio.Button>
-                    <Radio.Button value={FRAME_FILE_TAG_ABANDON}>废弃</Radio.Button>
-                  </Radio.Group>
-                  <Select
-                    mode="tags"
-                    size="small"
-                    style={{ minWidth: 160, maxWidth: 220 }}
-                    placeholder="自定义标签"
-                    disabled={!currentFrameFileId || frameFileTagsLoading}
-                    loading={frameFileTagsLoading}
-                    value={currentFrameFileTags.filter((t) => t !== FRAME_FILE_TAG_ADOPT && t !== FRAME_FILE_TAG_ABANDON)}
-                    onChange={(vals) => {
-                      const base = Array.isArray(vals) ? (vals as any[]).map((v) => String(v)) : []
-                      const keep =
-                        currentFrameFileTags.find((t) => t === FRAME_FILE_TAG_ADOPT || t === FRAME_FILE_TAG_ABANDON) ?? null
-                      void updateCurrentFrameFileTags(keep ? [keep, ...base] : base)
-                    }}
-                  />
-                </Space>
-                <Tooltip title="当前镜头数据">
-                  <Tag className="m-0">
-                    帧图 {frameImages.length} · 关联 {sceneLinks.length + actorImageLinks.length + propLinks.length + costumeLinks.length}
-                  </Tag>
-                </Tooltip>
-              </Space>
+            <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pr-1">
+              <GeneratedVideoGrid
+                selectedShot={selectedShot}
+                videos={generatedVideos}
+                selectedVideosByShot={selectedVideosByShot}
+                onSelectVideo={(shotId, fileId) =>
+                  setSelectedVideosByShot((prev) => {
+                    if (prev[shotId] === fileId) {
+                      const next = { ...prev }
+                      delete next[shotId]
+                      return next
+                    }
+                    return { ...prev, [shotId]: fileId }
+                  })
+                }
+                onDeleteVideo={handleDeleteVideo}
+              />
             </div>
-
-            <div className="flex-1 min-h-0 overflow-auto flex flex-col gap-8 pr-1">
-              <div className="relative">
-                <div className="cs-player-shell">
-                  <div className="aspect-video bg-black rounded overflow-hidden flex items-center justify-center">
-                  {/* Mock：没有真实视频源时仍可展示播放器结构 */}
-                  <video
-                    ref={videoRef}
-                    className="w-full h-full object-contain"
-                    controls={false}
-                    muted
-                    playsInline
-                    preload="metadata"
-                    src={currentPreviewVideoUrl || undefined}
-                  />
-                  {!selectedShot && (
-                    <div className="absolute inset-0 flex items-center justify-center text-gray-400">
-                      请选择分镜
-                    </div>
-                  )}
-                  {selectedShot && !currentPreviewVideoUrl && selectedShot.status !== 'ready' && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Badge
-                        status={shotRuntimeMap[selectedShot.id]?.has_active_tasks ? 'processing' : 'default'}
-                        text={shotRuntimeMap[selectedShot.id]?.has_active_tasks ? '生成中…' : '未生成'}
-                      />
-                    </div>
-                  )}
-                  </div>
-                </div>
-
-                {/* 播放控制条 */}
-                <div className="mt-2 flex items-center gap-2">
-                  <Button
-                    size="small"
-                    icon={<CaretLeftOutlined />}
-                    onClick={() => message.info('帧退（Mock）')}
-                  />
-                  <Button
-                    size="small"
-                    type="primary"
-                    icon={isPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
-                    onClick={() => {
-                      const v = videoRef.current
-                      if (!v) return
-                      if (v.paused) void v.play()
-                      else v.pause()
-                    }}
-                  >
-                    {isPlaying ? '暂停' : '播放'}
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<CaretRightOutlined />}
-                    onClick={() => message.info('帧进（Mock）')}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <Slider
-                      tooltip={{ formatter: null }}
-                      min={0}
-                      max={Math.max(1, videoDuration || shotDetail?.duration || (selectedShotId ? shotDurations[selectedShotId] : 0) || 1)}
-                      value={videoTime}
-                      onChange={(v) => {
-                        const vv = videoRef.current
-                        if (!vv) return
-                        vv.currentTime = Number(v)
-                        setVideoTime(Number(v))
-                      }}
-                    />
-                  </div>
-                  <div className="text-xs text-gray-400 w-[110px] text-right">
-                    {videoTime.toFixed(1)} / {Math.max(videoDuration || 0, shotDetail?.duration || (selectedShotId ? shotDurations[selectedShotId] : 0) || 0).toFixed(1)}s
-                  </div>
-                </div>
-
-                {/* 对白字幕条 */}
-                <div className="cs-subtitle mt-2 px-3 py-2">
-                  {subtitleLines.length === 0 ? (
-                    <div className="text-sm opacity-80">暂无对白字幕</div>
-                  ) : (
-                    <div className="flex flex-col gap-1">
-                      {subtitleLines.map((l, idx) => {
-                        const active = idx === activeSubtitleIndex
-                        return (
-                          <div
-                            key={l.key}
-                            className="cs-sub-line text-sm cursor-pointer"
-                            style={{ opacity: active ? 1 : 0.6, fontWeight: active ? 600 : 400 }}
-                            onClick={() => {
-                              const v = videoRef.current
-                              if (!v) return
-                              v.currentTime = l.start
-                              setVideoTime(l.start)
-                            }}
-                          >
-                            <span style={{ opacity: 0.9 }}>{l.role}：</span>
-                            <span>{l.text}</span>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* 章节级时间轴（可折叠，固定在底部不参与滚动） */}
-            {showChapterTimeline && (
-              <div
-                className="rounded border border-solid border-gray-200 flex-shrink-0 min-h-0 flex flex-col"
-                style={{ background: 'var(--ant-color-bg-container)' }}
-              >
-                <div className="px-3 py-2 flex items-center justify-between flex-shrink-0">
-                  <div className="text-sm font-medium">章节时间轴</div>
-                  <Button
-                    size="small"
-                    type="text"
-                    onClick={() => setPrefs((p) => ({ ...p, timelineCollapsed: !p.timelineCollapsed }))}
-                  >
-                    {prefs.timelineCollapsed ? '展开' : '折叠'}
-                  </Button>
-                </div>
-                {!prefs.timelineCollapsed && (
-                  <div className="px-3 pb-3 flex-shrink-0 overflow-hidden">
-                    <div className="flex items-center gap-2 overflow-x-auto py-1 min-h-[32px]">
-                      {shots
-                        .slice()
-                        .sort((a, b) => a.index - b.index)
-                        .filter((s) => !s.hidden)
-                        .map((s) => {
-                          const active = s.id === selectedShotId
-                          return (
-                            <div
-                              key={s.id}
-                              className="shrink-0 cursor-pointer rounded"
-                              style={{
-                                width: clamp(18 + ((shotDurations[s.id] ?? 1) || 1) * 6, 24, 96),
-                                height: 14,
-                                background:
-                                  shotRuntimeMap[s.id]?.has_active_tasks
-                                    ? 'rgba(59,130,246,0.45)'
-                                    : s.status === 'ready'
-                                    ? 'rgba(34,197,94,0.45)'
-                                    : 'rgba(156,163,175,0.45)',
-                                outline: active ? '2px solid var(--ant-color-primary)' : '1px solid rgba(0,0,0,0.06)',
-                              }}
-                              title={`${String(s.index).padStart(2, '0')} · ${s.title}`}
-                              onClick={() => setSelectedShotId(s.id)}
-                            />
-                          )
-                        })}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      点击条块跳转分镜；隐藏分镜不参与预览
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </Card>
         </Content>
 
@@ -2690,28 +2452,22 @@ const ChapterStudio: React.FC = () => {
                 onChangeKeyframeResolutionProfile={setKeyframeResolutionProfile}
                 loadingDetail={loadingDetail}
                 shotDetail={shotDetail}
-                dialogLines={dialogLines}
                 frameImages={frameImages}
                 sceneLinks={sceneLinks}
                 propLinks={propLinks}
                 costumeLinks={costumeLinks}
                 shotCharacterLinks={shotCharacterLinks}
                 shotCandidateItems={shotCandidateItems}
-                shotDialogueCandidateItems={shotDialogueCandidateItems}
                 cameraUpdating={cameraUpdating}
                 promptAssetsUpdating={promptAssetsUpdating}
-                onDeleteDialogLine={deleteDialogLine}
                 onUpdatePromptScene={updatePromptScene}
                 onUpdatePromptActors={updatePromptActors}
                 onUpdatePromptProps={updatePromptProps}
                 onUpdatePromptCostumes={updatePromptCostumes}
                 selectedShot={selectedShot}
-                onUpdateShotTitle={updateShotTitleInOps}
-                onUpdateShotScriptExcerpt={updateShotScriptExcerptInOps}
-                onDeleteShotOps={deleteShotFromOps}
                 onPatchShotDetail={patchShotDetailLocal}
                 onPatchShotDetailImmediate={patchShotDetailImmediate}
-                onSelectPreviewVideo={setPreviewVideoFileId}
+                onVideoResultsChanged={() => setVideoResultsRefreshKey((value) => value + 1)}
                 onRefreshShotFrameImages={refreshShotFrameImages}
                 onClose={() => setPrefs((p) => ({ ...p, inspectorOpen: false }))}
               />
@@ -2764,28 +2520,22 @@ const ChapterStudio: React.FC = () => {
                     onChangeKeyframeResolutionProfile={setKeyframeResolutionProfile}
                     loadingDetail={loadingDetail}
                     shotDetail={shotDetail}
-                    dialogLines={dialogLines}
                     frameImages={frameImages}
                     sceneLinks={sceneLinks}
                     propLinks={propLinks}
                     costumeLinks={costumeLinks}
                     shotCharacterLinks={shotCharacterLinks}
                     shotCandidateItems={shotCandidateItems}
-                    shotDialogueCandidateItems={shotDialogueCandidateItems}
                     cameraUpdating={cameraUpdating}
                     promptAssetsUpdating={promptAssetsUpdating}
-                    onDeleteDialogLine={deleteDialogLine}
                     onUpdatePromptScene={updatePromptScene}
                     onUpdatePromptActors={updatePromptActors}
                     onUpdatePromptProps={updatePromptProps}
                     onUpdatePromptCostumes={updatePromptCostumes}
                     selectedShot={selectedShot}
-                    onUpdateShotTitle={updateShotTitleInOps}
-                    onUpdateShotScriptExcerpt={updateShotScriptExcerptInOps}
-                    onDeleteShotOps={deleteShotFromOps}
                     onPatchShotDetail={patchShotDetailLocal}
                     onPatchShotDetailImmediate={patchShotDetailImmediate}
-                    onSelectPreviewVideo={setPreviewVideoFileId}
+                    onVideoResultsChanged={() => setVideoResultsRefreshKey((value) => value + 1)}
                     onRefreshShotFrameImages={refreshShotFrameImages}
                     onClose={() => setPrefs((p) => ({ ...p, inspectorOpen: false }))}
                   />
@@ -2908,29 +2658,23 @@ function Inspector(props: {
   onChangeKeyframeResolutionProfile: (value: KeyframeResolutionProfile) => void
   loadingDetail: boolean
   shotDetail: ShotDetailRead | null
-  dialogLines: ShotDialogLineRead[]
   frameImages: ShotFrameImageRead[]
   sceneLinks: ProjectSceneLinkRead[]
   propLinks: ProjectPropLinkRead[]
   costumeLinks: ProjectCostumeLinkRead[]
   shotCharacterLinks: ShotCharacterLinkRead[]
   shotCandidateItems: ShotExtractedCandidateRead[]
-  shotDialogueCandidateItems: ShotExtractedDialogueCandidateRead[]
   cameraUpdating: boolean
   promptAssetsUpdating: boolean
-  onDeleteDialogLine: (lineId: number) => Promise<void>
   onUpdatePromptScene: (sceneId?: string) => Promise<void>
   onUpdatePromptActors: (actorIds: string[]) => Promise<void>
   onUpdatePromptProps: (propIds: string[]) => Promise<void>
   onUpdatePromptCostumes: (costumeIds: string[]) => Promise<void>
   selectedShot: StudioShot | null
-  onUpdateShotTitle: (shotId: string, title: string) => Promise<void>
-  onUpdateShotScriptExcerpt: (shotId: string, script_excerpt: string) => Promise<void>
-  onDeleteShotOps: (shotId: string) => Promise<void>
   onClose: () => void
   onPatchShotDetail: (patch: Partial<ShotDetailRead>) => void
   onPatchShotDetailImmediate: (patch: Partial<ShotDetailRead>) => Promise<void>
-  onSelectPreviewVideo: (fileId: string) => void
+  onVideoResultsChanged: () => void
   /** 下拉展开时拉取最新分镜帧图，用于「参考」关键帧类型选项动态更新 */
   onRefreshShotFrameImages?: () => Promise<void>
 }) {
@@ -2947,29 +2691,23 @@ function Inspector(props: {
     onChangeKeyframeResolutionProfile,
     loadingDetail,
     shotDetail,
-    dialogLines,
     frameImages,
     sceneLinks,
     propLinks,
     costumeLinks,
     shotCharacterLinks,
     shotCandidateItems,
-    shotDialogueCandidateItems,
     cameraUpdating,
     promptAssetsUpdating,
-    onDeleteDialogLine,
     onUpdatePromptScene,
     onUpdatePromptActors,
     onUpdatePromptProps,
     onUpdatePromptCostumes,
     selectedShot,
-    onUpdateShotTitle,
-    onUpdateShotScriptExcerpt,
-    onDeleteShotOps,
     onClose,
     onPatchShotDetail,
     onPatchShotDetailImmediate,
-    onSelectPreviewVideo,
+    onVideoResultsChanged,
     onRefreshShotFrameImages,
   } = props
   const currentChapterId = chapterId ?? null
@@ -2978,7 +2716,6 @@ function Inspector(props: {
   const [refFrameTypeSelectLoading, setRefFrameTypeSelectLoading] = useState(false)
   const [useBoneDepth, setUseBoneDepth] = useState(false)
   const [audioMode, setAudioMode] = useState<'none' | 'prompt' | 'upload'>('none')
-  const [hideShot, setHideShot] = useState(false)
   const [inspectorTabKey, setInspectorTabKey] = useState<InspectorTabKey>('camera')
   const [sceneNameMap, setSceneNameMap] = useState<Record<string, string>>({})
   const [characterNameMap, setCharacterNameMap] = useState<Record<string, string>>({})
@@ -3018,10 +2755,6 @@ function Inspector(props: {
   const [linkCostumeLoading, setLinkCostumeLoading] = useState(false)
   const [linkCostumeSelectedIds, setLinkCostumeSelectedIds] = useState<string[]>([])
   const [projectCostumeOptions, setProjectCostumeOptions] = useState<Array<{ value: string; label: React.ReactNode; searchLabel: string; disabled?: boolean }>>([])
-  const [opsTitleDraft, setOpsTitleDraft] = useState('')
-  const [opsNoteDraft, setOpsNoteDraft] = useState('')
-  const opsTitleSaveTimerRef = useRef<number | null>(null)
-  const opsNoteSaveTimerRef = useRef<number | null>(null)
   const [keyframePromptPreviewOpen, setKeyframePromptPreviewOpen] = useState(false)
   const [keyframePromptPreviewLoading, setKeyframePromptPreviewLoading] = useState(false)
   const [keyframePromptActionLoading, setKeyframePromptActionLoading] = useState(false)
@@ -3035,6 +2768,45 @@ function Inspector(props: {
   const [videoPromptPreviewLoading, setVideoPromptPreviewLoading] = useState(false)
   const [videoPromptPreviewSubmitting, setVideoPromptPreviewSubmitting] = useState(false)
   const [videoPromptContextCollapsed, setVideoPromptContextCollapsed] = useState(true)
+  const [videoModelPickerOpen, setVideoModelPickerOpen] = useState(false)
+  const [videoModelsLoading, setVideoModelsLoading] = useState(false)
+  const [videoModels, setVideoModels] = useState<VideoModelOption[]>([])
+  const [selectedVideoModelId, setSelectedVideoModelId] = useState<string | null>(null)
+  const selectedVideoModel = useMemo(
+    () => videoModels.find((item) => item.id === selectedVideoModelId) ?? null,
+    [selectedVideoModelId, videoModels],
+  )
+
+  useEffect(() => {
+    let active = true
+    setVideoModelsLoading(true)
+    void (async () => {
+      try {
+        const modelsRes = await LlmService.listBuiltinGenerationModelsApiV1LlmBuiltinModelsGet({
+          category: 'video',
+        })
+        if (!active) return
+        const items = ((modelsRes.data ?? []) as VideoModelOption[]).filter((model) => model.category === 'video')
+        setVideoModels(items)
+        setSelectedVideoModelId((prev) => {
+          if (prev && items.some((item) => item.id === prev)) return prev
+          return items.find((item) => item.recommended)?.id ?? items[0]?.id ?? null
+        })
+      } catch {
+        if (active) {
+          setVideoModels([])
+        }
+      } finally {
+        if (active) {
+          setVideoModelsLoading(false)
+        }
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [])
+
   const resolveVideoRatioForRequest = useCallback(() => {
     const shotRatio = String(shotDetail?.override_video_ratio ?? '').trim()
     const projectRatio = String(projectDefaultVideoRatio ?? '').trim()
@@ -3094,6 +2866,7 @@ function Inspector(props: {
           prompt: (derived.prompt || '').trim(),
           images: derived.images,
           ratio,
+          model_id: selectedVideoModelId,
         } as any,
       })
       return {
@@ -3128,7 +2901,6 @@ function Inspector(props: {
   const [promptSettledTask, setPromptSettledTask] = useState<RelationTaskState | null>(null)
   const [frameImageTask, setFrameImageTask] = useState<RelationTaskState | null>(null)
   const [frameImageSettledTask, setFrameImageSettledTask] = useState<RelationTaskState | null>(null)
-  const [generatedVideos, setGeneratedVideos] = useState<Array<{ linkId: number; fileId: string; url: string }>>([])
   const [videoReadiness, setVideoReadiness] = useState<ShotVideoReadinessRead | null>(null)
   const [videoReadinessLoading, setVideoReadinessLoading] = useState(false)
   const [keyframeCards, setKeyframeCards] = useState<Record<PromptFrameType, KeyframeCardState>>({
@@ -3229,10 +3001,9 @@ function Inspector(props: {
   const getInspectorTabForSelectedShot = useCallback(
     (shot: StudioShot | null): InspectorTabKey => {
       if (!shot) return 'camera'
-      if (shot.hasProblem) return 'ops'
+      if (shot.hasProblem) return 'prompt_image'
       if (!(shot.script_excerpt ?? '').trim() || shot.status !== 'ready') return 'prompt_image'
       if (shot.status === 'ready') return 'gen_ref'
-      if (!shot.hasSpeech) return 'dialogue'
       return 'camera'
     },
     [],
@@ -3241,11 +3012,6 @@ function Inspector(props: {
   useEffect(() => {
     setInspectorTabKey(getInspectorTabForSelectedShot(selectedShot))
   }, [getInspectorTabForSelectedShot, selectedShot?.id])
-
-  useEffect(() => {
-    setHideShot(Boolean(selectedShot?.hidden))
-  }, [selectedShot?.hidden])
-
   useEffect(() => {
     if (!selectedShot?.id) {
       setVideoReadiness(null)
@@ -3281,110 +3047,6 @@ function Inspector(props: {
     shotDetail?.last_frame_prompt,
     frameImages.map((x) => `${x.id}:${x.file_id ?? ''}`).join('|'),
   ])
-
-  useEffect(() => {
-    if (!selectedShot?.id) {
-      setGeneratedVideos([])
-      return
-    }
-    let canceled = false
-    void (async () => {
-      try {
-        const links = await listTaskLinksNormalized({
-          resourceType: 'video',
-          relationType: 'video',
-          relationEntityId: selectedShot.id,
-          order: 'updated_at',
-          isDesc: true,
-          page: 1,
-          pageSize: 100,
-        })
-        if (canceled) return
-        const seen = new Set<string>()
-        const list = links
-          .filter((l) => Boolean(l.file_id))
-          .map((l) => ({
-            linkId: l.id,
-            fileId: String(l.file_id),
-            url: buildFileDownloadUrl(String(l.file_id)) ?? '',
-          }))
-          .filter((v) => Boolean(v.url))
-          .filter((v) => {
-            if (seen.has(v.fileId)) return false
-            seen.add(v.fileId)
-            return true
-          })
-        const currentId = selectedShot.generated_video_file_id?.trim() || ''
-        if (currentId && !list.some((x) => x.fileId === currentId)) {
-          const currentUrl = buildFileDownloadUrl(currentId) ?? ''
-          if (currentUrl) list.unshift({ linkId: -1, fileId: currentId, url: currentUrl })
-        }
-        setGeneratedVideos(list)
-      } catch {
-        if (!canceled) setGeneratedVideos([])
-      }
-    })()
-    return () => {
-      canceled = true
-    }
-  }, [selectedShot?.id, selectedShot?.generated_video_file_id, videoTaskStatus, videoTaskPolling])
-
-  useEffect(() => {
-    setOpsTitleDraft(selectedShot?.title ?? '')
-    setOpsNoteDraft(selectedShot?.script_excerpt ?? '')
-    if (opsTitleSaveTimerRef.current) window.clearTimeout(opsTitleSaveTimerRef.current)
-    if (opsNoteSaveTimerRef.current) window.clearTimeout(opsNoteSaveTimerRef.current)
-    opsTitleSaveTimerRef.current = null
-    opsNoteSaveTimerRef.current = null
-  }, [selectedShot?.id])
-
-  useEffect(() => {
-    if (!selectedShot?.id) return
-    if (opsTitleDraft === (selectedShot.title ?? '')) return
-
-    if (opsTitleSaveTimerRef.current) window.clearTimeout(opsTitleSaveTimerRef.current)
-    opsTitleSaveTimerRef.current = window.setTimeout(() => {
-      void onUpdateShotTitle(selectedShot.id, opsTitleDraft)
-      opsTitleSaveTimerRef.current = null
-    }, 500)
-
-    return () => {
-      if (opsTitleSaveTimerRef.current) window.clearTimeout(opsTitleSaveTimerRef.current)
-      opsTitleSaveTimerRef.current = null
-    }
-  }, [opsTitleDraft, selectedShot?.id, selectedShot?.title, onUpdateShotTitle])
-
-  useEffect(() => {
-    if (!selectedShot?.id) return
-    if (opsNoteDraft === (selectedShot.script_excerpt ?? '')) return
-
-    if (opsNoteSaveTimerRef.current) window.clearTimeout(opsNoteSaveTimerRef.current)
-    opsNoteSaveTimerRef.current = window.setTimeout(() => {
-      void onUpdateShotScriptExcerpt(selectedShot.id, opsNoteDraft)
-      opsNoteSaveTimerRef.current = null
-    }, 500)
-
-    return () => {
-      if (opsNoteSaveTimerRef.current) window.clearTimeout(opsNoteSaveTimerRef.current)
-      opsNoteSaveTimerRef.current = null
-    }
-  }, [opsNoteDraft, selectedShot?.id, selectedShot?.script_excerpt, onUpdateShotScriptExcerpt])
-
-  const flushOpsTitle = async () => {
-    if (!selectedShot?.id) return
-    if (opsTitleSaveTimerRef.current) window.clearTimeout(opsTitleSaveTimerRef.current)
-    opsTitleSaveTimerRef.current = null
-    if (opsTitleDraft === (selectedShot.title ?? '')) return
-    await onUpdateShotTitle(selectedShot.id, opsTitleDraft)
-  }
-
-  const flushOpsNote = async () => {
-    if (!selectedShot?.id) return
-    if (opsNoteSaveTimerRef.current) window.clearTimeout(opsNoteSaveTimerRef.current)
-    opsNoteSaveTimerRef.current = null
-    if (opsNoteDraft === (selectedShot.script_excerpt ?? '')) return
-    await onUpdateShotScriptExcerpt(selectedShot.id, opsNoteDraft)
-  }
 
   const sceneIds = useMemo(() => Array.from(new Set(sceneLinks.map((x) => x.scene_id).filter(Boolean))), [sceneLinks])
   const characterIds = useMemo(() => Array.from(new Set(shotCharacterLinks.map((x) => x.character_id).filter(Boolean))), [shotCharacterLinks])
@@ -3664,14 +3326,6 @@ function Inspector(props: {
     if (item.linked_to_shot) return '已关联'
     return null
   }, [readinessExistenceLoading, readinessExistenceMap])
-
-
-  const promptAssetReadinessNote = useMemo(() => {
-    if (!selectedShot) return '请先选择一个分镜。'
-    if (selectedShot.skip_extraction) return '当前分镜已明确标记为无需提取，系统会直接按“提取确认已完成”处理。'
-    if (!shotAssetsOverview) return '当前还没有拿到这条分镜的资产总览，暂时无法展示候选确认状态。'
-    return '这里作为生成前的诊断面板，优先依据后端 assets-overview 展示当前镜头的信息确认状态；提取、刷新与精细确认统一在分镜编辑页处理。'
-  }, [selectedShot, shotAssetsOverview])
 
   const shotExtractStatusText = useMemo(() => {
     if (!shotExtractStatus.message) return ''
@@ -4250,6 +3904,10 @@ function Inspector(props: {
       message.warning('请先选择一个分镜')
       return
     }
+    if (!selectedVideoModelId) {
+      message.warning('请先选择视频模型')
+      return
+    }
     const { referenceMode, images } = buildVideoRefSelection()
     const nextContext = { referenceMode, images }
     videoPromptDraft.hydrate({
@@ -4284,6 +3942,10 @@ function Inspector(props: {
   const submitVideoGeneration = async () => {
     if (!selectedShot?.id) {
       message.warning('请先选择一个分镜')
+      return
+    }
+    if (!selectedVideoModelId) {
+      message.warning('请先选择视频模型')
       return
     }
     if (!resolveVideoRatioForRequest()) {
@@ -4349,6 +4011,9 @@ function Inspector(props: {
         ) {
           setVideoTask(null)
           setVideoSettledTask(finalTaskState)
+          if (finalTaskState.status === 'succeeded') {
+            onVideoResultsChanged()
+          }
         }
       } catch {
         if (!cancelled) {
@@ -4696,8 +4361,6 @@ function Inspector(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedShot?.id, frameImages.map((x) => `${x.id}:${x.file_id ?? ''}`).join('|')])
 
-  const pendingDialogueCandidates = shotDialogueCandidateItems.filter((item) => item.candidate_status === 'pending')
-
   return (
     <div className="w-full h-full flex flex-col min-h-0">
       <div className="cs-inspector-header flex items-center justify-between">
@@ -4721,38 +4384,7 @@ function Inspector(props: {
           onChange={(activeKey) => setInspectorTabKey(activeKey as InspectorTabKey)}
           items={(() => {
             const items = [
-              {
-              key: 'ops',
-              label: '维护设置',
-              children: (
-                <ChapterStudioMaintenancePanel
-                  opsTitleDraft={opsTitleDraft}
-                  opsNoteDraft={opsNoteDraft}
-                  hideShot={hideShot}
-                  onChangeTitle={setOpsTitleDraft}
-                  onBlurTitle={() => {
-                    void flushOpsTitle()
-                  }}
-                  onChangeNote={setOpsNoteDraft}
-                  onBlurNote={() => {
-                    void flushOpsNote()
-                  }}
-                  onToggleHidden={setHideShot}
-                  onRequestDelete={() => {
-                    if (!selectedShot?.id) return
-                    Modal.confirm({
-                      title: '删除分镜？',
-                      content: '此操作不可撤销。',
-                      okText: '删除',
-                      okButtonProps: { danger: true },
-                      cancelText: '取消',
-                      onOk: () => onDeleteShotOps(selectedShot.id),
-                    })
-                  }}
-                />
-              ),
-            },
-              {
+{
               key: 'camera',
               label: '生成参数',
               children: (
@@ -4800,25 +4432,25 @@ function Inspector(props: {
                             />
                           </div>
                           <div>
-                            <div className="text-gray-500 text-xs mb-1">时长（1–30s，整数）</div>
+                            <div className="text-gray-500 text-xs mb-1">时长（3–30s，整数）</div>
                             <div className="flex items-center gap-2">
                               <Slider
-                                min={1}
+                                min={3}
                                 max={30}
                                 step={1}
-                                value={Math.max(1, Math.min(30, Math.round(shotDetail.duration ?? 1)))}
+                                value={Math.max(3, Math.min(30, Math.round(shotDetail.duration ?? 3)))}
                                 style={{ flex: 1 }}
                                 onChange={(v) => void onPatchShotDetailImmediate({ duration: Math.round(Number(v)) })}
                                 disabled={cameraUpdating}
                               />
                               <Input
                                 size="small"
-                                value={`${Math.max(1, Math.min(30, Math.round(shotDetail.duration ?? 1)))}`}
+                                value={`${Math.max(3, Math.min(30, Math.round(shotDetail.duration ?? 3)))}`}
                                 style={{ width: 72 }}
                                 onChange={(e) => {
                                   const raw = Number(e.target.value)
                                   if (!Number.isFinite(raw)) return
-                                  const n = Math.max(1, Math.min(30, Math.round(raw)))
+                                  const n = Math.max(3, Math.min(30, Math.round(raw)))
                                   void onPatchShotDetailImmediate({ duration: n })
                                 }}
                                 disabled={cameraUpdating}
@@ -4845,24 +4477,6 @@ function Inspector(props: {
                         </div>
                       </div>
 
-                      <div className="cs-group">
-                        <div className="cs-group-title">
-                          <TagOutlined /> 情绪标签
-                        </div>
-                        <div className="cs-hint">用标签快速标记镜头情绪，便于生成风格统一。</div>
-                        <div className="mt-3">
-                          <Space wrap>
-                            {['愤怒', '反转', '紧张', '温馨', '压抑'].map((t) => (
-                              <Tag key={t} className="cursor-pointer">
-                                {t}
-                              </Tag>
-                            ))}
-                            <Button size="small" type="dashed">
-                              + 自定义
-                            </Button>
-                          </Space>
-                        </div>
-                      </div>
                     </>
                   ) : (
                     <div className="text-gray-500">请选择分镜</div>
@@ -4872,14 +4486,13 @@ function Inspector(props: {
             },
               {
               key: 'prompt_image',
-              label: '确认诊断',
+              label: '确认资产与台词',
               children: (
                 <div>
                   <ChapterStudioReadinessDiagnosisPanel
                     selectedShot={selectedShot}
                     shotAssetsOverview={shotAssetsOverview}
                     promptAssetReadiness={promptAssetReadiness}
-                    promptAssetReadinessNote={promptAssetReadinessNote}
                     shotExtractStatusSource={shotExtractStatus.source}
                     shotExtractStatusText={shotExtractStatusText}
                     onGoToShotEdit={goToShotEditForAssets}
@@ -4894,14 +4507,6 @@ function Inspector(props: {
                       <PictureOutlined /> 氛围描述
                     </div>
                     <div>
-                        <div className="flex items-center justify-between">
-                          <div className="text-gray-500 text-xs">氛围描述</div>
-                          <Switch
-                            size="small"
-                            checked={shotDetail?.follow_atmosphere ?? false}
-                            onChange={(v) => onPatchShotDetail({ follow_atmosphere: v })}
-                          />
-                        </div>
                         <TextArea
                           rows={3}
                           placeholder="氛围描述…（可选跟随画面）"
@@ -4911,90 +4516,6 @@ function Inspector(props: {
                     </div>
                   </div>
 
-                </div>
-              ),
-            },
-              {
-              key: 'dialogue',
-              label: '对白状态',
-              children: (
-                <div>
-                  <div className="cs-group">
-                    <div className="cs-group-title">
-                      <SoundOutlined /> 对白状态
-                    </div>
-                    <div className="cs-hint">这里主要查看当前镜头对白与待确认状态。对白候选的主确认入口在分镜编辑页，工作室侧重继续准备关键帧、图片和视频生成。</div>
-                    <div className="space-y-4 mt-3">
-                      <div>
-                        <Button icon={<EditOutlined />} onClick={goToShotEditForAssets}>
-                          去分镜编辑确认对白
-                        </Button>
-                      </div>
-                      <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-500">
-                        如需新增对白、接受候选或忽略候选，请前往分镜编辑页处理。工作室这里主要用于查看当前对白状态，并继续后续生成准备。
-                      </div>
-
-                      {pendingDialogueCandidates.length > 0 ? (
-                        <div>
-                          <div className="text-gray-500 text-xs mb-2">待确认对白候选</div>
-                          <div className="space-y-2">
-                            {pendingDialogueCandidates.map((candidate) => (
-                              <div key={candidate.id} className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                                <div className="flex items-start justify-between gap-2">
-                                  <div className="min-w-0">
-                                    <div className="text-xs text-amber-700 mb-1">
-                                      {candidate.speaker_name?.trim() || '未知'} → {candidate.target_name?.trim() || '未知'}
-                                    </div>
-                                    <div className="text-xs text-gray-700 break-words">{candidate.text}</div>
-                                  </div>
-                                  <Button size="small" icon={<EditOutlined />} onClick={goToShotEditForAssets}>
-                                    去编辑页处理
-                                  </Button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-
-                      <div>
-                        <div className="text-gray-500 text-xs mb-2">当前对白</div>
-                        {dialogLines.length > 0 ? (
-                          <div className="space-y-1">
-                            {dialogLines.slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0)).map((l) => (
-                              <div key={l.id} className="flex items-center gap-2">
-                                <div className="text-xs text-gray-600 truncate flex-1 min-w-0">{l.text}</div>
-                                <Button
-                                  size="small"
-                                  type="text"
-                                  danger
-                                  icon={<DeleteOutlined />}
-                                  onClick={() => {
-                                    Modal.confirm({
-                                      title: '删除该对白？',
-                                      okText: '删除',
-                                      cancelText: '取消',
-                                      okButtonProps: { danger: true },
-                                      onOk: async () => {
-                                        try {
-                                          await onDeleteDialogLine(l.id)
-                                          message.success('已删除')
-                                        } catch {
-                                          message.error('删除失败')
-                                        }
-                                      },
-                                    })
-                                  }}
-                                />
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="text-xs text-gray-400">当前镜头还没有对白。</div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
                 </div>
               ),
             },
@@ -5467,7 +4988,6 @@ function Inspector(props: {
                     selectedShot={selectedShot}
                     videoReadinessLoading={videoReadinessLoading}
                     videoReadiness={videoReadiness}
-                    videoReferenceMode={videoReferenceMode}
                   />
 
                   <div className="cs-group">
@@ -5513,49 +5033,74 @@ function Inspector(props: {
                     <div className="cs-group-title">
                       <ThunderboltOutlined /> 生成
                     </div>
-                    <Space wrap>
-                      <Button type="primary" icon={<VideoCameraOutlined />} loading={videoPromptPreviewSubmitting || videoTaskPolling} onClick={() => void openVideoPromptPreview()}>
+                    <Space direction="vertical" className="w-full" size="small">
+                      <Popover
+                        open={videoModelPickerOpen}
+                        onOpenChange={setVideoModelPickerOpen}
+                        trigger="click"
+                        placement="leftTop"
+                        title={<span className="text-sm font-medium">选择视频模型</span>}
+                        content={(
+                          <div style={{ width: 260 }}>
+                            {videoModelsLoading ? (
+                              <div className="py-3 text-center text-xs text-gray-400">加载中...</div>
+                            ) : videoModels.length === 0 ? (
+                              <div className="py-3 text-center text-xs text-gray-400">
+                                暂无可用视频模型
+                              </div>
+                            ) : (
+                              <div className="space-y-1">
+                                {videoModels.map((model) => (
+                                  <div
+                                    key={model.id}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => {
+                                      setSelectedVideoModelId(model.id)
+                                      setVideoModelPickerOpen(false)
+                                    }}
+                                    onKeyDown={(event) => {
+                                      if (event.key === 'Enter' || event.key === ' ') {
+                                        event.preventDefault()
+                                        setSelectedVideoModelId(model.id)
+                                        setVideoModelPickerOpen(false)
+                                      }
+                                    }}
+                                    className={[
+                                      'flex cursor-pointer items-start gap-2 rounded px-3 py-2 transition-colors select-none',
+                                      selectedVideoModelId === model.id ? 'bg-blue-50 ring-1 ring-blue-400' : 'hover:bg-gray-50',
+                                    ].join(' ')}
+                                  >
+                                    <div className="flex-1 min-w-0">
+                                      <div className="truncate text-sm font-medium text-gray-800">{model.display_name || model.name}</div>
+                                      <div className="mt-0.5 flex items-center gap-1.5">
+                                        <Tag className="m-0 flex-shrink-0 px-1 py-0 text-[10px] leading-4">{model.provider_name}</Tag>
+                                      </div>
+                                    </div>
+                                    {selectedVideoModelId === model.id && <CheckOutlined className="mt-0.5 flex-shrink-0 text-blue-500" />}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      >
+                        <Button
+                          size="small"
+                          block
+                          loading={videoModelsLoading}
+                          icon={<AppstoreOutlined />}
+                          className="text-left"
+                          style={{ justifyContent: 'flex-start' }}
+                        >
+                          {selectedVideoModel ? (selectedVideoModel.display_name || selectedVideoModel.name) : '选择模型'}
+                        </Button>
+                      </Popover>
+                      <Button type="primary" block icon={<VideoCameraOutlined />} loading={videoPromptPreviewSubmitting || videoTaskPolling} onClick={() => void openVideoPromptPreview()}>
                         生成视频
                       </Button>
                       {videoTaskStatus ? <span className="text-xs text-gray-500">任务状态：{videoTaskStatus}</span> : null}
                     </Space>
-                  </div>
-
-                  <div className="cs-group">
-                    <div className="cs-group-title">
-                      <VideoCameraOutlined /> 已生成视频
-                    </div>
-                    {generatedVideos.length === 0 ? (
-                      <div className="text-xs text-gray-400">当前分镜暂无已生成视频</div>
-                    ) : (
-                      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
-                        {generatedVideos.map((item, idx) => (
-                          <div key={`${item.linkId}-${item.fileId}`} className="border rounded p-2">
-                            <video
-                              src={item.url}
-                              className="w-full h-20 rounded object-cover bg-black"
-                              preload="metadata"
-                              muted
-                              onClick={() => onSelectPreviewVideo(item.fileId)}
-                              style={{ cursor: 'pointer' }}
-                            />
-                            <div className="mt-2 flex items-center justify-between gap-2">
-                              <span className="text-xs text-gray-500">视频 {idx + 1}</span>
-                              <Tooltip title="下载视频">
-                                <Button
-                                  size="small"
-                                  icon={<DownloadOutlined />}
-                                  onClick={() => {
-                                    if (!item.url) return
-                                    window.open(item.url, '_blank', 'noopener,noreferrer')
-                                  }}
-                                />
-                              </Tooltip>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                   </div>
 
                   {showGenRefVersions && (
@@ -5582,13 +5127,11 @@ function Inspector(props: {
             ]
 
             const order: Record<string, number> = {
-              gen_ref: 0,
+              prompt_image: 0,
               keyframe_gen: 1,
               camera: 2,
-              prompt_image: 3,
-              dialogue: 4,
-              ops: 5,
-              av: 6,
+              gen_ref: 3,
+              av: 4,
             }
 
             return items.sort((a, b) => (order[String(a.key)] ?? 999) - (order[String(b.key)] ?? 999))

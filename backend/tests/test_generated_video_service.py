@@ -221,6 +221,40 @@ async def test_build_run_args_maps_reference_images(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
+async def test_build_run_args_accepts_builtin_video_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    db, engine = await _build_session()
+    async with db:
+        await _seed_shot_graph(db)
+        provider = Provider(id="bailian-provider", name="阿里百炼", base_url="https://dashscope.aliyuncs.com/compatible-mode/v1", api_key="k")
+        db.add(provider)
+        await db.commit()
+
+        async def _fake_file_id_to_data_url(_db: AsyncSession, *, file_id: str) -> str:
+            return f"data:image/png;base64,{file_id}"
+
+        monkeypatch.setattr(
+            "app.services.film.generated_video.file_id_to_data_url",
+            _fake_file_id_to_data_url,
+        )
+
+        run_args = await build_run_args(
+            db,
+            shot_id="s1",
+            reference_mode="text_only",
+            prompt="builtin model prompt",
+            images=[],
+            ratio="16:9",
+            model_id="builtin:aliyun_bailian:video:happyhorse-1.0-t2v",
+        )
+
+        assert run_args["provider"] == "aliyun_bailian"
+        assert run_args["api_key"] == "k"
+        assert run_args["base_url"] == "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        assert run_args["input"]["model"] == "happyhorse-1.0-t2v"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_build_run_args_uses_prompt_pack_when_prompt_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     db, engine = await _build_session()
     async with db:

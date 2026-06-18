@@ -7,8 +7,8 @@ import type { ProjectSceneLinkRead } from '../../../../../services/generated'
 import { buildFileDownloadUrl, resolveAssetUrl } from '../../../assets/utils'
 import { DisplayImageCard } from '../../../assets/components/DisplayImageCard'
 import { StudioEntitiesApi } from '../../../../../services/studioEntities'
-import { StudioAssetTypeFormModal } from '../../../assets/components/StudioAssetTypeFormModal'
 import { encodeWorkbenchAssetEditReturnTo } from '../utils/workbenchAssetReturnTo'
+import { newId } from '../hooks/useProjectData'
 
 type SceneLike = {
   id: string
@@ -25,7 +25,7 @@ export function ScenesTab() {
   const [linksLoading, setLinksLoading] = useState(false)
   const [scenesById, setScenesById] = useState<Record<string, SceneLike>>({})
 
-  const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [creating, setCreating] = useState(false)
   const [linkModalOpen, setLinkModalOpen] = useState(false)
   const [scenes, setScenes] = useState<SceneLike[]>([])
   const [scenesLoading, setScenesLoading] = useState(false)
@@ -155,6 +155,21 @@ export function ScenesTab() {
     }
   }
 
+  const handleCreateNew = async () => {
+    if (!projectId || creating) return
+    setCreating(true)
+    try {
+      const id = newId('scene')
+      const res = await StudioEntitiesApi.create('scene', { id, name: '未命名场景' })
+      const createdId = (res.data as { id?: string } | undefined)?.id ?? id
+      navigate(`/assets/scenes/${createdId}/edit?returnTo=${encodeWorkbenchAssetEditReturnTo(projectId, 'scenes')}`)
+    } catch {
+      message.error('新建场景失败')
+    } finally {
+      setCreating(false)
+    }
+  }
+
   if (!projectId) return null
 
   return (
@@ -163,7 +178,7 @@ export function ScenesTab() {
         title="项目场景"
         extra={
           <Space>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateModalOpen(true)}>
+            <Button type="primary" icon={<PlusOutlined />} loading={creating} onClick={handleCreateNew}>
               新建
             </Button>
             <Button
@@ -253,28 +268,6 @@ export function ScenesTab() {
           </div>
         )}
       </Card>
-
-      <StudioAssetTypeFormModal
-        open={createModalOpen}
-        label="场景"
-        entityType="scene"
-        editing={null}
-        linkProjectId={projectId}
-        createAsset={async (payload) => {
-          const res = await StudioEntitiesApi.create('scene', payload as Record<string, unknown>)
-          if (!res.data) throw new Error('empty scene')
-          return res.data as SceneLike
-        }}
-        updateAsset={async (id, payload) => {
-          const res = await StudioEntitiesApi.update('scene', id, payload as Record<string, unknown>)
-          if (!res.data) throw new Error('empty scene')
-          return res.data as SceneLike
-        }}
-        onCancel={() => setCreateModalOpen(false)}
-        onSaved={async () => {
-          await loadLinks()
-        }}
-      />
 
       <Modal
         title="从资产库关联场景"

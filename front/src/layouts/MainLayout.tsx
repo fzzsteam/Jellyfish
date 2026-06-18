@@ -1,14 +1,11 @@
-import React, { useMemo } from 'react'
-import { Layout, Menu, theme, Dropdown, Space, Avatar, Select, Breadcrumb } from 'antd'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { Layout, Menu, theme, Dropdown, Space, Avatar } from 'antd'
 import {
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
   SettingOutlined,
   UserOutlined,
   FolderOutlined,
   PictureOutlined,
   FileTextOutlined,
-  ApiOutlined,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
@@ -19,16 +16,13 @@ import { TaskRuntimeProvider } from '../pages/aiStudio/components/TaskRuntimePro
 const { Header, Sider, Content } = Layout
 
 const MainLayout: React.FC = () => {
-  const { t, i18n } = useTranslation('layout')
+  const { t } = useTranslation('layout')
   const location = useLocation()
   const navigate = useNavigate()
   const { token } = theme.useToken()
 
   const collapsed = useAppStore((state) => state.siderCollapsed)
-  const toggleCollapsed = useAppStore((state) => state.toggleSider)
   const user = useAppStore((state) => state.user)
-  const language = useAppStore((state) => state.language)
-  const setLanguage = useAppStore((state) => state.setLanguage)
 
   const selectedKeys = useMemo(() => {
     if (location.pathname === '/projects' || location.pathname.startsWith('/projects/')) return ['projects']
@@ -36,68 +30,112 @@ const MainLayout: React.FC = () => {
     if (location.pathname.startsWith('/prompts')) return ['prompts']
     if (location.pathname.startsWith('/files')) return ['files']
     if (location.pathname.startsWith('/agents')) return ['agents']
-    if (location.pathname.startsWith('/models')) return ['models']
     if (location.pathname.startsWith('/settings')) return ['settings']
     return []
   }, [location.pathname])
 
-  const breadcrumbItems = useMemo(() => {
-    const path = location.pathname.replace(/^\/+/, '').split('/').filter(Boolean)
-    if (path.length === 0) return [{ title: t('title') }]
-    const items: { title: React.ReactNode; key: string }[] = []
-    const pathLabels: Record<string, string> = {
-      projects: '项目列表',
-      assets: '资产管理',
-      prompts: '提示词模板',
-      files: '文件管理',
-      agents: 'Agent管理',
-      models: '模型管理',
-      settings: t('menu.settings'),
-      chapters: '章节管理',
-      studio: '分镜工作室',
-      prep: '章节编辑',
-      shots: '分镜',
-      editor: '视频剪辑',
-      edit: '编辑',
+  // 从 URL 提取项目 / 章节上下文，用于顶部导航按钮
+  const pathSegments = useMemo(
+    () => location.pathname.replace(/^\/+/, '').split('/').filter(Boolean),
+    [location.pathname],
+  )
+  const urlProjectId = useMemo(
+    () => (pathSegments[0] === 'projects' && pathSegments[1] ? pathSegments[1] : null),
+    [pathSegments],
+  )
+  const urlChapterId = useMemo(
+    () => (pathSegments[2] === 'chapters' && pathSegments[3] ? pathSegments[3] : null),
+    [pathSegments],
+  )
+
+  // 当前激活的导航项
+  const activeNav = useMemo(() => {
+    if (!urlProjectId) return 'home'
+    if (!urlChapterId) return 'workbench'
+    const section = pathSegments[4]
+    if (section === 'studio') return 'studio'
+    if (section === 'shots') return 'shots'
+    return 'workbench'
+  }, [urlProjectId, urlChapterId, pathSegments])
+
+  // 持久化记录每个项目最后访问的 chapterId。
+  // 一旦某项目到达过章节页，后续在项目任意页面均可直接跳转到分镜列表/工作室。
+  const [storedChapterId, setStoredChapterId] = useState<string | null>(() => {
+    const segs = location.pathname.replace(/^\/+/, '').split('/').filter(Boolean)
+    const pid = segs[0] === 'projects' && segs[1] ? segs[1] : null
+    if (!pid) return null
+    return localStorage.getItem(`nav_lastChapterId_${pid}`)
+  })
+
+  useEffect(() => {
+    if (urlProjectId && urlChapterId) {
+      localStorage.setItem(`nav_lastChapterId_${urlProjectId}`, urlChapterId)
+      setStoredChapterId(urlChapterId)
+    } else if (urlProjectId) {
+      setStoredChapterId(localStorage.getItem(`nav_lastChapterId_${urlProjectId}`))
+    } else {
+      setStoredChapterId(null)
     }
-    path.forEach((segment, i) => {
-      // 特殊：/projects/:projectId/chapters/:chapterId/* 中的 chapterId 段不展示（避免出现“章节”这一层）
-      if (path[0] === 'projects' && path[2] === 'chapters' && i === 3) {
-        return
-      }
+  }, [urlProjectId, urlChapterId])
 
-      // 默认：按原始路径逐段拼接
-      let href = path.slice(0, i + 1).join('/')
-      href = `/${href}`
+  // 导航时优先用 URL 里的 chapterId，否则回退到上次访问记录
+  const effectiveChapterId = urlChapterId ?? storedChapterId
 
-      // 特殊：章节相关的中间路径段在路由里不存在，需映射到有效地址
-      // /projects/:projectId/chapters/:chapterId/*
-      if (path[0] === 'projects' && path[2] === 'chapters') {
-        const projectId = path[1]
-        const chapterId = path[3]
-        if (segment === 'chapters' && i === 2) {
-          // “章节管理”实际在项目工作台页
-          href = `/projects/${projectId}?tab=chapters`
-        } else if (i === 3) {
-          // 章节 ID 段没有对应独立页面，跳到分镜页（存在路由）
-          href = `/projects/${projectId}/chapters/${chapterId}/shots`
-        }
-      }
+  // 用 React state 跟踪 hover，避免直接操作 DOM style 导致导航后残留背景色
+  const [hoveredNavKey, setHoveredNavKey] = useState<string | null>(null)
+  // 导航发生时（activeNav 变化）清除 hover 残留
+  const prevActiveNavRef = useRef(activeNav)
+  useEffect(() => {
+    if (prevActiveNavRef.current !== activeNav) {
+      prevActiveNavRef.current = activeNav
+      setHoveredNavKey(null)
+    }
+  }, [activeNav])
 
-      const isLast = i === path.length - 1
-      let label = pathLabels[segment]
-      if (label === undefined) {
-        if (path[0] === 'projects' && i === 1) label = '项目工作台'
-        else if (path[2] === 'chapters' && i === 3) label = '章节'
-        else label = segment
-      }
-      items.push({
-        key: href,
-        title: isLast ? label : <Link to={href}>{label}</Link>,
-      })
-    })
-    return items
-  }, [location.pathname, t])
+  const navItems = useMemo(() => {
+    const shotsPath =
+      urlProjectId && effectiveChapterId
+        ? `/projects/${urlProjectId}/chapters/${effectiveChapterId}/shots`
+        : null
+    const studioPath =
+      urlProjectId && effectiveChapterId
+        ? `/projects/${urlProjectId}/chapters/${effectiveChapterId}/studio`
+        : null
+
+    return [
+      {
+        key: 'home',
+        label: '主页面',
+        path: '/projects',
+        // 始终可见、始终可用
+        visible: true,
+        enabled: true,
+      },
+      {
+        key: 'workbench',
+        label: '项目工作台',
+        path: urlProjectId ? `/projects/${urlProjectId}` : null,
+        // 有项目上下文才显示，进入项目后即解锁
+        visible: !!urlProjectId,
+        enabled: !!urlProjectId,
+      },
+      {
+        key: 'shots',
+        label: '分镜列表',
+        path: shotsPath,
+        // 有项目上下文才显示；曾到达过章节层级才可用（effectiveChapterId 有值）
+        visible: !!urlProjectId,
+        enabled: !!effectiveChapterId,
+      },
+      {
+        key: 'studio',
+        label: '分镜工作室',
+        path: studioPath,
+        visible: !!urlProjectId,
+        enabled: !!effectiveChapterId,
+      },
+    ]
+  }, [urlProjectId, effectiveChapterId])
 
   const menuItems = [
     {
@@ -114,11 +152,6 @@ const MainLayout: React.FC = () => {
       key: 'prompts',
       icon: <FileTextOutlined />,
       label: <Link to="/prompts">提示词模板</Link>,
-    },
-    {
-      key: 'models',
-      icon: <ApiOutlined />,
-      label: <Link to="/models">模型管理</Link>,
     },
     {
       key: 'settings',
@@ -166,9 +199,9 @@ const MainLayout: React.FC = () => {
           overflow: 'auto',
         }}
       >
-        <div className="flex items-center h-16 px-4 border-b border-solid" style={{ borderColor: token.colorBorderSecondary }}>
+        <div className="flex h-16 items-center px-4 border-b border-solid" style={{ borderColor: token.colorBorderSecondary }}>
           <Link to="/projects" className="flex items-center gap-2 min-w-0">
-            <img src="/logo.svg" alt="Jellyfish" className="w-8 h-8 shrink-0" />
+            <img src="/logo-wanxiang.png" alt="万象元生" className="w-12 h-12 shrink-0 rounded-full" />
             {!collapsed && (
               <div className="min-w-0">
                 <div className="text-base font-semibold text-gray-900 truncate">
@@ -186,7 +219,7 @@ const MainLayout: React.FC = () => {
           mode="inline"
           selectedKeys={selectedKeys}
           items={menuItems}
-          style={{ borderRight: 'none', paddingTop: 8 }}
+          style={{ borderRight: 'none', paddingTop: 0 }}
         />
       </Sider>
 
@@ -200,50 +233,62 @@ const MainLayout: React.FC = () => {
         }}
       >
         <Header
-          className="flex items-center justify-between px-4"
+          className="flex items-center"
           style={{
             flexShrink: 0,
             background: token.colorBgContainer,
             borderBottom: `1px solid ${token.colorBorderSecondary}`,
+            padding: 0,
           }}
         >
-          <Space size="middle" className="flex-1 min-w-0">
-            <span
-              className="cursor-pointer text-xl shrink-0"
-              onClick={toggleCollapsed}
-            >
-              {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-            </span>
-            <Breadcrumb
-              items={breadcrumbItems}
-              className="hidden sm:block"
-              style={{ lineHeight: '32px' }}
-            />
-          </Space>
+          {/* 四个等距导航按钮
+              - visible=false 时用 visibility:hidden 占位，保证按钮始终保持等宽
+              - enabled=false 时置灰不可点击（进度锁定效果）
+          */}
+          <div className="flex-1 flex items-stretch h-full">
+            {navItems.map(({ key, label, path, visible, enabled }) => {
+              const isActive = activeNav === key
+              const isHovered = hoveredNavKey === key && enabled && !isActive
+              return (
+                <button
+                  key={key}
+                  onClick={() => {
+                    if (enabled && path) navigate(path)
+                  }}
+                  onMouseEnter={() => setHoveredNavKey(key)}
+                  onMouseLeave={() => setHoveredNavKey(null)}
+                  style={{
+                    flex: 1,
+                    border: 'none',
+                    // 所有背景色均由 React state 驱动，不直接操作 DOM，
+                    // 确保导航后 re-render 时旧按钮背景色正确归零
+                    background: isHovered ? token.colorBgTextHover : 'transparent',
+                    borderBottom: isActive ? `2px solid ${token.colorPrimary}` : '2px solid transparent',
+                    color: isActive
+                      ? token.colorPrimary
+                      : !enabled
+                      ? token.colorTextDisabled
+                      : isHovered
+                      ? token.colorText
+                      : token.colorTextSecondary,
+                    fontWeight: isActive ? 600 : 400,
+                    fontSize: 14,
+                    cursor: enabled ? 'pointer' : 'not-allowed',
+                    transition: 'all 0.2s',
+                    whiteSpace: 'nowrap',
+                    // 不可见时保留占位空间，让"主页面"始终维持 1/4 宽度
+                    visibility: visible ? 'visible' : 'hidden',
+                  }}
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </div>
 
-          <Space size="middle">
-            <Select
-              size="small"
-              value={language}
-              style={{ width: 120 }}
-              onChange={(value) => {
-                setLanguage(value)
-                void i18n.changeLanguage(value)
-                window.localStorage.setItem('jellyfish_language', value)
-                document.documentElement.lang = value === 'en-US' ? 'en' : 'zh-CN'
-              }}
-              options={[
-                { label: t('lang.zh'), value: 'zh-CN' },
-                { label: t('lang.en'), value: 'en-US' },
-              ]}
-            />
-
-            <Dropdown
-              menu={{
-                items: userMenuItems,
-              }}
-              placement="bottomRight"
-            >
+          {/* 用户信息 */}
+          <Space size="middle" className="px-4 shrink-0">
+            <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
               <div className="flex items-center gap-2 cursor-pointer">
                 <Avatar size={32} icon={<UserOutlined />} />
                 <div className="hidden md:flex flex-col leading-tight">

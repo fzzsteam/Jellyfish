@@ -18,6 +18,7 @@ from app.services.studio.shot_character_links import upsert as upsert_shot_chara
 from app.utils.project_links import upsert_project_link
 
 ENTITY_ORDER_FIELDS = {"name", "style", "visual_style", "created_at", "updated_at"}
+GLOBAL_NAME_UNIQUE_ENTITY_TYPES = {"actor", "scene", "prop", "costume"}
 
 
 def _asset_read_payload(obj: Any, thumbnail: str) -> dict[str, Any]:
@@ -34,6 +35,27 @@ def _asset_read_payload(obj: Any, thumbnail: str) -> dict[str, Any]:
     }
 
 
+async def _ensure_global_name_available(
+    db: AsyncSession,
+    *,
+    entity_type: str,
+    model: type,
+    name: str | None,
+    exclude_id: str | None = None,
+) -> None:
+    """在写库前校验全局资产名称唯一性，避免数据库唯一约束异常泄漏到业务流程。"""
+    normalized_name = str(name or "").strip()
+    if entity_type not in GLOBAL_NAME_UNIQUE_ENTITY_TYPES or not normalized_name:
+        return
+
+    stmt = select(model.id).where(model.name == normalized_name)
+    if exclude_id:
+        stmt = stmt.where(model.id != exclude_id)
+    existing_id = (await db.execute(stmt.limit(1))).scalars().first()
+    if existing_id is not None:
+        raise HTTPException(status_code=409, detail=f"{model.__name__} name already exists: {normalized_name}")
+
+
 async def list_entities_paginated(
     db: AsyncSession,
     *,
@@ -45,11 +67,15 @@ async def list_entities_paginated(
     is_desc: bool,
     page: int,
     page_size: int,
+    project_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     entity_type_norm = normalize_entity_type(entity_type)
     spec = entity_spec(entity_type_norm)
     stmt = select(spec.model)
     stmt = apply_keyword_filter(stmt, q=q, fields=[spec.model.name, spec.model.description])
+    # character 是项目级实体，可按 project_id 过滤以只展示当前项目的角色
+    if project_id and entity_type_norm in {"actor", "character"} and hasattr(spec.model, "project_id"):
+        stmt = stmt.where(getattr(spec.model, "project_id") == project_id)
     if style:
         stmt = stmt.where(getattr(spec.model, "style") == style)
     if visual_style:
@@ -107,6 +133,12 @@ async def create_entity(
     exists = await db.get(spec.model, data["id"])
     if exists is not None:
         raise HTTPException(status_code=400, detail=entity_already_exists(spec.model.__name__))
+    await _ensure_global_name_available(
+        db,
+        entity_type=entity_type_norm,
+        model=spec.model,
+        name=data.get("name"),
+    )
 
     if entity_type_norm == "character":
         if await db.get(Project, data["project_id"]) is None:
@@ -140,7 +172,9 @@ async def create_entity(
     await db.flush()
     await db.refresh(obj)
 
-    if entity_type_norm in {"actor", "scene", "prop", "costume"}:
+    # character 也创建正面视角图片槽位，与 actor/scene/prop/costume 保持一致；
+    # view_count 在角色上未使用，固定创建 1 个正面槽位即可
+    if entity_type_norm in {"actor", "character", "scene", "prop", "costume"}:
         count = int(getattr(obj, "view_count", 1) or 1)
         angles = list(DEFAULT_VIEW_ANGLES[: min(max(count, 0), len(DEFAULT_VIEW_ANGLES))])
         for angle in angles:
@@ -168,8 +202,10 @@ async def create_entity(
             .limit(1)
         )
         max_index = (await db.execute(existing_indexes_stmt)).scalars().first()
+        # 追加语义：新建角色挂到镜头时只顺延 index，不踢掉镜头内已关联的其它角色
         await upsert_shot_character_link(
             db,
+            reassign_index_on_conflict=True,
             body=ShotCharacterLinkCreate(
                 shot_id=link_shot_id,
                 character_id=obj.id,
@@ -225,6 +261,13 @@ async def update_entity(
         raise HTTPException(status_code=404, detail=entity_not_found(spec.model.__name__))
 
     update_data = spec.update_model.model_validate(body).model_dump(exclude_unset=True)
+    await _ensure_global_name_available(
+        db,
+        entity_type=entity_type_norm,
+        model=spec.model,
+        name=update_data.get("name"),
+        exclude_id=entity_id,
+    )
     if entity_type_norm == "character":
         if "project_id" in update_data and await db.get(Project, update_data["project_id"]) is None:
             raise HTTPException(status_code=400, detail=entity_not_found("Project"))

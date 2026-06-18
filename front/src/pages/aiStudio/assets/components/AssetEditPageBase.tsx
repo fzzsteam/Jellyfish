@@ -1,36 +1,33 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
   Col,
   Collapse,
   Empty,
-  Image,
   Input,
-  InputNumber,
   Modal,
   Row,
   Space,
   Spin,
   Tag,
   Typography,
+  Upload,
   message,
 } from 'antd'
-import { ArrowLeftOutlined, CloseCircleOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
-import { FilmService, ScriptProcessingService } from '../../../../services/generated'
-import type { TaskStatus } from '../../../../services/generated'
-import { listTaskLinksNormalized } from '../../../../services/filmTaskLinks'
+import { ArrowLeftOutlined, CheckOutlined, CloseCircleOutlined, EditOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
+import { FilmService, LlmService, ScriptProcessingService, StudioFilesService } from '../../../../services/generated'
+import type { AssetImageCandidateRead, BuiltinGenerationModelRead, TaskStatus } from '../../../../services/generated'
 import { buildFileDownloadUrl } from '../utils'
+import { AssetImageCandidateGallery } from './AssetImageCandidateGallery'
+import { MentionEditor } from './MentionEditor'
 import { DisplayImageCard } from './DisplayImageCard'
-import { ProjectVisualStyleAndStyleFields } from '../../project/ProjectVisualStyleAndStyleFields'
-import { useProjectStyleOptions } from '../../project/useProjectStyleOptions'
 import { defaultTaskActionErrorMessage, executeAsyncTaskCreate, executeTaskCancel, notifyExistingTask } from '../../components/taskActionHelpers'
 import { handleTaskResultSafely } from '../../components/taskResultHelpers'
 import { useRelationTaskNotification } from '../../components/taskNotificationHelpers'
 import { useTaskPageContext } from '../../components/taskPageContext'
 import { TASK_COPY } from '../../components/taskCopy'
 import { useLocation } from 'react-router-dom'
-import { useGenerationDraft } from '../../hooks/useGenerationDraft'
 import {
   CHARACTER_PORTRAIT_ANALYSIS_RELATION_TYPE,
   COSTUME_INFO_ANALYSIS_RELATION_TYPE,
@@ -63,16 +60,6 @@ export type AssetUpdate = {
 
 const DEFAULT_ANGLES: AssetViewAngle[] = ['FRONT', 'LEFT', 'RIGHT', 'BACK']
 
-const ANGLE_LABEL_MAP: Record<AssetViewAngle, string> = {
-  FRONT: '正面',
-  LEFT: '左侧',
-  RIGHT: '右侧',
-  BACK: '背面',
-  THREE_QUARTER: '3/4 侧面',
-  TOP: '俯视',
-  DETAIL: '细节',
-}
-
 export type BaseAsset = {
   id: string
   name: string
@@ -92,6 +79,14 @@ export type BaseAssetImage = {
   format?: string | null
 }
 
+type ImageGenerationPayload = {
+  prompt: string
+  images: string[]
+  model_id: string | null
+}
+
+type ImageModelOption = BuiltinGenerationModelRead
+
 export type AssetEditPageBaseProps<TAsset extends BaseAsset, TImage extends BaseAssetImage> = {
   assetId?: string
   missingAssetIdText: string
@@ -103,20 +98,12 @@ export type AssetEditPageBaseProps<TAsset extends BaseAsset, TImage extends Base
   listImages: (assetId: string) => Promise<TImage[]>
   createImageSlot: (assetId: string, angle: AssetViewAngle) => Promise<void>
   updateImage: (assetId: string, imageId: number, payload: { file_id: string; width?: number | null; height?: number | null; format?: string | null }) => Promise<void>
-  renderPrompt: (assetId: string, imageId: number) => Promise<{ prompt: string; images: string[] }>
-  createGenerationTask: (assetId: string, imageId: number, payload: { prompt: string; images: string[] }) => Promise<string | null>
+  listImageCandidates: (assetId: string, imageId: number) => Promise<AssetImageCandidateRead[]>
+  adoptImageCandidate: (assetId: string, imageId: number, candidateId: number) => Promise<void>
+  deleteImageCandidate: (assetId: string, imageId: number, candidateId: number) => Promise<void>
+  createGenerationTask: (assetId: string, imageId: number, payload: ImageGenerationPayload) => Promise<string | null>
+  attachImageCandidates?: (assetId: string, imageId: number, fileIds: string[]) => Promise<void>
   onNavigate: (to: string, replace?: boolean) => void
-}
-
-type HistoryCandidate<TImage extends BaseAssetImage> = {
-  id: string
-  file_id: string
-  view_angle?: AssetViewAngle
-  width?: number | null
-  height?: number | null
-  format?: string | null
-  source: 'task-link' | 'image'
-  originalImage?: TImage
 }
 
 function normalizeTags(input: string): string[] {
@@ -137,6 +124,21 @@ function sleep(ms: number): Promise<void> {
 
 function isTerminalStatus(status: TaskStatus): boolean {
   return status === 'succeeded' || status === 'failed' || status === 'cancelled'
+}
+
+// 从 generated client 或 fetch 包装错误中提取 HTTP 状态码，用于保存前冲突提示。
+function getHttpStatus(error: unknown): number | undefined {
+  const maybe = error as { status?: number; statusCode?: number; response?: { status?: number }; body?: { code?: number; status?: number } }
+  return maybe.response?.status ?? maybe.status ?? maybe.statusCode ?? maybe.body?.status ?? maybe.body?.code
+}
+
+// 识别资产名唯一约束冲突，兼容 generated client、响应体和通用错误文本的不同包装。
+function isAssetNameConflictError(error: unknown): boolean {
+  if (getHttpStatus(error) === 409) return true
+
+  const maybe = error as { message?: string; body?: { message?: string; detail?: string } }
+  const text = [maybe.body?.message, maybe.body?.detail, maybe.message].filter(Boolean).join('\n')
+  return /name already exists|Duplicate entry|uq_(actors|scenes|props|costumes)_name/i.test(text)
 }
 
 function getSmartDetectRelationType(relationType: string): string | null {
@@ -166,14 +168,23 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   updateAsset,
   listImages,
   createImageSlot,
-  updateImage,
-  renderPrompt,
+  listImageCandidates,
+  adoptImageCandidate,
+  deleteImageCandidate,
   createGenerationTask,
+  attachImageCandidates,
   onNavigate,
 }: AssetEditPageBaseProps<TAsset, TImage>) {
-  const { options: projectStyleOptions, defaultVisualStyle, getDefaultStyle } = useProjectStyleOptions()
   const taskCopy = TASK_COPY.smartDetect
   const location = useLocation()
+  // 从 URL 读取一次性预填名称（由分镜准备"新建"按钮传入）。
+  // 用 window.location.search 直接读取（而非 useSearchParams），避免清除时触发 React Router 重渲染链。
+  const prefillNameRef = useRef<string | null>(
+    new URLSearchParams(window.location.search).get('prefillName')?.trim() || null,
+  )
+  // onNavigate 来自父组件内联函数，每次渲染都是新引用；用 ref 稳定化以避免 loadData 被重建重跑。
+  const onNavigateRef = useRef(onNavigate)
+  onNavigateRef.current = onNavigate
   const [loading, setLoading] = useState(true)
   const [asset, setAsset] = useState<TAsset | null>(null)
   const [images, setImages] = useState<TImage[]>([])
@@ -181,10 +192,10 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   const [formName, setFormName] = useState('')
   const [formDesc, setFormDesc] = useState('')
   const [formTags, setFormTags] = useState('')
-  const [formViewCount, setFormViewCount] = useState(1)
-  const [formVisualStyle, setFormVisualStyle] = useState<'现实' | '动漫'>(defaultVisualStyle as '现实' | '动漫')
-  const [formStyle, setFormStyle] = useState<string>(getDefaultStyle(defaultVisualStyle))
   const [savingBase, setSavingBase] = useState(false)
+  const [imageModelsLoading, setImageModelsLoading] = useState(false)
+  const [imageModels, setImageModels] = useState<ImageModelOption[]>([])
+  const [selectedImageModelId, setSelectedImageModelId] = useState<string | null>(null)
 
   const [smartDetectLoading, setSmartDetectLoading] = useState(false)
   const [smartDetectOpen, setSmartDetectOpen] = useState(false)
@@ -195,46 +206,15 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   const [generationTask, setGenerationTask] = useState<RelationTaskState | null>(null)
   const [generationSettledTask, setGenerationSettledTask] = useState<RelationTaskState | null>(null)
 
-  const [promptPreviewOpen, setPromptPreviewOpen] = useState(false)
-  const [promptPreviewLoading, setPromptPreviewLoading] = useState(false)
-  const [promptPreviewImage, setPromptPreviewImage] = useState<TImage | null>(null)
-  const promptDraft = useGenerationDraft<
-    { prompt: string },
-    { imageId: number | null; images: string[] },
-    { prompt: string; images: string[] },
-    { taskId: string | null }
-  >({
-    initialBase: { prompt: '' },
-    initialContext: { imageId: null, images: [] },
-    derive: async ({ base, context }) => {
-      if (!assetId || !context.imageId) {
-        throw new Error('asset image slot is required')
-      }
-      const result = await renderPrompt(assetId, context.imageId)
-      return {
-        prompt: (base.prompt || '').trim() || (result.prompt ?? ''),
-        images: Array.isArray(result.images) ? result.images.filter(Boolean) : [],
-      }
-    },
-    submit: async ({ context, derived }) => {
-      if (!assetId || !context.imageId) {
-        throw new Error('asset image slot is required')
-      }
-      const taskId = await createGenerationTask(assetId, context.imageId, {
-        prompt: (derived.prompt || '').trim(),
-        images: derived.images,
-      })
-      return { taskId }
-    },
-  })
-  const promptPreviewDraft = promptDraft.base.prompt
-  const promptPreviewRefFileIds = promptDraft.context.images
-
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(false)
-  const [historyCandidates, setHistoryCandidates] = useState<HistoryCandidate<TImage>[]>([])
+  const [historyCandidates, setHistoryCandidates] = useState<AssetImageCandidateRead[]>([])
   const [editingSlotImage, setEditingSlotImage] = useState<TImage | null>(null)
-  const [adoptingImageId, setAdoptingImageId] = useState<string | null>(null)
+  const [adoptingImageId, setAdoptingImageId] = useState<number | null>(null)
+  const [deletingCandidateId, setDeletingCandidateId] = useState<number | null>(null)
+  const [uploadingCandidates, setUploadingCandidates] = useState(false)
+  const [mentionedFileIds, setMentionedFileIds] = useState<string[]>([])
+
   const smartDetectRelationType = useMemo(() => getSmartDetectRelationType(relationType), [relationType])
   const smartDetectRelationEntityId = useMemo(
     () => (assetId && smartDetectRelationType ? `${relationType}:${assetId}` : null),
@@ -244,6 +224,40 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     () => getAssetNavigateRelationType(relationType),
     [relationType],
   )
+
+  // Loads selectable image models so asset image generation can target a concrete model.
+  useEffect(() => {
+    let active = true
+    setImageModelsLoading(true)
+    void (async () => {
+      try {
+        const modelsRes = await LlmService.listBuiltinGenerationModelsApiV1LlmBuiltinModelsGet({
+          category: 'image',
+        })
+        if (!active) return
+        const items = ((modelsRes.data ?? []) as ImageModelOption[]).filter((model) => model.category === 'image')
+        setImageModels(items)
+        setSelectedImageModelId((prev) => {
+          if (prev && items.some((item) => item.id === prev)) return prev
+          return items.find((item) => item.recommended)?.id ?? items[0]?.id ?? null
+        })
+      } catch {
+        if (active) {
+          setImageModels([])
+          setSelectedImageModelId(null)
+        }
+      } finally {
+        if (active) {
+          setImageModelsLoading(false)
+        }
+      }
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [])
+
   const applySmartDetectResult = useCallback(async (taskId: string) => {
     await handleTaskResultSafely(taskId, {
       readErrorMessage: '读取智能检测结果失败',
@@ -329,23 +343,24 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       const nextAsset = await getAsset(assetId)
       if (!nextAsset) {
         message.error(`未找到${assetDisplayName}资产`)
-        onNavigate(backTo, true)
+        onNavigateRef.current(backTo, true)
         return
       }
 
       setAsset(nextAsset)
-      setFormName(nextAsset.name)
+      const prefillName = prefillNameRef.current
+      prefillNameRef.current = null  // 消费一次后清空，防止 reload 时重复覆盖
+      setFormName(prefillName ?? nextAsset.name)
+      // prefillName 已消费，用 replaceState 清除 URL 参数。
+      // 不用 setSearchParams 是因为它会触发父组件重渲染，导致 loadData 被重建重跑，覆盖掉刚设置的预填名称。
+      if (prefillName) {
+        const cleanUrl = new URL(window.location.href)
+        cleanUrl.searchParams.delete('prefillName')
+        window.history.replaceState(null, '', cleanUrl.toString())
+      }
       setFormDesc(nextAsset.description ?? '')
       setFormTags((nextAsset.tags ?? []).join(', '))
-      {
-        const nextVisual = (nextAsset.visual_style ?? defaultVisualStyle) as '现实' | '动漫'
-        setFormVisualStyle(nextVisual)
-        setFormStyle((nextAsset.style as string | undefined) ?? getDefaultStyle(nextVisual))
-      }
-
       const targetCount = clampViewCount(nextAsset.view_count)
-      setFormViewCount(targetCount)
-
       const imageRows = await ensureImageSlots(targetCount)
       setImages(imageRows)
     } catch {
@@ -353,14 +368,15 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     } finally {
       setLoading(false)
     }
-  }, [assetId, assetDisplayName, backTo, defaultVisualStyle, ensureImageSlots, getAsset, getDefaultStyle, onNavigate])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assetId, assetDisplayName, backTo, ensureImageSlots, getAsset])
 
   useEffect(() => {
     void loadData()
   }, [loadData])
 
   const slotItems = useMemo(() => {
-    const count = clampViewCount(formViewCount)
+    const count = clampViewCount(asset?.view_count)
     const byAngle = new Map<AssetViewAngle, TImage>()
     images.forEach((img) => {
       if (img.view_angle) byAngle.set(img.view_angle, img)
@@ -374,38 +390,24 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
         imageUrl: buildFileDownloadUrl(image?.file_id),
       }
     })
-  }, [formViewCount, images])
+  }, [asset?.view_count, images])
 
-  const minViewCount = useMemo(() => clampViewCount(asset?.view_count), [asset?.view_count])
-
-  const handleSaveBaseInfo = async () => {
-    if (!assetId || !asset) return
+  // Builds the asset update payload from the current form so generation can use unsaved edits.
+  const buildBasePayload = useCallback((): AssetUpdate | null => {
     if (!formName.trim()) {
       message.warning('请输入名称')
-      return
+      return null
     }
 
-    setSavingBase(true)
-    try {
-      const nextViewCount = Math.max(minViewCount, clampViewCount(formViewCount))
-      const payload: AssetUpdate = {
-        name: formName.trim(),
-        description: formDesc.trim(),
-        tags: normalizeTags(formTags),
-        view_count: nextViewCount,
-        visual_style: formVisualStyle,
-        style: formStyle,
-      }
-      const nextAsset = await updateAsset(assetId, payload)
-      if (nextAsset) setAsset(nextAsset)
-      message.success('基础信息已保存')
-      await loadData()
-    } catch {
-      message.error('保存失败')
-    } finally {
-      setSavingBase(false)
+    return {
+      name: formName.trim(),
+      description: formDesc.trim(),
+      tags: normalizeTags(formTags),
+      view_count: clampViewCount(asset?.view_count),
+      visual_style: (asset?.visual_style ?? '现实') as '现实' | '动漫',
+      style: asset?.style,
     }
-  }
+  }, [asset?.style, asset?.view_count, asset?.visual_style, formDesc, formName, formTags])
 
   const handleSmartDetectMissing = async () => {
     if (!assetId) return
@@ -414,6 +416,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     const description = (formDesc || '').trim()
     if (!description) {
       if (relationType === 'actor_image') message.warning('请先输入演员描述再进行智能检测')
+      else if (relationType === 'character_image') message.warning('请先输入角色描述再进行智能检测')
       else if (relationType === 'scene_image') message.warning('请先输入场景描述再进行智能检测')
       else if (relationType === 'prop_image') message.warning('请先输入道具描述再进行智能检测')
       else if (relationType === 'costume_image') message.warning('请先输入服装描述再进行智能检测')
@@ -430,8 +433,9 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     setSmartDetectLoading(true)
     try {
       const request = () => {
-        if (relationType === 'actor_image') {
-          const character_context = asset?.name ? `角色名：${formName}\n演员标签：${formTags}` : `演员标签：${formTags}`
+        if (relationType === 'actor_image' || relationType === 'character_image') {
+          const subjectLabel = relationType === 'character_image' ? '角色' : '演员'
+          const character_context = asset?.name ? `${subjectLabel}名：${formName}\n标签：${formTags}` : `标签：${formTags}`
           return ScriptProcessingService.analyzeCharacterPortraitAsyncApiV1ScriptProcessingAnalyzeCharacterPortraitAsyncPost({
             requestBody: {
               relation_entity_id: smartDetectRelationEntityId,
@@ -558,48 +562,32 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     onNavigate: () => onNavigate(location.pathname),
   })
 
-  const openPromptPreview = async (image: TImage) => {
-    if (!assetId) return
-
-    try {
-      setPromptPreviewOpen(true)
-      setPromptPreviewLoading(true)
-      setPromptPreviewImage(image)
-      const nextContext = { imageId: image.id, images: [] }
-      promptDraft.hydrate({
-        base: { prompt: '' },
-        context: nextContext,
-      })
-      const derived = await promptDraft.deriveNow({
-        base: { prompt: '' },
-        context: nextContext,
-      })
-      if (derived) {
-        promptDraft.hydrate({
-          base: { prompt: derived.prompt },
-          context: { imageId: image.id, images: derived.images },
-          derived,
-        })
-      }
-    } catch {
-      message.error('获取提示词失败')
-    } finally {
-      setPromptPreviewLoading(false)
-    }
-  }
-
-  const confirmGenerateWithPrompt = async () => {
-    if (!assetId || !promptPreviewImage) return
-    const prompt = (promptPreviewDraft || '').trim()
+  // Saves current form edits and starts generation directly from the description field.
+  const handleGenerateImage = async (image: TImage) => {
+    if (!assetId || !asset) return
+    const prompt = formDesc.trim()
     if (!prompt) {
-      message.warning('请输入提示词')
+      message.warning('请先填写描述')
       return
     }
+    if (!selectedImageModelId) {
+      message.warning('请先选择图片模型')
+      return
+    }
+    const payload = buildBasePayload()
+    if (!payload) return
 
-    setGeneratingByImageId((prev) => ({ ...prev, [promptPreviewImage.id]: true }))
+    setGeneratingByImageId((prev) => ({ ...prev, [image.id]: true }))
+    setSavingBase(true)
     try {
-      const submitted = await promptDraft.submitNow()
-      const taskId = submitted?.taskId
+      const nextAsset = await updateAsset(assetId, payload)
+      if (nextAsset) setAsset(nextAsset)
+
+      const taskId = await createGenerationTask(assetId, image.id, {
+        prompt,
+        images: mentionedFileIds,
+        model_id: selectedImageModelId,
+      })
       if (!taskId) {
         message.error('生成任务创建失败：缺少任务 ID')
         return
@@ -632,93 +620,45 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       }
 
       if (finalStatus === 'succeeded') {
-        setPromptPreviewOpen(false)
-        setPromptPreviewImage(null)
         await loadData()
       } else if (finalStatus !== 'failed' && finalStatus !== 'cancelled') {
         message.warning('生成任务仍在执行，请稍后刷新')
       }
-    } catch {
-      message.error('发起生成失败')
+    } catch (error) {
+      if (isAssetNameConflictError(error)) {
+        message.error(`${assetDisplayName}名称已存在，请修改名称或编辑已有资产后再生成`)
+      } else {
+        message.error('发起生成失败')
+      }
     } finally {
-      setGeneratingByImageId((prev) => ({ ...prev, [promptPreviewImage.id]: false }))
+      setSavingBase(false)
+      setGeneratingByImageId((prev) => ({ ...prev, [image.id]: false }))
     }
   }
 
   const openHistoryModal = async (targetImage: TImage) => {
+    if (!assetId) return
     setEditingSlotImage(targetImage)
     setHistoryOpen(true)
     setHistoryLoading(true)
 
     try {
-      const links = await listTaskLinksNormalized({
-        resourceType: 'image',
-        relationType,
-        relationEntityId: String(targetImage.id),
-      })
-      const imagesByFileId = new Map<string, TImage>()
-      images.forEach((img) => {
-        if (img.file_id) {
-          imagesByFileId.set(img.file_id, img)
-        }
-      })
-
-      const seenFileIds = new Set<string>()
-      const taskLinkCandidates: HistoryCandidate<TImage>[] = links
-        .filter((link) => Boolean(link.file_id))
-        .map((link) => {
-          const fileId = String(link.file_id)
-          const matchedImage = imagesByFileId.get(fileId)
-          return {
-            id: `task-link-${link.id}`,
-            file_id: fileId,
-            view_angle: matchedImage?.view_angle ?? targetImage.view_angle,
-            width: matchedImage?.width ?? null,
-            height: matchedImage?.height ?? null,
-            format: matchedImage?.format ?? null,
-            source: 'task-link' as const,
-            originalImage: matchedImage,
-          }
-        })
-        .filter((candidate) => {
-          if (seenFileIds.has(candidate.file_id)) return false
-          seenFileIds.add(candidate.file_id)
-          return true
-        })
-
-      const fallbackCandidates: HistoryCandidate<TImage>[] = images
-        .filter((img) => img.file_id && img.id !== targetImage.id && !seenFileIds.has(String(img.file_id)))
-        .map((img) => ({
-          id: `image-${img.id}`,
-          file_id: String(img.file_id),
-          view_angle: img.view_angle,
-          width: img.width ?? null,
-          height: img.height ?? null,
-          format: img.format ?? null,
-          source: 'image' as const,
-          originalImage: img,
-        }))
-
-      setHistoryCandidates(taskLinkCandidates.length > 0 ? taskLinkCandidates : fallbackCandidates)
+      const candidates = await listImageCandidates(assetId, targetImage.id)
+      setHistoryCandidates(candidates)
     } catch {
-      message.error('加载历史生成图片失败')
+      message.error('加载候选图片失败')
       setHistoryCandidates([])
     } finally {
       setHistoryLoading(false)
     }
   }
 
-  const handleAdoptHistoryImage = async (candidate: HistoryCandidate<TImage>) => {
+  const handleAdoptHistoryImage = async (candidate: AssetImageCandidateRead) => {
     if (!assetId || !editingSlotImage || !candidate.file_id) return
 
     setAdoptingImageId(candidate.id)
     try {
-      await updateImage(assetId, editingSlotImage.id, {
-        file_id: candidate.file_id,
-        width: candidate.width ?? null,
-        height: candidate.height ?? null,
-        format: candidate.format ?? null,
-      })
+      await adoptImageCandidate(assetId, editingSlotImage.id, candidate.id)
       message.success('角度图片已更新')
       setHistoryOpen(false)
       setEditingSlotImage(null)
@@ -729,6 +669,66 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       setAdoptingImageId(null)
     }
   }
+
+  const handleDeleteCandidate = async (candidate: AssetImageCandidateRead) => {
+    if (!assetId || !editingSlotImage) return
+
+    setDeletingCandidateId(candidate.id)
+    try {
+      await deleteImageCandidate(assetId, editingSlotImage.id, candidate.id)
+      message.success('候选图片已移除')
+      const candidates = await listImageCandidates(assetId, editingSlotImage.id)
+      setHistoryCandidates(candidates)
+    } catch {
+      message.error('移除候选图片失败')
+    } finally {
+      setDeletingCandidateId(null)
+    }
+  }
+
+  const handleCandidateUpload = async (files: File[]) => {
+    if (!assetId || !editingSlotImage || files.length === 0 || !attachImageCandidates) return
+    setUploadingCandidates(true)
+    try {
+      const fileIds: string[] = []
+      for (const file of files) {
+        const res = await StudioFilesService.uploadFileApiApiV1StudioFilesUploadPost({
+          formData: { file } as any,
+          name: file.name,
+        })
+        const fileId = res.data?.id
+        if (fileId) fileIds.push(String(fileId))
+      }
+      if (fileIds.length > 0) {
+        await attachImageCandidates(assetId, editingSlotImage.id, fileIds)
+        const candidates = await listImageCandidates(assetId, editingSlotImage.id)
+        setHistoryCandidates(candidates)
+        message.success(`已上传 ${fileIds.length} 张图片到候选池`)
+      }
+    } catch {
+      message.error('上传候选图片失败')
+    } finally {
+      setUploadingCandidates(false)
+    }
+  }
+
+  // Loads all image candidates from every slot and deduplicates by file_id, for MentionEditor.
+  const loadMentionCandidates = useCallback(async (): Promise<AssetImageCandidateRead[]> => {
+    if (!assetId) return []
+    const all: AssetImageCandidateRead[] = []
+    for (const item of slotItems) {
+      if (item.image) {
+        const cands = await listImageCandidates(assetId, item.image.id)
+        all.push(...cands)
+      }
+    }
+    const seen = new Set<string>()
+    return all.filter((c) => {
+      if (!c.file_id || seen.has(c.file_id)) return false
+      seen.add(c.file_id)
+      return true
+    })
+  }, [assetId, slotItems, listImageCandidates])
 
   if (!assetId) {
     return (
@@ -777,6 +777,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                     <div className="flex items-center justify-between gap-2 mb-1">
                       <div className="text-gray-600 text-sm">描述</div>
                       {relationType === 'actor_image' ||
+                      relationType === 'character_image' ||
                       relationType === 'scene_image' ||
                       relationType === 'prop_image' ||
                       relationType === 'costume_image' ? (
@@ -804,62 +805,79 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                         </>
                       ) : null}
                     </div>
-                  <Input.TextArea
-                    rows={4}
+                  <MentionEditor
                     value={formDesc}
-                    onChange={(e) => setFormDesc(e.target.value)}
-                    disabled={smartDetectBusy || savingBase}
-                  />
-                </div>
-                <div>
-                  <div className="text-gray-600 text-sm mb-1">标签（逗号分隔）</div>
-                  <Input value={formTags} onChange={(e) => setFormTags(e.target.value)} disabled={smartDetectBusy || savingBase} />
-                </div>
-                <div>
-                  <div className="text-gray-600 text-sm mb-1">镜头数（仅可增加，最大 4）</div>
-                  <InputNumber
-                    min={minViewCount}
-                    max={4}
-                    precision={0}
-                    value={formViewCount}
-                    onChange={(v) => setFormViewCount(v ?? minViewCount)}
-                    disabled={smartDetectBusy || savingBase}
-                  />
-                </div>
-                <div>
-                  <div className="text-gray-600 text-sm mb-1">视觉风格</div>
-                  <ProjectVisualStyleAndStyleFields
-                    disabled={smartDetectBusy || savingBase}
-                    visual_style={formVisualStyle}
-                    style={formStyle}
-                    options={projectStyleOptions}
-                    onChange={(next) => {
-                      setFormVisualStyle(next.visual_style)
-                      setFormStyle(next.style)
+                    onChange={(text, fileIds) => {
+                      setFormDesc(text)
+                      setMentionedFileIds(fileIds)
                     }}
+                    disabled={smartDetectBusy || savingBase}
+                    placeholder="支持输入 @ 选择候选池图片作为参考"
+                    loadCandidates={loadMentionCandidates}
                   />
                 </div>
-                <Button type="primary" onClick={() => void handleSaveBaseInfo()} loading={savingBase || smartDetectLoading}>
-                  保存基础信息
-                </Button>
+                <div>
+                  <div className="text-gray-600 text-sm mb-2">模型选择</div>
+                  {imageModelsLoading ? (
+                    <div className="h-28 flex items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50">
+                      <Spin size="small" />
+                    </div>
+                  ) : imageModels.length === 0 ? (
+                    <div className="h-28 flex items-center justify-center rounded border border-dashed border-gray-200 bg-gray-50 text-sm text-gray-400">
+                      暂无可用图片模型
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {imageModels.map((model) => {
+                        const selected = model.id === selectedImageModelId
+                        return (
+                          <div
+                            key={model.id}
+                            role="button"
+                            tabIndex={0}
+                            className={[
+                              'flex cursor-pointer items-start gap-2 rounded px-3 py-2 transition-colors select-none',
+                              selected ? 'bg-blue-50 ring-1 ring-blue-400' : 'hover:bg-gray-50',
+                              (savingBase || smartDetectBusy) ? 'pointer-events-none opacity-50' : '',
+                            ].join(' ')}
+                            onClick={() => setSelectedImageModelId(model.id)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                setSelectedImageModelId(model.id)
+                              }
+                            }}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="truncate text-sm font-medium text-gray-800">{model.display_name || model.name}</div>
+                              <div className="mt-0.5 flex items-center gap-1.5">
+                                <Tag className="m-0 flex-shrink-0 px-1 py-0 text-[10px] leading-4">{model.provider_name}</Tag>
+                              </div>
+                            </div>
+                            {selected ? <CheckOutlined className="mt-0.5 flex-shrink-0 text-blue-500" /> : null}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
               </div>
             ),
           },
           {
             key: 'views',
-            label: '多镜头图片',
+            label: '图片',
             children: (
               <Row gutter={[16, 16]}>
                 {slotItems.map((slot) => (
                   <Col xs={24} sm={12} lg={8} xl={6} key={slot.angle}>
                     <DisplayImageCard
-                      title={`照片角度：${ANGLE_LABEL_MAP[slot.angle]}`}
+                      title={null}
                       imageUrl={slot.imageUrl}
                       imageAlt={slot.angle}
                       placeholder="暂无图片"
                       hoverable={false}
                       imageHeightClassName="h-44"
-                      extra={slot.image ? <Tag color="blue">ID {slot.image.id}</Tag> : null}
                       footer={
                         <div className="flex items-center gap-2">
                           <Button
@@ -867,7 +885,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                             size="small"
                             disabled={!slot.image}
                             loading={Boolean(slot.image && generatingByImageId[slot.image.id])}
-                            onClick={() => slot.image && void openPromptPreview(slot.image)}
+                            onClick={() => slot.image && void handleGenerateImage(slot.image)}
                           >
                             生成
                           </Button>
@@ -877,7 +895,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                             disabled={!slot.image}
                             onClick={() => slot.image && void openHistoryModal(slot.image)}
                           >
-                            编辑
+                            候选池
                           </Button>
                         </div>
                       }
@@ -891,7 +909,28 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       />
 
       <Modal
-        title="历史生成图片"
+        title={
+          <div className="flex items-center justify-between pr-8">
+            <span>图片候选池</span>
+            {attachImageCandidates && (
+              <Upload
+                accept="image/*"
+                multiple
+                showUploadList={false}
+                disabled={uploadingCandidates}
+                beforeUpload={(file, fileList) => {
+                  const isLast = file.uid === fileList[fileList.length - 1]?.uid
+                  if (isLast) void handleCandidateUpload(fileList)
+                  return Upload.LIST_IGNORE
+                }}
+              >
+                <Button size="small" icon={<UploadOutlined />} loading={uploadingCandidates}>
+                  本地上传
+                </Button>
+              </Upload>
+            )}
+          </div>
+        }
         open={historyOpen}
         onCancel={() => {
           setHistoryOpen(false)
@@ -905,88 +944,16 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
             <Spin />
           </div>
         ) : historyCandidates.length === 0 ? (
-          <Empty description="暂无可用历史图片" />
+          <Empty description="暂无候选图片。生成图片后，所有结果会保留在这里供选择。" />
         ) : (
-          <Row gutter={[16, 16]}>
-            {historyCandidates.map((candidate) => (
-              <Col xs={24} sm={12} md={8} key={candidate.id}>
-                <DisplayImageCard
-                  title={candidate.view_angle ? `角度：${ANGLE_LABEL_MAP[candidate.view_angle] ?? candidate.view_angle}` : candidate.source === 'task-link' ? '任务产物' : `图片 ${candidate.id}`}
-                  imageUrl={buildFileDownloadUrl(candidate.file_id)}
-                  imageAlt={candidate.id}
-                  placeholder="无缩略图"
-                  hoverable={false}
-                  imageHeightClassName="h-44"
-                  footer={
-                    <Button
-                      className="mt-2"
-                      type="primary"
-                      size="small"
-                      block
-                      disabled={!candidate.file_id}
-                      loading={adoptingImageId === candidate.id}
-                      onClick={() => void handleAdoptHistoryImage(candidate)}
-                    >
-                      选中并更新当前角度
-                    </Button>
-                  }
-                />
-              </Col>
-            ))}
-          </Row>
-        )}
-      </Modal>
-
-      <Modal
-        title="提示词内容预览"
-        open={promptPreviewOpen}
-        onCancel={() => {
-          setPromptPreviewOpen(false)
-          setPromptPreviewImage(null)
-        }}
-        okText="生成"
-        cancelText="取消"
-        confirmLoading={Boolean(promptPreviewImage && generatingByImageId[promptPreviewImage.id])}
-        onOk={() => void confirmGenerateWithPrompt()}
-        destroyOnClose
-        width={900}
-      >
-        {promptPreviewLoading ? (
-          <div className="py-8 text-center">
-            <Spin />
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div>
-              <div className="text-xs text-gray-500 mb-2">关联图片（参考图）</div>
-              {promptPreviewRefFileIds.length === 0 ? (
-                <div className="text-xs text-gray-400">暂无关联图片</div>
-              ) : (
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                  <Image.PreviewGroup>
-                    {promptPreviewRefFileIds.map((fid) => (
-                      <Image
-                        key={fid}
-                        width={72}
-                        height={72}
-                        style={{ objectFit: 'cover', borderRadius: 8 }}
-                        src={buildFileDownloadUrl(fid)}
-                      />
-                    ))}
-                  </Image.PreviewGroup>
-                </div>
-              )}
-            </div>
-            <div>
-              <div className="text-xs text-gray-500 mb-2">提示词（可编辑）</div>
-              <Input.TextArea
-                rows={10}
-                value={promptPreviewDraft}
-                onChange={(e) => promptDraft.setBase({ prompt: e.target.value })}
-                placeholder="请输入提示词…"
-              />
-            </div>
-          </div>
+          <AssetImageCandidateGallery
+            candidates={historyCandidates}
+            adoptingId={adoptingImageId}
+            deletingId={deletingCandidateId}
+            resolveFileUrl={(fileId) => buildFileDownloadUrl(fileId) ?? ''}
+            onAdopt={handleAdoptHistoryImage}
+            onDelete={handleDeleteCandidate}
+          />
         )}
       </Modal>
 

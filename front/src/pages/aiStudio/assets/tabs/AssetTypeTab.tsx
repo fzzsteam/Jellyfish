@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Card, Input, Row, Col, Tag, Button, message, Modal, Space, Pagination } from 'antd'
-import { EditOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Card, Input, Row, Col, Tag, Button, message, Modal, Space, Pagination, Upload } from 'antd'
+import { EditOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
 import { useSearchParams } from 'react-router-dom'
 import { resolveAssetUrl } from '../utils'
 import { DisplayImageCard } from '../components/DisplayImageCard'
+import { useProjectStyleOptions } from '../../project/useProjectStyleOptions'
+import { bulkUploadAssetImages } from '../bulkUploadAssets'
 import {
   StudioAssetTypeFormModal,
   normalizeStudioAsset,
@@ -39,16 +41,19 @@ export function AssetTypeTab({
   onEditAsset,
 }: {
   label: string
-  tabKey: 'scene' | 'prop' | 'costume'
+  tabKey: 'scene' | 'prop' | 'costume' | 'character'
   listAssets: (params: { q?: string; page: number; pageSize: number }) => Promise<{ items: StudioAssetLike[]; total: number }>
   createAsset: (payload: AssetCreatePayload) => Promise<StudioAssetLike>
   updateAsset: (id: string, payload: AssetMutationPayload) => Promise<StudioAssetLike>
   deleteAsset: (id: string) => Promise<void>
   onEditAsset?: (asset: StudioAssetLike) => void
 }) {
+  const { defaultVisualStyle, getDefaultStyle } = useProjectStyleOptions()
   const [searchParams, setSearchParams] = useSearchParams()
   const [assets, setAssets] = useState<StudioAssetLike[]>([])
   const [loading, setLoading] = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(12)
@@ -98,11 +103,36 @@ export function AssetTypeTab({
     return Array.isArray(assets) ? assets : []
   }, [assets])
 
-  const openCreate = () => {
-    setEditing(null)
-    setCreateSeed(null)
-    setFromShotCreateContext(null)
-    setEditOpen(true)
+  /** 生成唯一草稿名，避免连续新建同类资产时触发后端名称唯一约束。 */
+  const draftAssetName = () => `未命名${label}-${Date.now().toString(36)}`
+
+  /** 创建一个最小资产草稿并打开详情编辑页，让基础信息只在最终编辑页维护。 */
+  const openCreate = async () => {
+    setCreating(true)
+    try {
+      const created = normalizeAsset(
+        await createAsset({
+          id: `asset_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          name: draftAssetName(),
+          description: '',
+          tags: [],
+          thumbnail: '',
+          view_count: 1,
+          visual_style: defaultVisualStyle,
+          style: getDefaultStyle(defaultVisualStyle),
+          prompt_template_id: null,
+        }),
+      )
+      if (onEditAsset) {
+        onEditAsset(created)
+      } else {
+        openEdit(created)
+      }
+    } catch {
+      message.error(`创建${label}资产失败`)
+    } finally {
+      setCreating(false)
+    }
   }
 
   useEffect(() => {
@@ -199,6 +229,32 @@ export function AssetTypeTab({
     setPreviewOpen(true)
   }
 
+  const handleBulkUpload = async (files: File[]) => {
+    if (files.length === 0) return
+    setUploading(true)
+    try {
+      const result = await bulkUploadAssetImages({
+        entityType: tabKey,
+        files,
+        visualStyle: defaultVisualStyle as '现实' | '动漫',
+        style: getDefaultStyle(defaultVisualStyle),
+      })
+      if (result.createdCount > 0) {
+        setPage(1)
+        await load({ page: 1 })
+      }
+      if (result.createdCount > 0 && result.failedCount === 0) {
+        message.success(`已创建 ${result.createdCount} 个${label}资产`)
+      } else if (result.createdCount > 0) {
+        message.warning(`已创建 ${result.createdCount} 个${label}资产，${result.failedCount} 个文件失败`)
+      } else {
+        message.error('批量上传失败')
+      }
+    } finally {
+      setUploading(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -217,9 +273,24 @@ export function AssetTypeTab({
           <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
             刷新
           </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+          <Button type="primary" icon={<PlusOutlined />} loading={creating} onClick={() => void openCreate()}>
             新建{label}
           </Button>
+          <Upload
+            accept="image/*"
+            multiple
+            showUploadList={false}
+            disabled={uploading}
+            beforeUpload={(file, fileList) => {
+              const isLastFile = file.uid === fileList[fileList.length - 1]?.uid
+              if (isLastFile) void handleBulkUpload(fileList)
+              return Upload.LIST_IGNORE
+            }}
+          >
+            <Button icon={<UploadOutlined />} loading={uploading}>
+              批量上传
+            </Button>
+          </Upload>
         </Space>
       </div>
 
