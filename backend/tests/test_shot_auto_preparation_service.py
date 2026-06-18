@@ -50,6 +50,7 @@ from app.schemas.skills.script_processing import (
     StudioShotDraft,
     StudioShotDraftDialogueLine,
 )
+from app.models.user import User
 from app.services.script_processing_worker import DivideTaskExecutor
 from app.services.studio.shot_auto_preparation import auto_prepare_chapter_shots_sync
 
@@ -65,11 +66,13 @@ def _build_session() -> tuple[Session, object]:
 
 
 def _seed_project_graph(db: Session) -> None:
+    db.add(User(id="test-user", username="test-user", hashed_password="x"))
     project = Project(
         id="project-1",
         name="测试项目",
         style=ProjectStyle.guoman,
         visual_style=ProjectVisualStyle.anime,
+        user_id="test-user",
     )
     chapter = Chapter(id="chapter-1", project_id=project.id, index=1, title="第一章")
     extracted_at = datetime.now(timezone.utc)
@@ -110,10 +113,10 @@ def _seed_project_graph(db: Session) -> None:
         ),
     ]
     files = [
-        FileItem(id="file-scene", type=FileType.image, name="场景图", storage_key="files/scene.png"),
-        FileItem(id="file-character", type=FileType.image, name="角色图", storage_key="files/character.png"),
-        FileItem(id="file-prop", type=FileType.image, name="道具图", storage_key="files/prop.png"),
-        FileItem(id="file-costume", type=FileType.image, name="服装图", storage_key="files/costume.png"),
+        FileItem(id="file-scene", type=FileType.image, name="场景图", storage_key="files/scene.png", user_id="test-user"),
+        FileItem(id="file-character", type=FileType.image, name="角色图", storage_key="files/character.png", user_id="test-user"),
+        FileItem(id="file-prop", type=FileType.image, name="道具图", storage_key="files/prop.png", user_id="test-user"),
+        FileItem(id="file-costume", type=FileType.image, name="服装图", storage_key="files/costume.png", user_id="test-user"),
     ]
     actor = Actor(
         id="actor-1",
@@ -121,6 +124,7 @@ def _seed_project_graph(db: Session) -> None:
         description="",
         style=ProjectStyle.guoman,
         visual_style=ProjectVisualStyle.anime,
+        user_id="test-user",
     )
     character = Character(
         id="character-1",
@@ -137,6 +141,7 @@ def _seed_project_graph(db: Session) -> None:
         description="",
         style=ProjectStyle.guoman,
         visual_style=ProjectVisualStyle.anime,
+        user_id="test-user",
     )
     fuzzy_prop = Prop(
         id="prop-1",
@@ -144,6 +149,7 @@ def _seed_project_graph(db: Session) -> None:
         description="",
         style=ProjectStyle.guoman,
         visual_style=ProjectVisualStyle.anime,
+        user_id="test-user",
     )
     ambiguous_prop = Prop(
         id="prop-ambiguous",
@@ -151,6 +157,7 @@ def _seed_project_graph(db: Session) -> None:
         description="",
         style=ProjectStyle.guoman,
         visual_style=ProjectVisualStyle.anime,
+        user_id="test-user",
     )
     costume = Costume(
         id="costume-1",
@@ -158,6 +165,7 @@ def _seed_project_graph(db: Session) -> None:
         description="",
         style=ProjectStyle.guoman,
         visual_style=ProjectVisualStyle.anime,
+        user_id="test-user",
     )
     no_image_scene = Scene(
         id="scene-no-image",
@@ -165,6 +173,7 @@ def _seed_project_graph(db: Session) -> None:
         description="",
         style=ProjectStyle.guoman,
         visual_style=ProjectVisualStyle.anime,
+        user_id="test-user",
     )
     images = [
         CharacterImage(character_id=character.id, file_id="file-character", is_primary=True),
@@ -193,20 +202,23 @@ def _seed_project_graph(db: Session) -> None:
 
 
 def _seed_project_and_assets(db: Session) -> None:
+    db.add(User(id="test-user", username="test-user", hashed_password="x"))
     project = Project(
         id="project-1",
         name="测试项目",
         style=ProjectStyle.guoman,
         visual_style=ProjectVisualStyle.anime,
+        user_id="test-user",
     )
     chapter = Chapter(id="chapter-1", project_id=project.id, index=1, title="第一章")
-    file_item = FileItem(id="file-scene", type=FileType.image, name="场景图", storage_key="files/scene.png")
+    file_item = FileItem(id="file-scene", type=FileType.image, name="场景图", storage_key="files/scene.png", user_id="test-user")
     scene = Scene(
         id="scene-1",
         name="控制室",
         description="",
         style=ProjectStyle.guoman,
         visual_style=ProjectVisualStyle.anime,
+        user_id="test-user",
     )
     scene_image = SceneImage(scene_id=scene.id, file_id=file_item.id)
     db.add_all([project, chapter, file_item, scene, scene_image])
@@ -260,7 +272,7 @@ def test_auto_prepare_links_assets_with_images_and_accepts_dialogue() -> None:
         )
         db.flush()
 
-        summary = auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
+        summary = auto_prepare_chapter_shots_sync(db, user_id="test-user", project_id="project-1", chapter_id="chapter-1")
 
         candidates = db.execute(
             select(ShotExtractedCandidate).where(ShotExtractedCandidate.shot_id == "shot-1")
@@ -301,7 +313,7 @@ def test_auto_prepare_links_no_image_assets_and_schedules_generation() -> None:
         )
         db.flush()
 
-        summary = auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
+        summary = auto_prepare_chapter_shots_sync(db, user_id="test-user", project_id="project-1", chapter_id="chapter-1")
 
         candidate = db.scalar(select(ShotExtractedCandidate).where(ShotExtractedCandidate.shot_id == "shot-4"))
         assert candidate is not None
@@ -334,7 +346,7 @@ def test_auto_prepare_uses_conservative_fuzzy_matching() -> None:
         )
         db.flush()
 
-        auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
+        auto_prepare_chapter_shots_sync(db, user_id="test-user", project_id="project-1", chapter_id="chapter-1")
 
         exact_candidate = db.scalar(
             select(ShotExtractedCandidate).where(ShotExtractedCandidate.shot_id == "shot-2")
@@ -357,14 +369,15 @@ def test_auto_prepare_links_unique_chinese_near_name_assets() -> None:
     db, engine = _build_session()
     try:
         _seed_project_graph(db)
-        lychee_file = FileItem(id="file-lychee", type=FileType.image, name="lychee.png", storage_key="files/lychee.png")
-        plate_file = FileItem(id="file-plate", type=FileType.image, name="plate.png", storage_key="files/plate.png")
+        lychee_file = FileItem(id="file-lychee", type=FileType.image, name="lychee.png", storage_key="files/lychee.png", user_id="test-user")
+        plate_file = FileItem(id="file-plate", type=FileType.image, name="plate.png", storage_key="files/plate.png", user_id="test-user")
         lychee = Prop(
             id="prop-lychee",
             name="青荔枝",
             description="",
             style=ProjectStyle.guoman,
             visual_style=ProjectVisualStyle.anime,
+            user_id="test-user",
         )
         plate = Prop(
             id="prop-plate",
@@ -372,6 +385,7 @@ def test_auto_prepare_links_unique_chinese_near_name_assets() -> None:
             description="",
             style=ProjectStyle.guoman,
             visual_style=ProjectVisualStyle.anime,
+            user_id="test-user",
         )
         db.add_all(
             [
@@ -395,7 +409,7 @@ def test_auto_prepare_links_unique_chinese_near_name_assets() -> None:
         )
         db.flush()
 
-        auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
+        auto_prepare_chapter_shots_sync(db, user_id="test-user", project_id="project-1", chapter_id="chapter-1")
 
         lychee_candidate = db.scalar(
             select(ShotExtractedCandidate).where(ShotExtractedCandidate.candidate_name == "青绿色荔枝")
@@ -420,14 +434,15 @@ def test_auto_prepare_keeps_ambiguous_chinese_near_name_pending() -> None:
         _seed_project_graph(db)
         db.add_all(
             [
-                FileItem(id="file-green-lychee", type=FileType.image, name="green.png", storage_key="files/green.png"),
-                FileItem(id="file-blue-lychee", type=FileType.image, name="blue.png", storage_key="files/blue.png"),
+                FileItem(id="file-green-lychee", type=FileType.image, name="green.png", storage_key="files/green.png", user_id="test-user"),
+                FileItem(id="file-blue-lychee", type=FileType.image, name="blue.png", storage_key="files/blue.png", user_id="test-user"),
                 Prop(
                     id="prop-green-lychee",
                     name="青荔枝",
                     description="",
                     style=ProjectStyle.guoman,
                     visual_style=ProjectVisualStyle.anime,
+                    user_id="test-user",
                 ),
                 Prop(
                     id="prop-blue-lychee",
@@ -435,6 +450,7 @@ def test_auto_prepare_keeps_ambiguous_chinese_near_name_pending() -> None:
                     description="",
                     style=ProjectStyle.guoman,
                     visual_style=ProjectVisualStyle.anime,
+                    user_id="test-user",
                 ),
                 PropImage(prop_id="prop-green-lychee", file_id="file-green-lychee"),
                 PropImage(prop_id="prop-blue-lychee", file_id="file-blue-lychee"),
@@ -447,7 +463,7 @@ def test_auto_prepare_keeps_ambiguous_chinese_near_name_pending() -> None:
         )
         db.flush()
 
-        auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
+        auto_prepare_chapter_shots_sync(db, user_id="test-user", project_id="project-1", chapter_id="chapter-1")
 
         candidate = db.scalar(
             select(ShotExtractedCandidate).where(ShotExtractedCandidate.candidate_name == "青绿色荔枝")
@@ -466,14 +482,15 @@ def test_auto_prepare_links_character_to_matching_actor_and_project_actor_link()
         _seed_project_graph(db)
         db.add_all(
             [
-                FileItem(id="file-actor-green", type=FileType.image, name="actor.png", storage_key="files/actor.png"),
-                FileItem(id="file-character-green", type=FileType.image, name="character.png", storage_key="files/character.png"),
+                FileItem(id="file-actor-green", type=FileType.image, name="actor.png", storage_key="files/actor.png", user_id="test-user"),
+                FileItem(id="file-character-green", type=FileType.image, name="character.png", storage_key="files/character.png", user_id="test-user"),
                 Actor(
                     id="actor-green",
                     name="青衣少女演员",
                     description="",
                     style=ProjectStyle.guoman,
                     visual_style=ProjectVisualStyle.anime,
+                    user_id="test-user",
                 ),
                 ActorImage(actor_id="actor-green", file_id="file-actor-green"),
                 Character(
@@ -495,7 +512,7 @@ def test_auto_prepare_links_character_to_matching_actor_and_project_actor_link()
         )
         db.flush()
 
-        auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
+        auto_prepare_chapter_shots_sync(db, user_id="test-user", project_id="project-1", chapter_id="chapter-1")
 
         character = db.get(Character, "character-green")
         candidate = db.scalar(
@@ -529,8 +546,9 @@ def test_auto_prepare_links_to_existing_cross_project_character() -> None:
                     name="其它项目",
                     style=ProjectStyle.guoman,
                     visual_style=ProjectVisualStyle.anime,
+                    user_id="test-user",
                 ),
-                FileItem(id="file-sdp", type=FileType.image, name="sdp.png", storage_key="files/sdp.png"),
+                FileItem(id="file-sdp", type=FileType.image, name="sdp.png", storage_key="files/sdp.png", user_id="test-user"),
                 Character(
                     id="char-sudongpo",
                     project_id="project-2",
@@ -550,7 +568,7 @@ def test_auto_prepare_links_to_existing_cross_project_character() -> None:
         db.flush()
         before_count = db.scalar(select(func.count()).select_from(Character))
 
-        auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
+        auto_prepare_chapter_shots_sync(db, user_id="test-user", project_id="project-1", chapter_id="chapter-1")
 
         candidate = db.scalar(
             select(ShotExtractedCandidate).where(ShotExtractedCandidate.shot_id == "shot-1")
@@ -575,7 +593,7 @@ def test_auto_prepare_leaves_character_actor_empty_without_unique_actor_match() 
         _seed_project_graph(db)
         db.add_all(
             [
-                FileItem(id="file-character-lone", type=FileType.image, name="character.png", storage_key="files/character-lone.png"),
+                FileItem(id="file-character-lone", type=FileType.image, name="character.png", storage_key="files/character-lone.png", user_id="test-user"),
                 Character(
                     id="character-lone",
                     project_id="project-1",
@@ -595,7 +613,7 @@ def test_auto_prepare_leaves_character_actor_empty_without_unique_actor_match() 
         )
         db.flush()
 
-        auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
+        auto_prepare_chapter_shots_sync(db, user_id="test-user", project_id="project-1", chapter_id="chapter-1")
 
         character = db.get(Character, "character-lone")
         candidate = db.scalar(
@@ -625,8 +643,8 @@ def test_auto_prepare_dialogue_is_idempotent() -> None:
         )
         db.flush()
 
-        auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
-        auto_prepare_chapter_shots_sync(db, project_id="project-1", chapter_id="chapter-1")
+        auto_prepare_chapter_shots_sync(db, user_id="test-user", project_id="project-1", chapter_id="chapter-1")
+        auto_prepare_chapter_shots_sync(db, user_id="test-user", project_id="project-1", chapter_id="chapter-1")
 
         lines = db.execute(select(ShotDialogLine).where(ShotDialogLine.shot_detail_id == "shot-1")).scalars().all()
         assert len(lines) == 1
@@ -680,7 +698,7 @@ def test_divide_task_apply_runs_extraction_and_auto_preparation(monkeypatch) -> 
         )
 
         DivideTaskExecutor().apply_result(
-            SimpleNamespace(db=db),
+            SimpleNamespace(db=db, task=SimpleNamespace(user_id="test-user")),
             {"chapter_id": "chapter-1"},
             _division_result(),
         )
