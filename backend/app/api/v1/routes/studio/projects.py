@@ -1,26 +1,17 @@
-"""Project CRUD。"""
+"""Project CRUD。
+
+路由层职责：收参 + 鉴权（注入 current_user）+ 调 service + 返回 ApiResponse。
+数据隔离逻辑全部在 service 层，路由仅透传 `current_user.id`。
+"""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.utils import apply_keyword_filter, apply_order, paginate
-from app.dependencies import get_db
-from app.models.studio import FileUsage, Project
-from app.models.types import ProjectStyle, ProjectVisualStyle
+from app.dependencies import get_current_user, get_db
+from app.models.user import User
 from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, paginated_response, success_response
-from app.services.common import (
-    create_and_refresh,
-    delete_if_exists,
-    entity_already_exists,
-    entity_not_found,
-    ensure_not_exists,
-    flush_and_refresh,
-    get_or_404,
-    patch_model,
-)
 from app.schemas.studio.projects import (
     ProjectCreate,
     ProjectRead,
@@ -28,37 +19,10 @@ from app.schemas.studio.projects import (
     ProjectUpdate,
     StyleOption,
 )
+from app.services.studio import projects as project_service
+from app.models.types import ProjectStyle, ProjectVisualStyle
 
 router = APIRouter()
-
-PROJECT_ORDER_FIELDS = {"name", "created_at", "updated_at", "progress"}
-
-
-def _build_project_style_options() -> tuple[dict[ProjectVisualStyle, list[ProjectStyle]], dict[ProjectVisualStyle, ProjectStyle]]:
-    mapping: dict[ProjectVisualStyle, list[ProjectStyle]] = {key: [] for key in ProjectVisualStyle}
-    for item in ProjectStyle:
-        if item.name.startswith("real_people_"):
-            mapping[ProjectVisualStyle.live_action].append(item)
-            continue
-        if item.name.startswith("anime_") or item.name in {"guoman", "ink_wash"}:
-            mapping[ProjectVisualStyle.anime].append(item)
-            continue
-    defaults: dict[ProjectVisualStyle, ProjectStyle] = {
-        visual: styles[0]
-        for visual, styles in mapping.items()
-        if styles
-    }
-    return mapping, defaults
-
-
-def _validate_project_style_combo(*, visual_style: ProjectVisualStyle, style: ProjectStyle) -> None:
-    mapping, _defaults = _build_project_style_options()
-    allowed = mapping.get(visual_style, [])
-    if style not in allowed:
-        raise ValueError(
-            f"style is not allowed for visual_style: visual_style={visual_style.value}, "
-            f"style={style.value}, allowed={[item.value for item in allowed]}"
-        )
 
 
 @router.get(
@@ -68,7 +32,7 @@ def _validate_project_style_combo(*, visual_style: ProjectVisualStyle, style: Pr
 )
 async def get_project_style_options(
 ) -> ApiResponse[ProjectStyleOptionsRead]:
-    mapping, defaults = _build_project_style_options()
+    mapping, defaults = project_service.build_project_style_options()
     data = ProjectStyleOptionsRead(
         visual_styles=[StyleOption(value=x.value, label=x.value) for x in ProjectVisualStyle],
         styles_by_visual_style={
@@ -87,16 +51,22 @@ async def get_project_style_options(
 )
 async def list_projects(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     q: str | None = Query(None, description="关键字，过滤 name/description"),
     order: str | None = Query(None, description="排序字段"),
     is_desc: bool = Query(False, description="是否倒序"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
 ) -> ApiResponse[PaginatedData[ProjectRead]]:
-    stmt = select(Project)
-    stmt = apply_keyword_filter(stmt, q=q, fields=[Project.name, Project.description])
-    stmt = apply_order(stmt, model=Project, order=order, is_desc=is_desc, allow_fields=PROJECT_ORDER_FIELDS, default="created_at")
-    items, total = await paginate(db, stmt=stmt, page=page, page_size=page_size)
+    items, total = await project_service.list_projects(
+        db,
+        user_id=current_user.id,
+        q=q,
+        order=order,
+        is_desc=is_desc,
+        page=page,
+        page_size=page_size,
+    )
     return paginated_response([ProjectRead.model_validate(x) for x in items], page=page, page_size=page_size, total=total)
 
 
@@ -109,18 +79,9 @@ async def list_projects(
 async def create_project(
     body: ProjectCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ProjectRead]:
-    await ensure_not_exists(
-        db,
-        Project,
-        body.id,
-        detail=entity_already_exists("Project"),
-    )
-    try:
-        _validate_project_style_combo(visual_style=body.visual_style, style=body.style)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    obj = await create_and_refresh(db, Project(**body.model_dump()))
+    obj = await project_service.create_project(db, body, user_id=current_user.id)
     return created_response(ProjectRead.model_validate(obj))
 
 
@@ -132,8 +93,9 @@ async def create_project(
 async def get_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ProjectRead]:
-    obj = await get_or_404(db, Project, project_id, detail=entity_not_found("Project"))
+    obj = await project_service.get_project(db, project_id, user_id=current_user.id)
     return success_response(ProjectRead.model_validate(obj))
 
 
@@ -146,18 +108,9 @@ async def update_project(
     project_id: str,
     body: ProjectUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ProjectRead]:
-    obj = await get_or_404(db, Project, project_id, detail=entity_not_found("Project"))
-    update_data = body.model_dump(exclude_unset=True)
-    visual_style = update_data.get("visual_style", obj.visual_style)
-    style = update_data.get("style", obj.style)
-    if visual_style is not None and style is not None:
-        try:
-            _validate_project_style_combo(visual_style=visual_style, style=style)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    patch_model(obj, update_data)
-    await flush_and_refresh(db, obj)
+    obj = await project_service.update_project(db, project_id, body, user_id=current_user.id)
     return success_response(ProjectRead.model_validate(obj))
 
 
@@ -169,27 +122,7 @@ async def update_project(
 async def delete_project(
     project_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[None]:
-    from sqlalchemy import delete as sql_delete
-
-    # 先清理关联的 file_usages 记录，避免外键约束失败:
-    # file_usages.project_id → projects.id (ON DELETE CASCADE)
-    # 但 orphan 记录（project_id 指向不存在的 project）无法级联
-
-    # 1. 删除该 project 关联的 file_usages
-    await db.execute(
-        sql_delete(FileUsage).where(FileUsage.project_id == project_id)
-    )
-
-    # 2. 清理所有 orphan file_usages（project_id 不对应任何存在的 project）
-    await db.execute(
-        sql_delete(FileUsage).where(
-            FileUsage.project_id.notin_(
-                select(Project.id).scalar_subquery()
-            )
-        )
-    )
-
-    # 3. 再删除 project 本身
-    await delete_if_exists(db, Project, project_id)
+    await project_service.delete_project(db, project_id, user_id=current_user.id)
     return empty_response()
