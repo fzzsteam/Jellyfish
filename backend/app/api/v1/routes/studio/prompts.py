@@ -1,24 +1,25 @@
 """提示词模板相关路由：CRUD。
 
-业务规则：
+路由层职责：收参 + 鉴权（注入 current_user）+ 调 service + 返回 ApiResponse。
+数据隔离与业务规则（系统模板放行/禁止删改、默认唯一等）全部在 service 层，
+路由仅透传 `current_user.id`。
+
+业务规则（实现见 service）：
 - is_system=True 的记录禁止修改和删除（403）。
 - is_default=True 的记录禁止删除（403）。
-- 同一 category 下至多一条 is_default=True：创建/更新时将同 category 其余记录置为 False。
+- 同一 category 下至多一条 is_default=True（按用户维度）：创建/更新时将同 category 其余记录置为 False。
 - id 由后端自动生成 UUID；is_system 不接受客户端传入（固定为 False）。
+- 列表/详情按"自己的模板 + 系统模板"过滤，看不到别人的模板。
 """
 
 from __future__ import annotations
 
-import uuid
-from typing import cast
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select, update
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.utils import apply_keyword_filter, apply_order, paginate
-from app.dependencies import get_db
-from app.models.studio import PromptCategory, PromptTemplate
+from app.dependencies import get_current_user, get_db
+from app.models.studio import PromptCategory
+from app.models.user import User
 from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, paginated_response, success_response
 from app.schemas.studio.prompts import (
     PromptCategoryOptionRead,
@@ -26,11 +27,10 @@ from app.schemas.studio.prompts import (
     PromptTemplateRead,
     PromptTemplateUpdate,
 )
-from app.services.common import entity_not_found
+from app.services.studio import prompts as prompt_service
 
 router = APIRouter()
 
-_ORDER_FIELDS = {"name", "category", "created_at", "updated_at"}
 _PROMPT_CATEGORY_ZH: dict[PromptCategory, tuple[str, str]] = {
     # 用于提交给图片模型的提示词
     PromptCategory.frame_head_image: ("首帧图片", "用于生成首帧图片的提示词"),
@@ -59,22 +59,6 @@ _PROMPT_CATEGORY_ZH: dict[PromptCategory, tuple[str, str]] = {
 }
 
 
-async def _clear_category_default(
-    db: AsyncSession,
-    *,
-    category: PromptCategory,
-    exclude_id: str | None = None,
-) -> None:
-    """将同 category 下所有记录的 is_default 置为 False（排除 exclude_id）。"""
-    stmt = (
-        update(PromptTemplate)
-        .where(PromptTemplate.category == category, PromptTemplate.is_default.is_(True))
-    )
-    if exclude_id:
-        stmt = stmt.where(PromptTemplate.id != exclude_id)
-    await db.execute(stmt)
-
-
 # ---------- 列表 ----------
 
 @router.get(
@@ -84,6 +68,7 @@ async def _clear_category_default(
 )
 async def list_prompt_templates(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     category: PromptCategory | None = Query(None, description="按类别过滤"),
     q: str | None = Query(None, description="关键字，过滤 name"),
     is_default: bool | None = Query(None, description="过滤是否为默认"),
@@ -93,23 +78,18 @@ async def list_prompt_templates(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
 ) -> ApiResponse[PaginatedData[PromptTemplateRead]]:
-    stmt = select(PromptTemplate)
-    if category is not None:
-        stmt = stmt.where(PromptTemplate.category == category)
-    if is_default is not None:
-        stmt = stmt.where(PromptTemplate.is_default.is_(is_default))
-    if is_system is not None:
-        stmt = stmt.where(PromptTemplate.is_system.is_(is_system))
-    stmt = apply_keyword_filter(stmt, q=q, fields=[PromptTemplate.name])
-    stmt = apply_order(
-        stmt,
-        model=PromptTemplate,
+    items, total = await prompt_service.list_prompt_templates(
+        db,
+        user_id=current_user.id,
+        category=category,
+        q=q,
+        is_default=is_default,
+        is_system=is_system,
         order=order,
         is_desc=is_desc,
-        allow_fields=_ORDER_FIELDS,
-        default="created_at",
+        page=page,
+        page_size=page_size,
     )
-    items, total = await paginate(db, stmt=stmt, page=page, page_size=page_size)
     return paginated_response(
         [PromptTemplateRead.model_validate(x) for x in items],
         page=page,
@@ -141,10 +121,9 @@ async def list_prompt_categories() -> ApiResponse[list[PromptCategoryOptionRead]
 async def get_prompt_template(
     template_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[PromptTemplateRead]:
-    obj = await db.get(PromptTemplate, template_id)
-    if obj is None:
-        raise HTTPException(status_code=404, detail=entity_not_found("PromptTemplate"))
+    obj = await prompt_service.get_prompt_template(db, template_id, user_id=current_user.id)
     return success_response(PromptTemplateRead.model_validate(obj))
 
 
@@ -159,24 +138,9 @@ async def get_prompt_template(
 async def create_prompt_template(
     body: PromptTemplateCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[PromptTemplateRead]:
-    # 若设为默认，先清除同类别其他默认
-    if body.is_default:
-        await _clear_category_default(db, category=body.category)
-
-    obj = PromptTemplate(
-        id=str(uuid.uuid4()),
-        category=body.category,
-        name=body.name,
-        content=body.content,
-        preview=body.preview,
-        variables=body.variables,
-        is_default=body.is_default,
-        is_system=False,  # 客户端不可设置
-    )
-    db.add(obj)
-    await db.flush()
-    await db.refresh(obj)
+    obj = await prompt_service.create_prompt_template(db, body, user_id=current_user.id)
     return created_response(PromptTemplateRead.model_validate(obj))
 
 
@@ -191,23 +155,9 @@ async def update_prompt_template(
     template_id: str,
     body: PromptTemplateUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[PromptTemplateRead]:
-    obj = await db.get(PromptTemplate, template_id)
-    if obj is None:
-        raise HTTPException(status_code=404, detail=entity_not_found("PromptTemplate"))
-    if obj.is_system:
-        raise HTTPException(status_code=403, detail="系统预置提示词不可修改")
-
-    # 若将当前记录设为默认，先清除同类别其他默认
-    if body.is_default is True:
-        await _clear_category_default(db, category=cast(PromptCategory, cast(object, obj.category)), exclude_id=template_id)
-
-    update_data = body.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(obj, field, value)
-
-    await db.flush()
-    await db.refresh(obj)
+    obj = await prompt_service.update_prompt_template(db, template_id, body, user_id=current_user.id)
     return success_response(PromptTemplateRead.model_validate(obj))
 
 
@@ -221,13 +171,7 @@ async def update_prompt_template(
 async def delete_prompt_template(
     template_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[None]:
-    obj = await db.get(PromptTemplate, template_id)
-    if obj is None:
-        raise HTTPException(status_code=404, detail=entity_not_found("PromptTemplate"))
-    if obj.is_system:
-        raise HTTPException(status_code=403, detail="系统预置提示词不可删除")
-    if obj.is_default:
-        raise HTTPException(status_code=403, detail="默认提示词不可删除，请先将其他提示词设为默认")
-    await db.delete(obj)
+    await prompt_service.delete_prompt_template(db, template_id, user_id=current_user.id)
     return empty_response()

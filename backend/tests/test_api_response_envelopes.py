@@ -12,8 +12,22 @@ from app.main import app
 from app.models.studio import PromptCategory, PromptTemplate
 
 
+class _FakeResult:
+    """execute 返回值替身：仅提供 prompts service 用到的 scalar_one_or_none。"""
+
+    def __init__(self, value: PromptTemplate | None) -> None:
+        self._value = value
+
+    def scalar_one_or_none(self) -> PromptTemplate | None:
+        return self._value
+
+
 class _FakePromptDB:
-    """最小 DB 替身：仅覆盖 prompts 路由测试所需行为。"""
+    """最小 DB 替身：仅覆盖 prompts 路由测试所需行为。
+
+    service 改造后通过 `execute(select(...))` 取单条模板，故这里按主键列的
+    `==` 绑定值在 items 里命中，返回带 scalar_one_or_none 的结果替身。
+    """
 
     def __init__(self) -> None:
         self.items: dict[str, PromptTemplate] = {}
@@ -23,7 +37,26 @@ class _FakePromptDB:
             return None
         return self.items.get(entity_id)
 
-    async def execute(self, *_args, **_kwargs) -> None:
+    async def execute(self, statement=None, *_args, **_kwargs):  # noqa: ANN001, ANN201
+        # 仅 select 语句需要返回结果；update（清默认）等返回 None 即可。
+        if statement is None or not hasattr(statement, "whereclause"):
+            return None
+        target_id = self._extract_id(statement)
+        if target_id is None:
+            return None
+        return _FakeResult(self.items.get(target_id))
+
+    @staticmethod
+    def _extract_id(statement) -> str | None:  # noqa: ANN001
+        """从 select(...).where(PromptTemplate.id == X, ...) 中取出 id 绑定值。"""
+        clause = statement.whereclause
+        if clause is None:
+            return None
+        for crit in getattr(clause, "clauses", [clause]):
+            left = getattr(crit, "left", None)
+            right = getattr(crit, "right", None)
+            if getattr(left, "key", None) == "id" and right is not None:
+                return getattr(right, "value", None)
         return None
 
     def add(self, obj: PromptTemplate) -> None:
