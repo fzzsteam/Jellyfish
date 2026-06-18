@@ -1222,7 +1222,7 @@ export function ChapterShotEditPage() {
       if (!projectId || !chapterId || !shotId || !replaceDrawerAsset?.id) return
       setReplaceDrawerLoading(true)
       try {
-        const res = await StudioShotsService.replaceAssetForPreparationApiV1StudioShotsShotIdPreparationReplacePost({
+        const res = await StudioShotsService.replaceAssetForPreparationApiApiV1StudioShotsShotIdPreparationReplacePost({
           shotId,
           requestBody: {
             project_id: projectId,
@@ -1258,7 +1258,7 @@ export function ChapterShotEditPage() {
       if (!shotId || !asset.id) return
       setUnlinkingIds((prev) => ({ ...prev, [asset.id!]: true }))
       try {
-        const res = await StudioShotsService.unlinkAssetForPreparationApiV1StudioShotsShotIdPreparationUnlinkPost({
+        const res = await StudioShotsService.unlinkAssetForPreparationApiApiV1StudioShotsShotIdPreparationUnlinkPost({
           shotId,
           requestBody: {
             entity_type: asset.kind === 'actor' ? 'character' : asset.kind,

@@ -12,6 +12,7 @@ from app.core.db import async_session_maker
 from app.core.task_manager import SqlAlchemyTaskStore
 from app.core.task_manager.types import TaskStatus
 from app.core.contracts.provider import ProviderConfig
+from app.core.contracts.generation_models import get_builtin_generation_model
 from app.core.contracts.video_generation import VideoGenerationInput, VideoGenerationResult
 from app.core.tasks import VideoGenerationTask
 from app.models.llm import Model, ModelCategoryKey, ModelSettings
@@ -20,7 +21,7 @@ from app.models.studio import FileItem, Shot, ShotDetail, ShotFrameType
 from app.models.types import FileUsageKind
 from app.services.common import entity_not_found
 from app.core.integrations.video_capabilities import resolve_video_capability
-from app.services.llm.provider_resolver import resolve_provider_config_by_model
+from app.services.llm.provider_resolver import resolve_provider_config_by_key, resolve_provider_config_by_model
 from app.services.studio.file_usages import sync_usage_from_shot_context
 from app.services.studio.generation.video import (
     REQUIRED_FRAMES_BY_MODE,
@@ -128,6 +129,20 @@ async def load_provider_config_by_model(db: AsyncSession, model: Model) -> Provi
     )
 
 
+async def load_provider_config_by_builtin_model(db: AsyncSession, *, provider_key: str) -> ProviderConfig:
+    """Resolve provider credentials for a system-owned built-in generation model."""
+    resolved = await resolve_provider_config_by_key(
+        db,
+        provider_key=provider_key,
+        category=ModelCategoryKey.video,
+    )
+    return ProviderConfig(
+        provider=resolved.provider_key,  # type: ignore[arg-type]
+        api_key=resolved.api_key,
+        base_url=resolved.base_url,
+    )
+
+
 def _normalize_optional_text(value: str | None) -> str | None:
     """归一化可选文本参数：空字符串视为未设置。"""
     normalized = (value or "").strip()
@@ -152,9 +167,18 @@ async def build_run_args(
     prompt: str | None,
     images: list[str],
     ratio: str | None,
+    model_id: str | None = None,
 ) -> dict:
-    model = await resolve_default_video_model(db)
-    provider_cfg = await load_provider_config_by_model(db, model)
+    builtin_model = get_builtin_generation_model(model_id)
+    if builtin_model is not None:
+        if builtin_model.category != "video":
+            raise HTTPException(status_code=400, detail=f"Built-in model is not a video model: {model_id}")
+        provider_cfg = await load_provider_config_by_builtin_model(db, provider_key=builtin_model.provider)
+        model_name = builtin_model.name
+    else:
+        model = await resolve_default_video_model(db)
+        provider_cfg = await load_provider_config_by_model(db, model)
+        model_name = model.name
     shot_detail = await validate_shot_and_duration(db, shot_id)
     resolved_ratio = await resolve_effective_video_options(requested_ratio=ratio)
     base = build_video_base_draft(shot_id=shot_id, prompt=prompt)
@@ -176,13 +200,13 @@ async def build_run_args(
     frame_map = {ft: frame_data_urls[i] for i, ft in enumerate(required_frames)}
 
     # 按供应商能力决定是否传 watermark=False，避免生成带水印的视频
-    cap = resolve_video_capability(provider=provider_cfg.provider, model=model.name)
+    cap = resolve_video_capability(provider=provider_cfg.provider, model=model_name)
     input_dict: dict = {
         "prompt": final_prompt,
         "first_frame_base64": frame_map.get(ShotFrameType.first),
         "last_frame_base64": frame_map.get(ShotFrameType.last),
         "key_frame_base64": frame_map.get(ShotFrameType.key),
-        "model": model.name,
+        "model": model_name,
         "ratio": resolved_ratio,
         "seconds": shot_detail.duration,
     }

@@ -17,7 +17,7 @@ import {
 } from 'antd'
 import { ArrowLeftOutlined, CheckOutlined, CloseCircleOutlined, EditOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
 import { FilmService, LlmService, ScriptProcessingService, StudioFilesService } from '../../../../services/generated'
-import type { AssetImageCandidateRead, ModelRead, ProviderRead, TaskStatus } from '../../../../services/generated'
+import type { AssetImageCandidateRead, BuiltinGenerationModelRead, TaskStatus } from '../../../../services/generated'
 import { buildFileDownloadUrl } from '../utils'
 import { AssetImageCandidateGallery } from './AssetImageCandidateGallery'
 import { MentionEditor } from './MentionEditor'
@@ -85,9 +85,7 @@ type ImageGenerationPayload = {
   model_id: string | null
 }
 
-type ImageModelOption = ModelRead & {
-  provider_name: string
-}
+type ImageModelOption = BuiltinGenerationModelRead
 
 export type AssetEditPageBaseProps<TAsset extends BaseAsset, TImage extends BaseAssetImage> = {
   assetId?: string
@@ -233,40 +231,15 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     setImageModelsLoading(true)
     void (async () => {
       try {
-        const [modelsRes, providersRes] = await Promise.all([
-          LlmService.listModelsApiV1LlmModelsGet({
-            category: 'image',
-            order: 'name',
-            isDesc: false,
-            page: 1,
-            pageSize: 100,
-          }),
-          LlmService.listProvidersApiV1LlmProvidersGet({
-            order: 'name',
-            isDesc: false,
-            page: 1,
-            pageSize: 100,
-          }),
-        ])
+        const modelsRes = await LlmService.listBuiltinGenerationModelsApiV1LlmBuiltinModelsGet({
+          category: 'image',
+        })
         if (!active) return
-        const providers = (providersRes.data?.items ?? []) as ProviderRead[]
-        const activeProviderIds = new Set(
-          providers
-            .filter((provider) => provider.status !== 'disabled')
-            .map((provider) => provider.id),
-        )
-        const providerNameById = new Map(providers.map((provider) => [provider.id, provider.name]))
-        const items = ((modelsRes.data?.items ?? []) as ModelRead[])
-          .filter((model) => model.category === 'image')
-          .filter((model) => activeProviderIds.size === 0 || activeProviderIds.has(model.provider_id))
-          .map((model) => ({
-            ...model,
-            provider_name: providerNameById.get(model.provider_id) ?? model.provider_id,
-          }))
+        const items = ((modelsRes.data ?? []) as ImageModelOption[]).filter((model) => model.category === 'image')
         setImageModels(items)
         setSelectedImageModelId((prev) => {
           if (prev && items.some((item) => item.id === prev)) return prev
-          return items[0]?.id ?? null
+          return items.find((item) => item.recommended)?.id ?? items[0]?.id ?? null
         })
       } catch {
         if (active) {
@@ -597,6 +570,10 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       message.warning('请先填写描述')
       return
     }
+    if (!selectedImageModelId) {
+      message.warning('请先选择图片模型')
+      return
+    }
     const payload = buildBasePayload()
     if (!payload) return
 
@@ -872,12 +849,9 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                             }}
                           >
                             <div className="flex-1 min-w-0">
-                              <div className="truncate text-sm font-medium text-gray-800">{model.name}</div>
+                              <div className="truncate text-sm font-medium text-gray-800">{model.display_name || model.name}</div>
                               <div className="mt-0.5 flex items-center gap-1.5">
                                 <Tag className="m-0 flex-shrink-0 px-1 py-0 text-[10px] leading-4">{model.provider_name}</Tag>
-                                {model.description ? (
-                                  <span className="truncate text-xs text-gray-500">{model.description}</span>
-                                ) : null}
                               </div>
                             </div>
                             {selected ? <CheckOutlined className="mt-0.5 flex-shrink-0 text-blue-500" /> : null}

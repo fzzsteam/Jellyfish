@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from fastapi import HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.llm import Model, ModelCategoryKey, Provider, ProviderStatus
@@ -49,6 +50,33 @@ async def resolve_provider_config(
             detail=f"{entity_not_found('Provider')} for provider_id={provider_id}",
         )
     return resolve_provider_config_from_provider(provider=provider, category=category)
+
+
+async def resolve_provider_config_by_key(
+    db: AsyncSession,
+    *,
+    provider_key: str,
+    category: ModelCategoryKey,
+) -> ResolvedProviderConfig:
+    """Resolve provider config by stable provider key for built-in generation models."""
+    bootstrap_all_registries()
+    provider = await db.get(Provider, provider_key)
+    if provider is not None:
+        return resolve_provider_config_from_provider(provider=provider, category=category)
+
+    rows = (await db.execute(select(Provider))).scalars().all()
+    for candidate in rows:
+        try:
+            candidate_key = resolve_provider_key_from_name(candidate.name)
+        except HTTPException:
+            continue
+        if candidate_key == provider_key:
+            return resolve_provider_config_from_provider(provider=candidate, category=category)
+
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail=f"Provider config not found for provider={provider_key}",
+    )
 
 
 def resolve_provider_config_from_provider(

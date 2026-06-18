@@ -9,6 +9,7 @@ from app.dependencies import get_db
 from app.models.llm import ModelCategoryKey
 from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, success_response
 from app.schemas.llm import (
+    BuiltinGenerationModelRead,
     ImageGenerationOptionsRead,
     ModelCreate,
     ModelRead,
@@ -31,6 +32,7 @@ from app.services.llm.manage import (
     get_provider as get_provider_service,
     get_image_generation_options as get_image_generation_options_service,
     get_video_generation_options as get_video_generation_options_service,
+    list_builtin_generation_models as list_builtin_generation_models_service,
     list_supported_providers as list_supported_providers_service,
     list_models_paginated,
     list_providers_paginated,
@@ -84,6 +86,19 @@ async def list_supported_providers(
     category: ModelCategoryKey | None = Query(None, description="按模型类别过滤：text/image/video"),
 ) -> ApiResponse[list[ProviderSupportedRead]]:
     items = list_supported_providers_service(category=category)
+    return success_response(items)
+
+
+@router.get(
+    "/builtin-models",
+    response_model=ApiResponse[list[BuiltinGenerationModelRead]],
+    summary="List built-in generation models exposed to image and video generation panels",
+)
+async def list_builtin_generation_models(
+    category: ModelCategoryKey | None = Query(None, description="Filter by model category: image/video"),
+) -> ApiResponse[list[BuiltinGenerationModelRead]]:
+    """Expose platform-owned generation models so users do not manage model rows."""
+    items = list_builtin_generation_models_service(category=category)
     return success_response(items)
 
 

@@ -8,6 +8,7 @@ from app.services.llm.manage import (
     get_or_create_settings,
     get_provider,
     list_models_paginated,
+    list_builtin_generation_models,
     list_providers_paginated,
     list_supported_providers,
     update_model,
@@ -34,6 +35,7 @@ from app.services.llm.provider_registry import (
 from app.services.llm.provider_resolver import (
     ResolvedProviderConfig,
     resolve_provider_config,
+    resolve_provider_config_by_key,
     resolve_provider_config_by_model,
 )
 
@@ -51,6 +53,7 @@ __all__ = [
     "get_provider_by_model_or_id",
     "get_provider",
     "list_models_paginated",
+    "list_builtin_generation_models",
     "list_providers_paginated",
     "list_supported_providers",
     "update_model",
@@ -67,5 +70,6 @@ __all__ = [
     "register_provider",
     "resolve_provider_key_from_name",
     "resolve_provider_config",
+    "resolve_provider_config_by_key",
     "resolve_provider_config_by_model",
 ]

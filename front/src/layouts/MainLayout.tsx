@@ -6,7 +6,6 @@ import {
   FolderOutlined,
   PictureOutlined,
   FileTextOutlined,
-  ApiOutlined,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
@@ -31,7 +30,6 @@ const MainLayout: React.FC = () => {
     if (location.pathname.startsWith('/prompts')) return ['prompts']
     if (location.pathname.startsWith('/files')) return ['files']
     if (location.pathname.startsWith('/agents')) return ['agents']
-    if (location.pathname.startsWith('/models')) return ['models']
     if (location.pathname.startsWith('/settings')) return ['settings']
     return []
   }, [location.pathname])
@@ -156,11 +154,6 @@ const MainLayout: React.FC = () => {
       label: <Link to="/prompts">提示词模板</Link>,
     },
     {
-      key: 'models',
-      icon: <ApiOutlined />,
-      label: <Link to="/models">模型管理</Link>,
-    },
-    {
       key: 'settings',
       icon: <SettingOutlined />,
       label: <Link to="/settings">{t('menu.settings')}</Link>,
@@ -206,7 +199,7 @@ const MainLayout: React.FC = () => {
           overflow: 'auto',
         }}
       >
-        <div className="flex items-center h-16 px-4 border-b border-solid" style={{ borderColor: token.colorBorderSecondary }}>
+        <div className="flex h-16 items-center px-4 border-b border-solid" style={{ borderColor: token.colorBorderSecondary }}>
           <Link to="/projects" className="flex items-center gap-2 min-w-0">
             <img src="/logo-wanxiang.png" alt="万象元生" className="w-12 h-12 shrink-0 rounded-full" />
             {!collapsed && (
@@ -226,7 +219,7 @@ const MainLayout: React.FC = () => {
           mode="inline"
           selectedKeys={selectedKeys}
           items={menuItems}
-          style={{ borderRight: 'none', paddingTop: 8 }}
+          style={{ borderRight: 'none', paddingTop: 0 }}
         />
       </Sider>
 

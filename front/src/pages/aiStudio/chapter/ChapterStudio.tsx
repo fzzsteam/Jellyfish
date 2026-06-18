@@ -71,11 +71,10 @@ import type {
   CameraAngle,
   CameraMovement,
   CameraShotType,
+  BuiltinGenerationModelRead,
   ChapterRead,
   EntityNameExistenceItem,
   ImageGenerationOptionsRead,
-  ModelRead,
-  ProviderRead,
   ProjectCostumeLinkRead,
   ShotDetailRead,
   ShotExtractedCandidateRead,
@@ -132,9 +131,7 @@ type VideoPromptDerived = {
   pack: ShotVideoPromptPackRead | null
 }
 type GeneratedVideoItem = { linkId: number; fileId: string; url: string }
-type VideoModelOption = ModelRead & {
-  provider_name: string
-}
+type VideoModelOption = BuiltinGenerationModelRead
 
 type FullscreenCapableVideo = HTMLVideoElement & {
   webkitRequestFullscreen?: () => Promise<void> | void
@@ -2785,40 +2782,15 @@ function Inspector(props: {
     setVideoModelsLoading(true)
     void (async () => {
       try {
-        const [modelsRes, providersRes] = await Promise.all([
-          LlmService.listModelsApiV1LlmModelsGet({
-            category: 'video',
-            order: 'name',
-            isDesc: false,
-            page: 1,
-            pageSize: 100,
-          }),
-          LlmService.listProvidersApiV1LlmProvidersGet({
-            order: 'name',
-            isDesc: false,
-            page: 1,
-            pageSize: 100,
-          }),
-        ])
+        const modelsRes = await LlmService.listBuiltinGenerationModelsApiV1LlmBuiltinModelsGet({
+          category: 'video',
+        })
         if (!active) return
-        const providers = (providersRes.data?.items ?? []) as ProviderRead[]
-        const activeProviderIds = new Set(
-          providers
-            .filter((provider) => provider.status !== 'disabled')
-            .map((provider) => provider.id),
-        )
-        const providerNameById = new Map(providers.map((provider) => [provider.id, provider.name]))
-        const items = ((modelsRes.data?.items ?? []) as ModelRead[])
-          .filter((model) => model.category === 'video')
-          .filter((model) => activeProviderIds.size === 0 || activeProviderIds.has(model.provider_id))
-          .map((model) => ({
-            ...model,
-            provider_name: providerNameById.get(model.provider_id) ?? model.provider_id,
-          }))
+        const items = ((modelsRes.data ?? []) as VideoModelOption[]).filter((model) => model.category === 'video')
         setVideoModels(items)
         setSelectedVideoModelId((prev) => {
           if (prev && items.some((item) => item.id === prev)) return prev
-          return items[0]?.id ?? null
+          return items.find((item) => item.recommended)?.id ?? items[0]?.id ?? null
         })
       } catch {
         if (active) {
@@ -2894,6 +2866,7 @@ function Inspector(props: {
           prompt: (derived.prompt || '').trim(),
           images: derived.images,
           ratio,
+          model_id: selectedVideoModelId,
         } as any,
       })
       return {
@@ -3931,6 +3904,10 @@ function Inspector(props: {
       message.warning('请先选择一个分镜')
       return
     }
+    if (!selectedVideoModelId) {
+      message.warning('请先选择视频模型')
+      return
+    }
     const { referenceMode, images } = buildVideoRefSelection()
     const nextContext = { referenceMode, images }
     videoPromptDraft.hydrate({
@@ -3965,6 +3942,10 @@ function Inspector(props: {
   const submitVideoGeneration = async () => {
     if (!selectedShot?.id) {
       message.warning('请先选择一个分镜')
+      return
+    }
+    if (!selectedVideoModelId) {
+      message.warning('请先选择视频模型')
       return
     }
     if (!resolveVideoRatioForRequest()) {
@@ -5065,7 +5046,7 @@ function Inspector(props: {
                               <div className="py-3 text-center text-xs text-gray-400">加载中...</div>
                             ) : videoModels.length === 0 ? (
                               <div className="py-3 text-center text-xs text-gray-400">
-                                暂无可用视频模型，请先在模型管理中配置
+                                暂无可用视频模型
                               </div>
                             ) : (
                               <div className="space-y-1">
@@ -5091,11 +5072,10 @@ function Inspector(props: {
                                     ].join(' ')}
                                   >
                                     <div className="flex-1 min-w-0">
-                                      <div className="truncate text-sm font-medium text-gray-800">{model.name}</div>
+                                      <div className="truncate text-sm font-medium text-gray-800">{model.display_name || model.name}</div>
                                       <div className="mt-0.5 flex items-center gap-1.5">
                                         <Tag className="m-0 flex-shrink-0 px-1 py-0 text-[10px] leading-4">{model.provider_name}</Tag>
                                       </div>
-                                      {model.description ? <div className="mt-1 text-xs text-gray-500">{model.description}</div> : null}
                                     </div>
                                     {selectedVideoModelId === model.id && <CheckOutlined className="mt-0.5 flex-shrink-0 text-blue-500" />}
                                   </div>
@@ -5113,7 +5093,7 @@ function Inspector(props: {
                           className="text-left"
                           style={{ justifyContent: 'flex-start' }}
                         >
-                          {selectedVideoModel ? selectedVideoModel.name : '选择模型'}
+                          {selectedVideoModel ? (selectedVideoModel.display_name || selectedVideoModel.name) : '选择模型'}
                         </Button>
                       </Popover>
                       <Button type="primary" block icon={<VideoCameraOutlined />} loading={videoPromptPreviewSubmitting || videoTaskPolling} onClick={() => void openVideoPromptPreview()}>

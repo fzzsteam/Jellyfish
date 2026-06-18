@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -7,6 +8,7 @@ from app.core.db import async_session_maker
 from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore, TaskManager
 from app.core.task_manager.types import TaskStatus
 from app.core.contracts.image_generation import ImageGenerationInput, ImageGenerationResult
+from app.core.contracts.generation_models import get_builtin_generation_model
 from app.core.contracts.provider import ProviderConfig
 from app.core.tasks import ImageGenerationTask
 from app.models.studio import (
@@ -33,6 +35,8 @@ from app.services.studio.file_usages import (
 )
 from app.services.studio.asset_image_candidates import attach_asset_image_candidate
 from app.services.studio.shot_status import mark_shot_generating, recompute_shot_status
+from app.models.llm import ModelCategoryKey
+from app.services.llm.provider_resolver import resolve_provider_config_by_key
 from app.services.studio.image_tasks import load_provider_config, resolve_image_model
 from app.services.worker.async_task_support import cancel_if_requested_async
 from app.services.worker.task_logging import log_task_event, log_task_failure
@@ -312,8 +316,25 @@ async def create_image_task_and_link(
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
 
-    model = await resolve_image_model(db, model_id)
-    provider_cfg = await load_provider_config(db, model.provider_id)
+    builtin_model = get_builtin_generation_model(model_id)
+    if builtin_model is not None:
+        if builtin_model.category != "image":
+            raise HTTPException(status_code=400, detail=f"Built-in model is not an image model: {model_id}")
+        resolved_provider = await resolve_provider_config_by_key(
+            db,
+            provider_key=builtin_model.provider,
+            category=ModelCategoryKey.image,
+        )
+        provider_cfg = ProviderConfig(
+            provider=resolved_provider.provider_key,  # type: ignore[arg-type]
+            api_key=resolved_provider.api_key,
+            base_url=resolved_provider.base_url,
+        )
+        model_name = builtin_model.name
+    else:
+        model = await resolve_image_model(db, model_id)
+        provider_cfg = await load_provider_config(db, model.provider_id)
+        model_name = model.name
 
     run_args: dict = {
         "provider": provider_cfg.provider,
@@ -323,7 +344,7 @@ async def create_image_task_and_link(
         "relation_entity_id": relation_entity_id,
         "input": {
             "prompt": prompt,
-            "model": model.name,
+            "model": model_name,
             "target_ratio": target_ratio,
             "resolution_profile": resolution_profile,
             "purpose": purpose,

@@ -1,10 +1,11 @@
-"""镜头视频生成准备度聚合服务。"""
+"""Shot video generation readiness aggregation service."""
 
 from __future__ import annotations
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.contracts.generation_models import get_recommended_builtin_generation_model
 from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider
 from app.models.studio import (
     Shot,
@@ -13,13 +14,14 @@ from app.models.studio import (
     ShotDetail,
     ShotExtractedCandidate,
     ShotExtractedDialogueCandidate,
-    ShotFrameType,
     ShotFrameImage,
+    ShotFrameType,
 )
 from app.models.task import GenerationTask, GenerationTaskStatus
 from app.models.task_links import GenerationTaskLink
 from app.schemas.studio.shots import ShotVideoReadinessCheck, ShotVideoReadinessRead
 from app.services.common import entity_not_found
+from app.services.llm.provider_resolver import resolve_provider_config_by_key
 from app.services.studio.generation.video import (
     build_video_base_draft,
     build_video_context,
@@ -44,10 +46,12 @@ _ACTIVE_TASK_STATUSES = (
 
 
 def _check(key: str, ok: bool, message: str) -> ShotVideoReadinessCheck:
+    """Create one normalized readiness check item for the panel."""
     return ShotVideoReadinessCheck(key=key, ok=ok, message=message)
 
 
 async def _count_pending_candidates(db: AsyncSession, *, shot_id: str) -> tuple[int, int]:
+    """Count pending extracted asset and dialogue candidates for a shot."""
     asset_stmt = (
         select(func.count(ShotExtractedCandidate.id))
         .where(ShotExtractedCandidate.shot_id == shot_id)
@@ -62,6 +66,7 @@ async def _count_pending_candidates(db: AsyncSession, *, shot_id: str) -> tuple[
 
 
 async def _has_active_video_task(db: AsyncSession, *, shot_id: str) -> bool:
+    """Return whether the shot already has a running video generation task."""
     stmt = (
         select(func.count(GenerationTask.id))
         .select_from(GenerationTaskLink)
@@ -80,6 +85,7 @@ async def _reference_frames_ready(
     shot_id: str,
     reference_mode: str,
 ) -> ShotVideoReadinessCheck:
+    """Check whether all reference frames required by the selected mode exist."""
     required_frames = REQUIRED_FRAMES_BY_MODE.get(reference_mode)
     if required_frames is None:
         return _check("reference_frames_ready", False, f"未知参考模式：{reference_mode}")
@@ -99,13 +105,27 @@ async def _reference_frames_ready(
 
 
 async def _video_model_and_provider_ready(db: AsyncSession) -> tuple[ShotVideoReadinessCheck, ShotVideoReadinessCheck]:
+    """Check video model availability using DB defaults or built-in model fallback."""
     settings = await db.get(ModelSettings, 1)
     model_id = settings.default_video_model_id if settings else None
     if not model_id:
+        builtin_model = get_recommended_builtin_generation_model("video")
+        try:
+            await resolve_provider_config_by_key(
+                db,
+                provider_key=builtin_model.provider,
+                category=ModelCategoryKey.video,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return (
+                _check("video_model_ready", True, f"使用内置视频模型：{builtin_model.display_name}"),
+                _check("provider_ready", False, f"内置视频模型供应商不可用：{exc}"),
+            )
         return (
-            _check("video_model_ready", False, "未配置默认视频模型"),
-            _check("provider_ready", False, "未配置默认视频模型，无法检查供应商"),
+            _check("video_model_ready", True, f"使用内置视频模型：{builtin_model.display_name}"),
+            _check("provider_ready", True, "内置视频模型供应商可用"),
         )
+
     model = await db.get(Model, model_id)
     if model is None:
         return (
@@ -140,7 +160,7 @@ async def get_shot_video_readiness(
     shot_id: str,
     reference_mode: str,
 ) -> ShotVideoReadinessRead:
-    """实时聚合镜头视频生成准备度，不写入数据库状态。"""
+    """Aggregate live shot readiness checks without mutating shot state."""
     shot = await db.get(Shot, shot_id)
     if shot is None:
         raise ValueError(entity_not_found("Shot"))

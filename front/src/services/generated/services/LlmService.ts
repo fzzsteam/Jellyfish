@@ -3,6 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { ApiResponse_ImageGenerationOptionsRead_ } from '../models/ApiResponse_ImageGenerationOptionsRead_';
+import type { ApiResponse_list_BuiltinGenerationModelRead__ } from '../models/ApiResponse_list_BuiltinGenerationModelRead__';
 import type { ApiResponse_list_ProviderSupportedRead__ } from '../models/ApiResponse_list_ProviderSupportedRead__';
 import type { ApiResponse_ModelRead_ } from '../models/ApiResponse_ModelRead_';
 import type { ApiResponse_ModelSettingsRead_ } from '../models/ApiResponse_ModelSettingsRead_';
@@ -105,6 +106,31 @@ export class LlmService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/llm/providers/supported',
+            query: {
+                'category': category,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * List built-in generation models exposed to image and video generation panels
+     * Expose platform-owned generation models so users do not manage model rows.
+     * @returns ApiResponse_list_BuiltinGenerationModelRead__ Successful Response
+     * @throws ApiError
+     */
+    public static listBuiltinGenerationModelsApiV1LlmBuiltinModelsGet({
+        category,
+    }: {
+        /**
+         * Filter by model category: image/video
+         */
+        category?: (ModelCategoryKey | null),
+    }): CancelablePromise<ApiResponse_list_BuiltinGenerationModelRead__> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/llm/builtin-models',
             query: {
                 'category': category,
             },

@@ -72,6 +72,19 @@ class ProviderSupportedRead(BaseModel):
     is_experimental: bool = Field(False, description="是否实验性供应商")
 
 
+class BuiltinGenerationModelRead(BaseModel):
+    """System-owned generation model option shown directly in generation panels."""
+
+    id: str = Field(..., description="Stable built-in model id passed by generation requests")
+    provider: str = Field(..., description="Provider stable key")
+    provider_name: str = Field(..., description="Provider display name")
+    category: ModelCategoryKey = Field(..., description="Model category: image/video")
+    name: str = Field(..., description="Provider model name sent to the adapter")
+    display_name: str = Field(..., description="UI display name")
+    description: str = Field("", description="Usage scenario description")
+    recommended: bool = Field(False, description="Whether this is the default model for the category")
+
+
 class VideoGenerationOptionsRead(BaseModel):
     """当前默认视频模型对应的生成参数选项。"""
 
