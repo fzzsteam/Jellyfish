@@ -77,6 +77,7 @@ async def file_id_to_data_url(db: AsyncSession, *, file_id: str) -> str:
 async def preview_prompt_and_images(
     db: AsyncSession,
     *,
+    user_id: str,
     shot_id: str,
     reference_mode: str,
     prompt: str | None,
@@ -90,7 +91,7 @@ async def preview_prompt_and_images(
         reference_mode=reference_mode,
         images=images,
     )
-    submission = await build_video_submission_payload(db, base=base, context=context)
+    submission = await build_video_submission_payload(db, user_id=user_id, base=base, context=context)
     if not submission.prompt:
         raise HTTPException(status_code=400, detail="prompt is required")
     prompt_preview_payload = submission.extra.get("prompt_preview")
@@ -100,8 +101,10 @@ async def preview_prompt_and_images(
     return submission.prompt, submission.images, None
 
 
-async def resolve_default_video_model(db: AsyncSession) -> Model:
-    settings_row = await db.get(ModelSettings, 1)
+async def resolve_default_video_model(db: AsyncSession, *, user_id: str) -> Model:
+    settings_row = (
+        await db.execute(select(ModelSettings).where(ModelSettings.user_id == user_id))
+    ).scalar_one_or_none()
     model_id = settings_row.default_video_model_id if settings_row else None
     if not model_id:
         raise HTTPException(
@@ -147,13 +150,14 @@ async def resolve_effective_video_options(
 async def build_run_args(
     db: AsyncSession,
     *,
+    user_id: str,
     shot_id: str,
     reference_mode: str,
     prompt: str | None,
     images: list[str],
     ratio: str | None,
 ) -> dict:
-    model = await resolve_default_video_model(db)
+    model = await resolve_default_video_model(db, user_id=user_id)
     provider_cfg = await load_provider_config_by_model(db, model)
     shot_detail = await validate_shot_and_duration(db, shot_id)
     resolved_ratio = await resolve_effective_video_options(requested_ratio=ratio)
@@ -164,7 +168,7 @@ async def build_run_args(
         reference_mode=reference_mode,
         images=images,
     )
-    submission = await build_video_submission_payload(db, base=base, context=context)
+    submission = await build_video_submission_payload(db, user_id=user_id, base=base, context=context)
     validate_images_count(reference_mode, submission.images)
 
     final_prompt = submission.prompt.strip()

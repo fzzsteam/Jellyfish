@@ -36,7 +36,7 @@ def _override_db():
 def test_divide_async_returns_created_task_payload(client, monkeypatch) -> None:
     called: dict[str, str] = {}
 
-    async def _fake_create_divide_task(_db, *, chapter_id: str, script_text: str, write_to_db: bool):
+    async def _fake_create_divide_task(_db, *, user_id: str, chapter_id: str, script_text: str, write_to_db: bool):
         assert chapter_id == "chapter-1"
         assert script_text == "一段剧本"
         assert write_to_db is True
@@ -80,6 +80,7 @@ def test_extract_async_returns_created_task_payload(client, monkeypatch) -> None
     async def _fake_create_extract_task(
         _db,
         *,
+        user_id: str,
         project_id: str,
         chapter_id: str,
         script_division: dict,
@@ -133,6 +134,7 @@ def test_merge_entities_async_returns_created_task_payload(client, monkeypatch) 
     async def _fake_create_merge_task(
         _db,
         *,
+        user_id: str,
         relation_entity_id: str,
         all_shot_extractions: list[dict],
         historical_library: dict | None,
@@ -193,7 +195,7 @@ def test_merge_entities_async_returns_created_task_payload(client, monkeypatch) 
 def test_check_consistency_async_returns_created_task_payload(client, monkeypatch) -> None:
     called: dict[str, str] = {}
 
-    async def _fake_create_consistency_task(_db, *, relation_entity_id: str, script_text: str):
+    async def _fake_create_consistency_task(_db, *, user_id: str, relation_entity_id: str, script_text: str):
         assert relation_entity_id == "chapter-1"
         assert script_text == "完整剧本"
         return AsyncTaskCreateResult(
@@ -242,6 +244,7 @@ def test_analyze_variants_async_returns_created_task_payload(client, monkeypatch
     async def _fake_create_variant_task(
         _db,
         *,
+        user_id: str,
         relation_entity_id: str,
         merged_library: dict,
         all_shot_extractions: list[dict],
@@ -296,7 +299,7 @@ def test_analyze_variants_async_returns_created_task_payload(client, monkeypatch
 def test_analyze_character_portrait_async_returns_created_task_payload(client, monkeypatch) -> None:
     called: dict[str, str] = {}
 
-    async def _fake_create(_db, *, relation_entity_id: str, character_context: str | None, character_description: str):
+    async def _fake_create(_db, *, user_id: str, relation_entity_id: str, character_context: str | None, character_description: str):
         assert relation_entity_id == "chapter-1"
         assert character_context is None
         assert character_description == "人物描述"
@@ -328,7 +331,7 @@ def test_analyze_character_portrait_async_returns_created_task_payload(client, m
 def test_analyze_prop_info_async_returns_created_task_payload(client, monkeypatch) -> None:
     called: dict[str, str] = {}
 
-    async def _fake_create(_db, *, relation_entity_id: str, prop_context: str | None, prop_description: str):
+    async def _fake_create(_db, *, user_id: str, relation_entity_id: str, prop_context: str | None, prop_description: str):
         assert relation_entity_id == "chapter-1"
         assert prop_context is None
         assert prop_description == "道具描述"
@@ -358,7 +361,7 @@ def test_analyze_prop_info_async_returns_created_task_payload(client, monkeypatc
 def test_analyze_scene_info_async_returns_created_task_payload(client, monkeypatch) -> None:
     called: dict[str, str] = {}
 
-    async def _fake_create(_db, *, relation_entity_id: str, scene_context: str | None, scene_description: str):
+    async def _fake_create(_db, *, user_id: str, relation_entity_id: str, scene_context: str | None, scene_description: str):
         assert relation_entity_id == "chapter-1"
         assert scene_context is None
         assert scene_description == "场景描述"
@@ -388,7 +391,7 @@ def test_analyze_scene_info_async_returns_created_task_payload(client, monkeypat
 def test_analyze_costume_info_async_returns_created_task_payload(client, monkeypatch) -> None:
     called: dict[str, str] = {}
 
-    async def _fake_create(_db, *, relation_entity_id: str, costume_context: str | None, costume_description: str):
+    async def _fake_create(_db, *, user_id: str, relation_entity_id: str, costume_context: str | None, costume_description: str):
         assert relation_entity_id == "chapter-1"
         assert costume_context is None
         assert costume_description == "服装描述"
@@ -418,7 +421,7 @@ def test_analyze_costume_info_async_returns_created_task_payload(client, monkeyp
 def test_optimize_script_async_returns_created_task_payload(client, monkeypatch) -> None:
     called: dict[str, str] = {}
 
-    async def _fake_create(_db, *, relation_entity_id: str, script_text: str, consistency: dict):
+    async def _fake_create(_db, *, user_id: str, relation_entity_id: str, script_text: str, consistency: dict):
         assert relation_entity_id == "chapter-opt"
         assert script_text == "原始剧本"
         assert consistency == {"has_issues": True}
@@ -455,7 +458,7 @@ def test_optimize_script_async_returns_created_task_payload(client, monkeypatch)
 def test_simplify_script_async_returns_created_task_payload(client, monkeypatch) -> None:
     called: dict[str, str] = {}
 
-    async def _fake_create(_db, *, relation_entity_id: str, script_text: str):
+    async def _fake_create(_db, *, user_id: str, relation_entity_id: str, script_text: str):
         assert relation_entity_id == "chapter-simplify"
         assert script_text == "原始剧本"
         return AsyncTaskCreateResult("task-simplify-1", TaskStatus.pending, False, SCRIPT_SIMPLIFICATION_RELATION_TYPE, "chapter-simplify")

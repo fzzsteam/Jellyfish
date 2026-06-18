@@ -35,6 +35,7 @@ class TaskManager:
         *,
         task: BaseTask,
         mode: DeliveryMode,
+        user_id: str,
         task_kind: str | None = None,
         run_args: dict[str, Any] | None = None,
     ) -> TaskRecord:
@@ -43,6 +44,7 @@ class TaskManager:
         参数：
         - task: 实际要执行的 Task 对象，必须实现 run/status/is_done/get_result
         - mode: 结果交付方式（流式 / 任务+轮询）
+        - user_id: 发起任务的用户 ID（按用户隔离归属，执行器据此解析该用户的模型配置）
         - run_args: 传给 task.run 的参数（会序列化到 payload，便于后续 worker 使用）
         """
         payload: dict[str, Any] = {
@@ -54,6 +56,7 @@ class TaskManager:
             payload=payload,
             mode=mode,
             task_kind=str(payload["task_kind"]),
+            user_id=user_id,
         )
 
     async def start(self, *, task_id: str) -> Optional[AsyncIterator[Any]]:

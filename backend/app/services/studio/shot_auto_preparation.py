@@ -663,12 +663,15 @@ def _get_or_create_image_slot_sync(
 def _load_image_run_args_sync(
     db: Session,
     *,
+    user_id: str,
     relation_type: str,
     relation_entity_id: str,
     prompt: str,
 ) -> dict | None:
-    """从 DB 加载默认图片模型配置并构建 run_args；未配置时返回 None。"""
-    settings = db.get(ModelSettings, 1)
+    """从 DB 加载该用户默认图片模型配置并构建 run_args；未配置时返回 None。"""
+    settings = db.execute(
+        select(ModelSettings).where(ModelSettings.user_id == user_id)
+    ).scalar_one_or_none()
     if settings is None or not settings.default_image_model_id:
         return None
     model = db.get(Model, settings.default_image_model_id)
@@ -698,15 +701,17 @@ def _load_image_run_args_sync(
 def _schedule_image_task_sync(
     db: Session,
     *,
+    user_id: str,
     run_args: dict,
     summary: AutoPreparationSummary,
 ) -> None:
-    """在当前事务的 SAVEPOINT 中创建图片生成任务记录；失败则静默回滚并跳过。"""
+    """在当前事务的 SAVEPOINT 中创建归属 user_id 的图片生成任务记录；失败则静默回滚并跳过。"""
     task_id = str(_uuid_mod.uuid4())
     try:
         with db.begin_nested():
             db.add(GenerationTask(
                 id=task_id,
+                user_id=user_id,
                 mode=GenerationDeliveryMode.async_polling,
                 task_kind="image_generation",
                 status=GenerationTaskStatus.pending,
@@ -732,6 +737,7 @@ def _schedule_image_task_sync(
 def _auto_create_and_link_sync(
     db: Session,
     *,
+    user_id: str,
     candidate: ShotExtractedCandidate,
     project_id: str,
     chapter_id: str,
@@ -806,10 +812,14 @@ def _auto_create_and_link_sync(
         if slot_info is not None:
             relation_type, relation_entity_id = slot_info
             run_args = _load_image_run_args_sync(
-                db, relation_type=relation_type, relation_entity_id=relation_entity_id, prompt=prompt
+                db,
+                user_id=user_id,
+                relation_type=relation_type,
+                relation_entity_id=relation_entity_id,
+                prompt=prompt,
             )
             if run_args is not None:
-                _schedule_image_task_sync(db, run_args=run_args, summary=summary)
+                _schedule_image_task_sync(db, user_id=user_id, run_args=run_args, summary=summary)
     except Exception:  # noqa: BLE001
         _logger.warning("auto_prep: 图片生成调度失败，候选 '%s' 仍将完成关联", candidate_name)
 
@@ -821,6 +831,7 @@ def _auto_create_and_link_sync(
 def auto_prepare_chapter_shots_sync(
     db: Session,
     *,
+    user_id: str,
     project_id: str,
     chapter_id: str,
 ) -> AutoPreparationSummary:
@@ -889,12 +900,13 @@ def auto_prepare_chapter_shots_sync(
                     relation_type, relation_entity_id = slot_info
                     run_args = _load_image_run_args_sync(
                         db,
+                        user_id=user_id,
                         relation_type=relation_type,
                         relation_entity_id=relation_entity_id,
                         prompt=prompt,
                     )
                     if run_args is not None:
-                        _schedule_image_task_sync(db, run_args=run_args, summary=summary)
+                        _schedule_image_task_sync(db, user_id=user_id, run_args=run_args, summary=summary)
             except Exception:  # noqa: BLE001
                 _logger.warning(
                     "auto_prep: 第一轮角色图片调度失败，候选 '%s'", candidate.candidate_name
@@ -930,6 +942,7 @@ def auto_prepare_chapter_shots_sync(
         candidate_type = ShotCandidateType(str(candidate.candidate_type))
         succeeded = _auto_create_and_link_sync(
             db,
+            user_id=user_id,
             candidate=candidate,
             project_id=project_id,
             chapter_id=chapter_id,

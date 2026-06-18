@@ -57,6 +57,7 @@ async def test_create_divide_task_creates_task_and_link() -> None:
     async with SessionLocal() as db:
         result = await create_divide_task(
             db,
+            user_id="test-user",
             chapter_id="chapter-1",
             script_text="一段剧本",
             write_to_db=True,
@@ -98,12 +99,14 @@ async def test_create_divide_task_reuses_existing_active_task() -> None:
     async with SessionLocal() as db:
         first = await create_divide_task(
             db,
+            user_id="test-user",
             chapter_id="chapter-1",
             script_text="第一版",
             write_to_db=True,
         )
         second = await create_divide_task(
             db,
+            user_id="test-user",
             chapter_id="chapter-1",
             script_text="第二版",
             write_to_db=True,
@@ -141,7 +144,7 @@ async def test_request_cancel_marks_pending_task_cancelled_immediately() -> None
 
     async with SessionLocal() as db:
         store = SqlAlchemyTaskStore(db)
-        task = await store.create(payload={"k": "v"}, mode=DeliveryMode.async_polling, task_kind="test_task")
+        task = await store.create(payload={"k": "v"}, mode=DeliveryMode.async_polling, task_kind="test_task", user_id="test-user")
         rec = await store.request_cancel(task.id, "用户取消")
         assert rec is not None
         assert rec.cancel_requested is True
@@ -169,6 +172,7 @@ async def test_create_extract_task_creates_task_and_link() -> None:
     async with SessionLocal() as db:
         result = await create_extract_task(
             db,
+            user_id="test-user",
             project_id="project-1",
             chapter_id="chapter-1",
             script_division={"shots": []},
@@ -212,6 +216,7 @@ async def test_create_extract_task_reuses_existing_active_task() -> None:
     async with SessionLocal() as db:
         first = await create_extract_task(
             db,
+            user_id="test-user",
             project_id="project-1",
             chapter_id="chapter-1",
             script_division={"shots": []},
@@ -220,6 +225,7 @@ async def test_create_extract_task_reuses_existing_active_task() -> None:
         )
         second = await create_extract_task(
             db,
+            user_id="test-user",
             project_id="project-1",
             chapter_id="chapter-1",
             script_division={"shots": [{"index": 1}]},
@@ -261,6 +267,7 @@ async def test_create_merge_task_creates_task_and_link() -> None:
     async with SessionLocal() as db:
         result = await create_merge_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             all_shot_extractions=[],
             historical_library=None,
@@ -302,6 +309,7 @@ async def test_create_merge_task_reuses_existing_active_task() -> None:
     async with SessionLocal() as db:
         first = await create_merge_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             all_shot_extractions=[],
             historical_library=None,
@@ -311,6 +319,7 @@ async def test_create_merge_task_reuses_existing_active_task() -> None:
         )
         second = await create_merge_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             all_shot_extractions=[{"a": 1}],
             historical_library={"x": 1},
@@ -344,6 +353,7 @@ async def test_create_consistency_task_creates_task_and_link() -> None:
     async with SessionLocal() as db:
         result = await create_consistency_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             script_text="完整剧本",
         )
@@ -381,11 +391,13 @@ async def test_create_consistency_task_reuses_existing_active_task() -> None:
     async with SessionLocal() as db:
         first = await create_consistency_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             script_text="完整剧本 A",
         )
         second = await create_consistency_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             script_text="完整剧本 B",
         )
@@ -415,6 +427,7 @@ async def test_create_variant_task_creates_task_and_link() -> None:
     async with SessionLocal() as db:
         result = await create_variant_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             merged_library={},
             all_shot_extractions=[],
@@ -454,6 +467,7 @@ async def test_create_variant_task_reuses_existing_active_task() -> None:
     async with SessionLocal() as db:
         first = await create_variant_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             merged_library={},
             all_shot_extractions=[],
@@ -461,6 +475,7 @@ async def test_create_variant_task_reuses_existing_active_task() -> None:
         )
         second = await create_variant_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             merged_library={"characters": []},
             all_shot_extractions=[{"a": 1}],
@@ -492,6 +507,7 @@ async def test_create_character_portrait_task_creates_task_and_link() -> None:
     async with SessionLocal() as db:
         result = await create_character_portrait_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             character_context=None,
             character_description="人物描述",
@@ -515,6 +531,7 @@ async def test_create_prop_info_task_creates_task_and_link() -> None:
     async with SessionLocal() as db:
         result = await create_prop_info_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             prop_context=None,
             prop_description="道具描述",
@@ -538,6 +555,7 @@ async def test_create_scene_info_task_creates_task_and_link() -> None:
     async with SessionLocal() as db:
         result = await create_scene_info_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             scene_context=None,
             scene_description="场景描述",
@@ -561,6 +579,7 @@ async def test_create_costume_info_task_creates_task_and_link() -> None:
     async with SessionLocal() as db:
         result = await create_costume_info_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             costume_context=None,
             costume_description="服装描述",
@@ -584,6 +603,7 @@ async def test_create_script_optimization_task_creates_task_and_link() -> None:
     async with SessionLocal() as db:
         result = await create_script_optimization_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             script_text="原始剧本",
             consistency={"has_issues": True},
@@ -607,6 +627,7 @@ async def test_create_script_simplification_task_creates_task_and_link() -> None
     async with SessionLocal() as db:
         result = await create_script_simplification_task(
             db,
+            user_id="test-user",
             relation_entity_id="chapter-1",
             script_text="原始剧本",
         )
@@ -656,6 +677,7 @@ async def test_run_extract_task_marks_cancelled_when_cancel_requested_before_sta
     async with SessionLocal() as db:
         created = await create_extract_task(
             db,
+            user_id="test-user",
             project_id="project-1",
             chapter_id="chapter-1",
             script_division={"shots": []},
@@ -698,7 +720,7 @@ async def test_run_extract_task_marks_cancelled_at_stage_boundary(monkeypatch, t
     monkeypatch.setattr("app.services.script_processing_worker.sync_session_maker", SyncSessionLocal)
     monkeypatch.setattr("app.services.script_processing_worker.ElementExtractorAgent", _FakeExtractorAgent)
 
-    def _fake_llm(_db, *, thinking: bool):  # noqa: ARG001
+    def _fake_llm(_db, *, user_id=None, thinking: bool):  # noqa: ARG001
         return object()
 
     def _cancel_during_sync(db, chapter_id: str, draft) -> None:  # noqa: ANN001
@@ -726,6 +748,7 @@ async def test_run_extract_task_marks_cancelled_at_stage_boundary(monkeypatch, t
     async with SessionLocal() as db:
         created = await create_extract_task(
             db,
+            user_id="test-user",
             project_id="project-1",
             chapter_id="chapter-1",
             script_division={"shots": []},

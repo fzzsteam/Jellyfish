@@ -33,7 +33,8 @@ from app.chains.agents.script_processing_agents import (
     ScriptSimplificationResult,
     StudioScriptExtractionDraft,
 )
-from app.dependencies import get_db, get_llm, get_nothinking_llm
+from app.dependencies import get_current_user, get_db, get_llm, get_nothinking_llm
+from app.models.user import User
 from app.schemas.common import ApiResponse, success_response
 from app.schemas.skills.character_portrait import CharacterPortraitAnalysisResult
 from app.schemas.skills.costume_info_analysis import CostumeInfoAnalysisResult
@@ -110,12 +111,14 @@ class ScriptDividerRequest(BaseModel):
 async def divide_script_async(
     request: ScriptDividerRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[AsyncTaskCreateRead]:
     if not request.chapter_id:
         raise HTTPException(status_code=400, detail=required_field("chapter_id", when="divide-async"))
 
     task_info = await create_divide_task(
         db,
+        user_id=current_user.id,
         chapter_id=request.chapter_id,
         script_text=request.script_text,
         write_to_db=request.write_to_db,
@@ -224,6 +227,7 @@ class EntityMergerRequest(BaseModel):
 async def merge_entities_async(
     request: EntityMergerRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[AsyncTaskCreateRead]:
     relation_entity_id = pick_merge_relation_entity_id(
         chapter_id=request.chapter_id,
@@ -231,6 +235,7 @@ async def merge_entities_async(
     )
     task_info = await create_merge_task(
         db,
+        user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         all_shot_extractions=request.all_shot_extractions,
         historical_library=request.historical_library,
@@ -333,6 +338,7 @@ class VariantAnalysisRequest(BaseModel):
 async def analyze_variants_async(
     request: VariantAnalysisRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[AsyncTaskCreateRead]:
     relation_entity_id = pick_variant_relation_entity_id(
         chapter_id=request.chapter_id,
@@ -340,6 +346,7 @@ async def analyze_variants_async(
     )
     task_info = await create_variant_task(
         db,
+        user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         merged_library=request.merged_library,
         all_shot_extractions=request.all_shot_extractions,
@@ -419,6 +426,7 @@ class ScriptConsistencyCheckRequest(BaseModel):
 async def check_consistency_async(
     request: ScriptConsistencyCheckRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[AsyncTaskCreateRead]:
     relation_entity_id = pick_consistency_relation_entity_id(
         chapter_id=request.chapter_id,
@@ -426,6 +434,7 @@ async def check_consistency_async(
     )
     task_info = await create_consistency_task(
         db,
+        user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         script_text=request.script_text,
     )
@@ -501,6 +510,7 @@ class CharacterPortraitAnalysisRequest(BaseModel):
 async def analyze_character_portrait_async(
     request: CharacterPortraitAnalysisRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[AsyncTaskCreateRead]:
     relation_entity_id = pick_analysis_relation_entity_id(
         relation_entity_id=request.relation_entity_id,
@@ -510,6 +520,7 @@ async def analyze_character_portrait_async(
     )
     task_info = await create_character_portrait_task(
         db,
+        user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         character_context=request.character_context,
         character_description=request.character_description,
@@ -578,6 +589,7 @@ class PropInfoAnalysisRequest(BaseModel):
 async def analyze_prop_info_async(
     request: PropInfoAnalysisRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[AsyncTaskCreateRead]:
     relation_entity_id = pick_analysis_relation_entity_id(
         relation_entity_id=request.relation_entity_id,
@@ -587,6 +599,7 @@ async def analyze_prop_info_async(
     )
     task_info = await create_prop_info_task(
         db,
+        user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         prop_context=request.prop_context,
         prop_description=request.prop_description,
@@ -655,6 +668,7 @@ class SceneInfoAnalysisRequest(BaseModel):
 async def analyze_scene_info_async(
     request: SceneInfoAnalysisRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[AsyncTaskCreateRead]:
     relation_entity_id = pick_analysis_relation_entity_id(
         relation_entity_id=request.relation_entity_id,
@@ -664,6 +678,7 @@ async def analyze_scene_info_async(
     )
     task_info = await create_scene_info_task(
         db,
+        user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         scene_context=request.scene_context,
         scene_description=request.scene_description,
@@ -732,6 +747,7 @@ class CostumeInfoAnalysisRequest(BaseModel):
 async def analyze_costume_info_async(
     request: CostumeInfoAnalysisRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[AsyncTaskCreateRead]:
     relation_entity_id = pick_analysis_relation_entity_id(
         relation_entity_id=request.relation_entity_id,
@@ -741,6 +757,7 @@ async def analyze_costume_info_async(
     )
     task_info = await create_costume_info_task(
         db,
+        user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         costume_context=request.costume_context,
         costume_description=request.costume_description,
@@ -813,6 +830,7 @@ class ScriptSimplifyRequest(BaseModel):
 async def optimize_script_async(
     request: ScriptOptimizeRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[AsyncTaskCreateRead]:
     relation_entity_id = pick_analysis_relation_entity_id(
         chapter_id=request.chapter_id,
@@ -821,6 +839,7 @@ async def optimize_script_async(
     )
     task_info = await create_script_optimization_task(
         db,
+        user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         script_text=request.script_text,
         consistency=request.consistency,
@@ -899,6 +918,7 @@ async def simplify_script(
 async def simplify_script_async(
     request: ScriptSimplifyRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[AsyncTaskCreateRead]:
     relation_entity_id = pick_analysis_relation_entity_id(
         chapter_id=request.chapter_id,
@@ -907,6 +927,7 @@ async def simplify_script_async(
     )
     task_info = await create_script_simplification_task(
         db,
+        user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         script_text=request.script_text,
     )
@@ -946,9 +967,11 @@ class ScriptExtractRequest(BaseModel):
 async def extract_script_async(
     request: ScriptExtractRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[AsyncTaskCreateRead]:
     task_info = await create_extract_task(
         db,
+        user_id=current_user.id,
         project_id=request.project_id,
         chapter_id=request.chapter_id,
         script_division=request.script_division,

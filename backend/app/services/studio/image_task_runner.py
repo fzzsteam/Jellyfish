@@ -298,6 +298,7 @@ async def _resolve_related_shot_id(
 async def create_image_task_and_link(
     *,
     db: AsyncSession,
+    user_id: str,
     model_id: str | None,
     relation_type: str,
     relation_entity_id: str,
@@ -308,11 +309,11 @@ async def create_image_task_and_link(
     purpose: str = "generic",
     render_context: dict | None = None,
 ) -> str:
-    """创建图片生成任务，并建立任务关联。"""
+    """创建图片生成任务（归属 user_id），并建立任务关联；默认模型按用户解析。"""
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
 
-    model = await resolve_image_model(db, model_id)
+    model = await resolve_image_model(db, model_id, user_id=user_id)
     provider_cfg = await load_provider_config(db, model.provider_id)
 
     run_args: dict = {
@@ -337,6 +338,7 @@ async def create_image_task_and_link(
     task_record = await tm.create(
         task=_CreateOnlyTask(),
         mode=DeliveryMode.async_polling,
+        user_id=user_id,
         task_kind="image_generation",
         run_args=run_args,
     )

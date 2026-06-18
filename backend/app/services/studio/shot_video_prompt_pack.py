@@ -15,7 +15,7 @@ import re
 
 from fastapi import HTTPException, status
 from langchain_core.prompts import PromptTemplate as LcPromptTemplate
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -363,8 +363,10 @@ def _fallback_video_prompt(pack: ShotVideoPromptPackRead) -> str:
 async def _resolve_video_prompt_template(
     db: AsyncSession,
     *,
+    user_id: str,
     template_id: str | None,
 ) -> PromptTemplate | None:
+    """解析视频提示词模板：显式 id 优先；默认查询限定"当前用户自有 + 系统共享"（按用户隔离，放行 is_system）。"""
     if template_id:
         template = await db.get(PromptTemplate, template_id)
         if template is None:
@@ -375,7 +377,10 @@ async def _resolve_video_prompt_template(
 
     stmt = (
         select(PromptTemplate)
-        .where(PromptTemplate.category == PromptCategory.video_prompt)
+        .where(
+            PromptTemplate.category == PromptCategory.video_prompt,
+            or_(PromptTemplate.user_id == user_id, PromptTemplate.is_system.is_(True)),
+        )
         .order_by(PromptTemplate.is_default.desc(), PromptTemplate.updated_at.desc())
         .limit(1)
     )

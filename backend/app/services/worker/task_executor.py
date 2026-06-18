@@ -43,11 +43,12 @@ class WorkerTaskContext:
 class AbstractLLMResultGenerator(ABC):
     thinking: bool = True
 
-    def build_llm(self, db: Session) -> BaseChatModel:
-        return build_default_text_llm_sync(db, thinking=self.thinking)
+    def build_llm(self, db: Session, *, user_id: str) -> BaseChatModel:
+        # 按任务归属用户解析其默认文本模型（任务隔离）。
+        return build_default_text_llm_sync(db, user_id=user_id, thinking=self.thinking)
 
-    def generate(self, db: Session, run_args: dict[str, Any]) -> Any:
-        llm = self.build_llm(db)
+    def generate(self, db: Session, run_args: dict[str, Any], *, user_id: str) -> Any:
+        llm = self.build_llm(db, user_id=user_id)
         return self.generate_with_llm(llm, run_args)
 
     @abstractmethod

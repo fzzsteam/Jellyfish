@@ -12,7 +12,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.contracts.image_generation import ImageResolutionProfile, ImageTargetRatio
-from app.dependencies import get_db
+from app.dependencies import get_current_user, get_db
+from app.models.user import User
 from app.models.studio import (
     ShotDetail,
     ShotFrameType,
@@ -179,6 +180,7 @@ async def create_actor_image_generation_task(
     actor_id: str,
     body: StudioImageTaskRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[TaskCreated]:
     """为指定演员创建图片生成任务，并通过 `GenerationTaskLink` 关联。"""
     prompt = (body.prompt or "").strip()
@@ -197,6 +199,7 @@ async def create_actor_image_generation_task(
     ref_images = await _resolve_reference_image_refs_by_file_ids_service(db, file_ids=submission.images)
     task_id = await _create_image_task_and_link_service(
         db=db,
+        user_id=current_user.id,
         model_id=body.model_id,
         relation_type=submission.relation_type,
         relation_entity_id=submission.relation_entity_id,
@@ -216,9 +219,11 @@ async def render_actor_image_prompt(
     actor_id: str,
     body: StudioImageTaskRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[RenderedPromptResponse]:
     base = await _build_actor_image_base_draft_service(
         db,
+        user_id=current_user.id,
         actor_id=actor_id,
         image_id=body.image_id,
     )
@@ -238,6 +243,7 @@ async def create_asset_image_generation_task(
     asset_id: str,
     body: StudioImageTaskRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[TaskCreated]:
     """为道具/场景/服装创建图片生成任务。
 
@@ -263,6 +269,7 @@ async def create_asset_image_generation_task(
 
     task_id = await _create_image_task_and_link_service(
         db=db,
+        user_id=current_user.id,
         model_id=body.model_id,
         relation_type=submission.relation_type,
         relation_entity_id=submission.relation_entity_id,
@@ -283,9 +290,11 @@ async def render_asset_image_prompt(
     asset_id: str,
     body: StudioImageTaskRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[RenderedPromptResponse]:
     base = await _build_asset_image_base_draft_service(
         db,
+        user_id=current_user.id,
         asset_type=asset_type,
         asset_id=asset_id,
         image_id=body.image_id,
@@ -305,6 +314,7 @@ async def create_character_image_generation_task(
     character_id: str,
     body: StudioImageTaskRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[TaskCreated]:
     """为角色创建图片生成任务（对应 CharacterImage 业务）。
 
@@ -327,6 +337,7 @@ async def create_character_image_generation_task(
     ref_images = await _resolve_reference_image_refs_by_file_ids_service(db, file_ids=submission.images)
     task_id = await _create_image_task_and_link_service(
         db=db,
+        user_id=current_user.id,
         model_id=body.model_id,
         relation_type=submission.relation_type,
         relation_entity_id=submission.relation_entity_id,
@@ -346,9 +357,11 @@ async def render_character_image_prompt(
     character_id: str,
     body: StudioImageTaskRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[RenderedPromptResponse]:
     base = await _build_character_image_base_draft_service(
         db,
+        user_id=current_user.id,
         character_id=character_id,
         image_id=body.image_id,
     )
@@ -367,6 +380,7 @@ async def create_shot_frame_image_generation_task(
     shot_id: str,
     body: ShotFrameImageTaskRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[TaskCreated]:
     """为镜头分镜帧图片生成任务（基于 `shot_id + frame_type` 自动定位数据）。"""
     prompt = (body.prompt or "").strip()
@@ -433,6 +447,7 @@ async def create_shot_frame_image_generation_task(
     submission_extra = dict(submission.extra or {})
     task_id = await _create_image_task_and_link_service(
         db=db,
+        user_id=current_user.id,
         model_id=body.model_id,
         relation_type="shot_frame_image",
         relation_entity_id=str(shot_frame_image.id),

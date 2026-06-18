@@ -49,6 +49,7 @@ async def test_task_manager_create_persists_task_kind() -> None:
         record = await tm.create(
             task=_DummyTask(),
             mode=DeliveryMode.async_polling,
+            user_id="test-user",
             task_kind="script_divide",
             run_args={"chapter_id": "chapter-1"},
         )
@@ -73,6 +74,7 @@ def test_run_task_celery_routes_by_task_kind(monkeypatch, tmp_path) -> None:
         db.add(
             GenerationTask(
                 id="task-1",
+                user_id="test-user",
                 mode="async_polling",
                 task_kind="script_divide",
                 status="pending",
@@ -115,6 +117,7 @@ def test_enqueue_task_execution_records_executor(monkeypatch, tmp_path) -> None:
         db.add(
             GenerationTask(
                 id="task-2",
+                user_id="test-user",
                 mode="async_polling",
                 task_kind="script_extract",
                 status="pending",
@@ -157,6 +160,7 @@ def test_revoke_task_execution_revokes_celery_task(monkeypatch, tmp_path) -> Non
         db.add(
             GenerationTask(
                 id="task-revoke",
+                user_id="test-user",
                 mode="async_polling",
                 task_kind="video_generation",
                 status="running",
@@ -213,6 +217,7 @@ def test_async_delegating_executor_marks_failed_on_timeout(monkeypatch, tmp_path
         db.add(
             GenerationTask(
                 id="task-timeout",
+                user_id="test-user",
                 mode="async_polling",
                 task_kind="video_generation",
                 status="pending",
@@ -262,6 +267,7 @@ def test_async_delegating_executor_marks_cancelled_before_start(monkeypatch, tmp
         db.add(
             GenerationTask(
                 id="task-cancelled",
+                user_id="test-user",
                 mode="async_polling",
                 task_kind="image_generation",
                 status="running",
@@ -315,6 +321,7 @@ def test_async_delegating_executor_closes_db_in_same_event_loop(monkeypatch, tmp
         db.add(
             GenerationTask(
                 id="task-close-loop",
+                user_id="test-user",
                 mode="async_polling",
                 task_kind="image_generation",
                 status="pending",
@@ -362,6 +369,7 @@ def test_sync_executor_marks_failed_on_boundary_timeout(tmp_path) -> None:
         db.add(
             GenerationTask(
                 id="task-sync-timeout",
+                user_id="test-user",
                 mode="async_polling",
                 task_kind="script_divide",
                 status="pending",

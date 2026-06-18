@@ -7,7 +7,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db
+from app.dependencies import get_current_user, get_db
+from app.models.user import User
 from app.services.studio.shot_assets import (
     create_project_asset_link as create_project_asset_link_service,
     delete_project_asset_link as delete_project_asset_link_service,
@@ -325,9 +326,11 @@ async def preview_shot_video_prompt(
     shot_id: str,
     template_id: str | None = Query(None, description="指定视频提示词模板 ID；不传则使用默认模板"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ShotVideoPromptPreviewRead]:
     derived = await derive_video_preview(
         db,
+        user_id=current_user.id,
         base=build_video_base_draft(shot_id=shot_id, prompt=None),
         context=await build_video_context(
             db,
@@ -349,8 +352,11 @@ async def get_shot_video_readiness_api(
     shot_id: str,
     reference_mode: str = Query("text_only", description="参考模式：first/last/key/first_last/first_last_key/text_only"),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ShotVideoReadinessRead]:
-    data = await get_shot_video_readiness(db, shot_id=shot_id, reference_mode=reference_mode)
+    data = await get_shot_video_readiness(
+        db, user_id=current_user.id, shot_id=shot_id, reference_mode=reference_mode
+    )
     return success_response(data)
 
 

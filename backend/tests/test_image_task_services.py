@@ -227,6 +227,7 @@ async def test_build_actor_image_base_draft_front_view_returns_no_refs(monkeypat
 
     draft = await asset_base.build_actor_image_base_draft(
         db,
+        user_id="test-user",
         actor_id="actor-1",
         image_id=1,
     )
@@ -276,6 +277,7 @@ async def test_build_character_image_base_draft_combines_actor_and_costume_refs(
 
     draft = await asset_base.build_character_image_base_draft(
         db,
+        user_id="test-user",
         character_id="char-1",
         image_id=1,
     )

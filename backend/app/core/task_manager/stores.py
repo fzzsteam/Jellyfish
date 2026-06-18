@@ -162,6 +162,7 @@ def _task_record_from_row(row: GenerationTask) -> TaskRecord:
         status=_to_app_status(row.status),
         progress=row.progress,
         payload=row.payload,
+        user_id=row.user_id,
         result=row.result,
         error=row.error or "",
         cancel_requested=bool(row.cancel_requested),
@@ -181,12 +182,17 @@ def _task_record_from_row(row: GenerationTask) -> TaskRecord:
 class TaskStore(Protocol):
     """任务存储抽象：可替换为内存、MySQL/SQLite(通过 SQLAlchemy) 等。"""
 
-    async def create(self, payload: dict[str, Any], mode: DeliveryMode, task_kind: str) -> TaskRecord: ...
-    async def get(self, task_id: str) -> Optional[TaskRecord]: ...
-    async def get_status_view(self, task_id: str) -> Optional[TaskStatusView]: ...
+    async def create(
+        self, payload: dict[str, Any], mode: DeliveryMode, task_kind: str, *, user_id: str
+    ) -> TaskRecord: ...
+    async def get(self, task_id: str, *, user_id: str | None = None) -> Optional[TaskRecord]: ...
+    async def get_status_view(
+        self, task_id: str, *, user_id: str | None = None
+    ) -> Optional[TaskStatusView]: ...
     async def list_task_views(
         self,
         *,
+        user_id: str | None = None,
         statuses: list[TaskStatus] | None = None,
         task_kind: str | None = None,
         relation_type: str | None = None,
@@ -210,7 +216,9 @@ class InMemoryTaskStore(TaskStore):
         self._lock = asyncio.Lock()
         self._data: dict[str, TaskRecord] = {}
 
-    async def create(self, payload: dict[str, Any], mode: DeliveryMode, task_kind: str) -> TaskRecord:
+    async def create(
+        self, payload: dict[str, Any], mode: DeliveryMode, task_kind: str, *, user_id: str
+    ) -> TaskRecord:
         async with self._lock:
             task_id = _new_id()
             ts = _now_ts()
@@ -221,6 +229,7 @@ class InMemoryTaskStore(TaskStore):
                 status=TaskStatus.pending,
                 progress=0,
                 payload=payload,
+                user_id=user_id,
                 result=None,
                 error="",
                 cancel_requested=False,
@@ -230,14 +239,19 @@ class InMemoryTaskStore(TaskStore):
             self._data[task_id] = rec
             return rec
 
-    async def get(self, task_id: str) -> Optional[TaskRecord]:
-        async with self._lock:
-            return self._data.get(task_id)
-
-    async def get_status_view(self, task_id: str) -> Optional[TaskStatusView]:
+    async def get(self, task_id: str, *, user_id: str | None = None) -> Optional[TaskRecord]:
         async with self._lock:
             rec = self._data.get(task_id)
-            if not rec:
+            if rec is None or (user_id is not None and rec.user_id != user_id):
+                return None
+            return rec
+
+    async def get_status_view(
+        self, task_id: str, *, user_id: str | None = None
+    ) -> Optional[TaskStatusView]:
+        async with self._lock:
+            rec = self._data.get(task_id)
+            if not rec or (user_id is not None and rec.user_id != user_id):
                 return None
             return TaskStatusView(
                 id=rec.id,
@@ -256,6 +270,7 @@ class InMemoryTaskStore(TaskStore):
     async def list_task_views(
         self,
         *,
+        user_id: str | None = None,
         statuses: list[TaskStatus] | None = None,
         task_kind: str | None = None,
         relation_type: str | None = None,
@@ -281,6 +296,7 @@ class InMemoryTaskStore(TaskStore):
                 executor_task_id=rec.executor_task_id,
             )
             for rec in self._data.values()
+            if user_id is None or rec.user_id == user_id
         ]
         if statuses:
             allow = set(statuses)
@@ -383,10 +399,13 @@ class SqlAlchemyTaskStore(TaskStore):
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def create(self, payload: dict[str, Any], mode: DeliveryMode, task_kind: str) -> TaskRecord:
+    async def create(
+        self, payload: dict[str, Any], mode: DeliveryMode, task_kind: str, *, user_id: str
+    ) -> TaskRecord:
         task_id = _new_id()
         row = GenerationTask(
             id=task_id,
+            user_id=user_id,
             mode=_to_db_mode(mode),
             task_kind=task_kind,
             status=_to_db_status(TaskStatus.pending),
@@ -400,13 +419,15 @@ class SqlAlchemyTaskStore(TaskStore):
         await self.db.refresh(row)
         return _task_record_from_row(row)
 
-    async def get(self, task_id: str) -> Optional[TaskRecord]:
+    async def get(self, task_id: str, *, user_id: str | None = None) -> Optional[TaskRecord]:
         row = await self.db.get(GenerationTask, task_id)
-        if row is None:
+        if row is None or (user_id is not None and row.user_id != user_id):
             return None
         return _task_record_from_row(row)
 
-    async def get_status_view(self, task_id: str) -> Optional[TaskStatusView]:
+    async def get_status_view(
+        self, task_id: str, *, user_id: str | None = None
+    ) -> Optional[TaskStatusView]:
         # 轮询高频：只选择必要列，减少 IO 与 ORM 开销
         stmt = (
             select(
@@ -424,6 +445,8 @@ class SqlAlchemyTaskStore(TaskStore):
             .where(GenerationTask.id == task_id)
             .limit(1)
         )
+        if user_id is not None:
+            stmt = stmt.where(GenerationTask.user_id == user_id)
         res = await self.db.execute(stmt)
         row = res.first()
         if not row:
@@ -446,6 +469,7 @@ class SqlAlchemyTaskStore(TaskStore):
     async def list_task_views(
         self,
         *,
+        user_id: str | None = None,
         statuses: list[TaskStatus] | None = None,
         task_kind: str | None = None,
         relation_type: str | None = None,
@@ -457,6 +481,8 @@ class SqlAlchemyTaskStore(TaskStore):
         filters = []
         cutoff_dt: datetime | None = None
         join_links = relation_type is not None or relation_entity_id is not None
+        if user_id is not None:
+            filters.append(GenerationTask.user_id == user_id)
         if relation_type is not None:
             filters.append(GenerationTaskLink.relation_type == relation_type)
         if relation_entity_id is not None:

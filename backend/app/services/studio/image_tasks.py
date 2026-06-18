@@ -7,7 +7,7 @@ import mimetypes
 
 from fastapi import HTTPException, status
 from langchain_core.prompts import PromptTemplate as LcPromptTemplate
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import storage
@@ -18,12 +18,13 @@ from app.services.llm import get_model_by_category
 from app.services.llm.provider_resolver import resolve_provider_config
 
 
-async def resolve_image_model(db: AsyncSession, model_id: str | None) -> Model:
-    """根据显式 model_id 或默认图片模型解析 Model。"""
+async def resolve_image_model(db: AsyncSession, model_id: str | None, *, user_id: str) -> Model:
+    """根据显式 model_id 或某用户的默认图片模型解析 Model（默认模型按用户隔离）。"""
     try:
         return await get_model_by_category(
             db,
             ModelCategoryKey.image,
+            user_id=user_id,
             model_or_id=model_id,
             allow_default_fallback=False,
         )
@@ -91,11 +92,16 @@ def map_view_angle_for_prompt(view_angle: AssetViewAngle | str | None) -> str:
 async def resolve_prompt_template(
     db: AsyncSession,
     *,
+    user_id: str,
     category: PromptCategory,
 ) -> PromptTemplate | None:
+    """按类别取默认提示词模板，仅在"当前用户自有 + 系统共享"范围内查找（按用户隔离，放行 is_system）。"""
     stmt = (
         select(PromptTemplate)
-        .where(PromptTemplate.category == category)
+        .where(
+            PromptTemplate.category == category,
+            or_(PromptTemplate.user_id == user_id, PromptTemplate.is_system.is_(True)),
+        )
         .order_by(PromptTemplate.is_default.desc(), PromptTemplate.updated_at.desc())
         .limit(1)
     )
@@ -116,12 +122,13 @@ def render_prompt_template_content(
 async def build_prompt_with_template(
     db: AsyncSession,
     *,
+    user_id: str,
     category: PromptCategory,
     variables: dict[str, object],
     fallback_prompt: str,
     not_found_msg: str,
 ) -> str:
-    template = await resolve_prompt_template(db, category=category)
+    template = await resolve_prompt_template(db, user_id=user_id, category=category)
     if template is not None and template.content:
         rendered = render_prompt_template_content(template.content, variables=variables)
         if rendered:
