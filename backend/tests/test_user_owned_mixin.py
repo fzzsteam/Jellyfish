@@ -12,7 +12,7 @@ from app.models.studio_prompts_files_timeline import FileItem, PromptTemplate
 from app.models.llm import Model, Provider
 from app.models.task import GenerationTask
 
-OWNED_MODELS = [Project, Actor, Scene, Prop, Costume, PromptTemplate, FileItem, Provider, Model, GenerationTask]
+OWNED_MODELS = [Project, Actor, Scene, Prop, Costume, FileItem, Provider, Model, GenerationTask]
 
 
 @pytest.mark.parametrize("model", OWNED_MODELS)
@@ -20,6 +20,16 @@ def test_model_has_user_id_column(model: type) -> None:
     column = model.__table__.columns.get("user_id")
     assert column is not None, f"{model.__name__} 缺少 user_id 列"
     assert column.nullable is False
+    assert len(column.foreign_keys) == 1
+    fk = next(iter(column.foreign_keys))
+    assert fk.column.table.name == "users"
+
+
+def test_prompt_template_user_id_is_nullable() -> None:
+    """系统预置模板（is_system=True）全用户共享，user_id 允许为 NULL。"""
+    column = PromptTemplate.__table__.columns.get("user_id")
+    assert column is not None, "PromptTemplate 缺少 user_id 列"
+    assert column.nullable is True
     assert len(column.foreign_keys) == 1
     fk = next(iter(column.foreign_keys))
     assert fk.column.table.name == "users"
