@@ -3,16 +3,13 @@ import type React from 'react'
 import { Button, Card, Descriptions, Form, Input, Table, Tag, message } from 'antd'
 import { useParams } from 'react-router-dom'
 import { AdminService } from '../../services/generated'
-import type { UserAdminRead } from '../../services/generated'
-
-/** 该用户项目列表项；列表接口运行时返回 [{id, name}]。 */
-type UserProject = { id: string; name: string }
+import type { UserAdminRead, UserProjectBrief } from '../../services/generated'
 
 /** 管理员用户详情页：展示用户信息、重置密码、查看其项目列表。 */
 const AdminUserDetailPage: React.FC = () => {
   const { id = '' } = useParams()
   const [user, setUser] = useState<UserAdminRead | null>(null)
-  const [projects, setProjects] = useState<UserProject[]>([])
+  const [projects, setProjects] = useState<UserProjectBrief[]>([])
   const [form] = Form.useForm()
 
   const load = async () => {
@@ -21,9 +18,7 @@ const AdminUserDetailPage: React.FC = () => {
       AdminService.listUserProjectsApiV1AdminUsersUserIdProjectsGet({ userId: id }),
     ])
     setUser(u.data ?? null)
-    // 项目列表接口在生成客户端中标注为非泛型 ApiResponse（data: null），
-    // 这里按后端真实返回的数组结构断言。
-    setProjects((p.data as UserProject[] | null) ?? [])
+    setProjects(p.data ?? [])
   }
 
   useEffect(() => {

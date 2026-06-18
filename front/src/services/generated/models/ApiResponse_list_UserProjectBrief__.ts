@@ -2,10 +2,8 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-/**
- * 无分页时的统一响应结构。
- */
-export type ApiResponse = {
+import type { UserProjectBrief } from './UserProjectBrief';
+export type ApiResponse_list_UserProjectBrief__ = {
     /**
      * 与 HTTP 状态码一致
      */
@@ -17,7 +15,7 @@ export type ApiResponse = {
     /**
      * 实际数据
      */
-    data?: null;
+    data?: (Array<UserProjectBrief> | null);
     /**
      * 附加元信息
      */

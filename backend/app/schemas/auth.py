@@ -69,3 +69,12 @@ class UserAdminRead(BaseModel):
     username: str = Field(..., description="用户名")
     is_admin: bool = Field(..., description="是否管理员")
     is_active: bool = Field(..., description="是否启用")
+
+
+class UserProjectBrief(BaseModel):
+    """管理员查看某用户项目时的精简项目信息。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str = Field(..., description="项目 ID")
+    name: str = Field(..., description="项目名称")

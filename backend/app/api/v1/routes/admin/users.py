@@ -9,8 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_db
-from app.schemas.auth import UserAdminRead, UserCreate, UserUpdate
-from app.schemas.common import ApiResponse, created_response, paginated_response, success_response
+from app.schemas.auth import UserAdminRead, UserCreate, UserProjectBrief, UserUpdate
+from app.schemas.common import (
+    ApiResponse,
+    PaginatedData,
+    created_response,
+    paginated_response,
+    success_response,
+)
 from app.services import admin as admin_service
 from app.services.common import entity_already_exists, entity_not_found
 from app.services.studio import projects as project_service
@@ -18,7 +24,7 @@ from app.services.studio import projects as project_service
 router = APIRouter()
 
 
-@router.get("", response_model=ApiResponse, summary="用户列表")
+@router.get("", response_model=ApiResponse[PaginatedData[UserAdminRead]], summary="用户列表")
 async def list_users(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -65,9 +71,13 @@ async def update_user(user_id: str, body: UserUpdate, db: AsyncSession = Depends
     return success_response(UserAdminRead.model_validate(user))
 
 
-@router.get("/{user_id}/projects", response_model=ApiResponse, summary="查看某用户的项目")
+@router.get(
+    "/{user_id}/projects",
+    response_model=ApiResponse[list[UserProjectBrief]],
+    summary="查看某用户的项目",
+)
 async def list_user_projects(user_id: str, db: AsyncSession = Depends(get_db)):
     # 管理员以目标 user_id 走与普通用户同一套隔离 service，不开特权查询路径。
     # list_projects 返回 (items, total) 元组，这里只取项目列表。
     projects, _total = await project_service.list_projects(db, user_id=user_id)
-    return success_response([{"id": p.id, "name": p.name} for p in projects])
+    return success_response([UserProjectBrief.model_validate(p) for p in projects])

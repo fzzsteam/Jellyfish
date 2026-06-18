@@ -9,7 +9,6 @@ export type { OpenAPIConfig } from './core/OpenAPI';
 
 export type { AccessTokenRead } from './models/AccessTokenRead';
 export type { ActionBeatPhaseRead } from './models/ActionBeatPhaseRead';
-export type { ApiResponse } from './models/ApiResponse';
 export type { ApiResponse_AccessTokenRead_ } from './models/ApiResponse_AccessTokenRead_';
 export type { ApiResponse_AssetImageCandidateRead_ } from './models/ApiResponse_AssetImageCandidateRead_';
 export type { ApiResponse_AsyncTaskCreateRead_ } from './models/ApiResponse_AsyncTaskCreateRead_';
@@ -31,6 +30,7 @@ export type { ApiResponse_list_ShotCharacterLinkRead__ } from './models/ApiRespo
 export type { ApiResponse_list_ShotExtractedCandidateRead__ } from './models/ApiResponse_list_ShotExtractedCandidateRead__';
 export type { ApiResponse_list_ShotExtractedDialogueCandidateRead__ } from './models/ApiResponse_list_ShotExtractedDialogueCandidateRead__';
 export type { ApiResponse_list_ShotRuntimeSummaryRead__ } from './models/ApiResponse_list_ShotRuntimeSummaryRead__';
+export type { ApiResponse_list_UserProjectBrief__ } from './models/ApiResponse_list_UserProjectBrief__';
 export type { ApiResponse_ModelRead_ } from './models/ApiResponse_ModelRead_';
 export type { ApiResponse_ModelSettingsRead_ } from './models/ApiResponse_ModelSettingsRead_';
 export type { ApiResponse_NoneType_ } from './models/ApiResponse_NoneType_';
@@ -49,6 +49,7 @@ export type { ApiResponse_PaginatedData_ShotFrameImageRead__ } from './models/Ap
 export type { ApiResponse_PaginatedData_ShotLinkedAssetItem__ } from './models/ApiResponse_PaginatedData_ShotLinkedAssetItem__';
 export type { ApiResponse_PaginatedData_ShotRead__ } from './models/ApiResponse_PaginatedData_ShotRead__';
 export type { ApiResponse_PaginatedData_TaskListItemRead__ } from './models/ApiResponse_PaginatedData_TaskListItemRead__';
+export type { ApiResponse_PaginatedData_UserAdminRead__ } from './models/ApiResponse_PaginatedData_UserAdminRead__';
 export type { ApiResponse_ProjectActorLinkRead_ } from './models/ApiResponse_ProjectActorLinkRead_';
 export type { ApiResponse_ProjectCostumeLinkRead_ } from './models/ApiResponse_ProjectCostumeLinkRead_';
 export type { ApiResponse_ProjectPropLinkRead_ } from './models/ApiResponse_ProjectPropLinkRead_';
@@ -149,6 +150,7 @@ export type { PaginatedData_ShotFrameImageRead_ } from './models/PaginatedData_S
 export type { PaginatedData_ShotLinkedAssetItem_ } from './models/PaginatedData_ShotLinkedAssetItem_';
 export type { PaginatedData_ShotRead_ } from './models/PaginatedData_ShotRead_';
 export type { PaginatedData_TaskListItemRead_ } from './models/PaginatedData_TaskListItemRead_';
+export type { PaginatedData_UserAdminRead_ } from './models/PaginatedData_UserAdminRead_';
 export type { Pagination } from './models/Pagination';
 export type { ProjectActorLinkRead } from './models/ProjectActorLinkRead';
 export type { ProjectAssetLinkCreate } from './models/ProjectAssetLinkCreate';
@@ -256,6 +258,7 @@ export type { TaskStatusRead } from './models/TaskStatusRead';
 export type { TokenPairRead } from './models/TokenPairRead';
 export type { UserAdminRead } from './models/UserAdminRead';
 export type { UserCreate } from './models/UserCreate';
+export type { UserProjectBrief } from './models/UserProjectBrief';
 export type { UserRead } from './models/UserRead';
 export type { UserUpdate } from './models/UserUpdate';
 export type { ValidationError } from './models/ValidationError';

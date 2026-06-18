@@ -5,13 +5,6 @@ import { Link } from 'react-router-dom'
 import { AdminService } from '../../services/generated'
 import type { UserAdminRead } from '../../services/generated'
 
-/**
- * 列表接口运行时返回的分页 data 形状。
- * 存在意义：生成客户端把该接口标注为非泛型 ApiResponse（data: null），
- * 这里按后端 paginated_response 的真实结构断言，访问 items 时保持类型安全。
- */
-type UserListData = { items: UserAdminRead[] }
-
 /** 管理员用户列表页：展示全部用户，支持创建与启用/禁用。 */
 const AdminUserListPage: React.FC = () => {
   const [users, setUsers] = useState<UserAdminRead[]>([])
@@ -23,8 +16,7 @@ const AdminUserListPage: React.FC = () => {
     setLoading(true)
     try {
       const res = await AdminService.listUsersApiV1AdminUsersGet({ page: 1, pageSize: 100 })
-      const data = res.data as UserListData | null
-      setUsers(data?.items ?? [])
+      setUsers(res.data?.items ?? [])
     } finally {
       setLoading(false)
     }

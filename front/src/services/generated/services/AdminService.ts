@@ -2,7 +2,8 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ApiResponse } from '../models/ApiResponse';
+import type { ApiResponse_list_UserProjectBrief__ } from '../models/ApiResponse_list_UserProjectBrief__';
+import type { ApiResponse_PaginatedData_UserAdminRead__ } from '../models/ApiResponse_PaginatedData_UserAdminRead__';
 import type { ApiResponse_UserAdminRead_ } from '../models/ApiResponse_UserAdminRead_';
 import type { UserCreate } from '../models/UserCreate';
 import type { UserUpdate } from '../models/UserUpdate';
@@ -12,7 +13,7 @@ import { request as __request } from '../core/request';
 export class AdminService {
     /**
      * 用户列表
-     * @returns ApiResponse Successful Response
+     * @returns ApiResponse_PaginatedData_UserAdminRead__ Successful Response
      * @throws ApiError
      */
     public static listUsersApiV1AdminUsersGet({
@@ -23,7 +24,7 @@ export class AdminService {
         page?: number,
         pageSize?: number,
         authorization?: (string | null),
-    }): CancelablePromise<ApiResponse> {
+    }): CancelablePromise<ApiResponse_PaginatedData_UserAdminRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/admin/users',
@@ -122,7 +123,7 @@ export class AdminService {
     }
     /**
      * 查看某用户的项目
-     * @returns ApiResponse Successful Response
+     * @returns ApiResponse_list_UserProjectBrief__ Successful Response
      * @throws ApiError
      */
     public static listUserProjectsApiV1AdminUsersUserIdProjectsGet({
@@ -131,7 +132,7 @@ export class AdminService {
     }: {
         userId: string,
         authorization?: (string | null),
-    }): CancelablePromise<ApiResponse> {
+    }): CancelablePromise<ApiResponse_list_UserProjectBrief__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/admin/users/{user_id}/projects',
