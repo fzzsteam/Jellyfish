@@ -425,7 +425,7 @@ export class LlmService {
         });
     }
     /**
-     * 获取模型全局设置（单例）
+     * 获取当前用户的模型设置
      * @returns ApiResponse_ModelSettingsRead_ Successful Response
      * @throws ApiError
      */
@@ -446,7 +446,7 @@ export class LlmService {
         });
     }
     /**
-     * 更新模型全局设置（单例）
+     * 更新当前用户的模型设置
      * @returns ApiResponse_ModelSettingsRead_ Successful Response
      * @throws ApiError
      */

@@ -24,7 +24,6 @@ const MainLayout: React.FC = () => {
   const { token } = theme.useToken()
 
   const collapsed = useAppStore((state) => state.siderCollapsed)
-  const toggleCollapsed = useAppStore((state) => state.toggleSider)
   const authUser = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
 

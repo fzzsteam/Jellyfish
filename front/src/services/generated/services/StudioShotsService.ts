@@ -289,22 +289,28 @@ export class StudioShotsService {
         });
     }
     /**
-     * 准备页解除已关联实体并返回最新聚合状态
+     * 准备页替换已关联实体并返回最新聚合状态
+     * 解除 old_entity_id 关联，关联 new_entity_id，保持分镜状态一致性。
      * @returns ApiResponse_ShotPreparationMutationResultRead_ Successful Response
      * @throws ApiError
      */
-    public static unlinkAssetForPreparationApiV1StudioShotsShotIdPreparationUnlinkPost({
+    public static replaceAssetForPreparationApiApiV1StudioShotsShotIdPreparationReplacePost({
         shotId,
         requestBody,
+        authorization,
     }: {
         shotId: string,
-        requestBody: ShotPreparationUnlinkRequest,
+        requestBody: ShotPreparationReplaceRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotPreparationMutationResultRead_> {
         return __request(OpenAPI, {
             method: 'POST',
-            url: '/api/v1/studio/shots/{shot_id}/preparation-unlink',
+            url: '/api/v1/studio/shots/{shot_id}/preparation-replace',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -314,22 +320,28 @@ export class StudioShotsService {
         });
     }
     /**
-     * 准备页替换已关联实体并返回最新聚合状态
+     * 准备页解除已关联实体并返回最新聚合状态
+     * 移除镜头与 entity_id 的关联，恢复候选为 pending 状态。
      * @returns ApiResponse_ShotPreparationMutationResultRead_ Successful Response
      * @throws ApiError
      */
-    public static replaceAssetForPreparationApiV1StudioShotsShotIdPreparationReplacePost({
+    public static unlinkAssetForPreparationApiApiV1StudioShotsShotIdPreparationUnlinkPost({
         shotId,
         requestBody,
+        authorization,
     }: {
         shotId: string,
-        requestBody: ShotPreparationReplaceRequest,
+        requestBody: ShotPreparationUnlinkRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ShotPreparationMutationResultRead_> {
         return __request(OpenAPI, {
             method: 'POST',
-            url: '/api/v1/studio/shots/{shot_id}/preparation-replace',
+            url: '/api/v1/studio/shots/{shot_id}/preparation-unlink',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
