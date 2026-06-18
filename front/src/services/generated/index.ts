@@ -9,6 +9,7 @@ export type { OpenAPIConfig } from './core/OpenAPI';
 
 export type { AccessTokenRead } from './models/AccessTokenRead';
 export type { ActionBeatPhaseRead } from './models/ActionBeatPhaseRead';
+export type { ApiResponse } from './models/ApiResponse';
 export type { ApiResponse_AccessTokenRead_ } from './models/ApiResponse_AccessTokenRead_';
 export type { ApiResponse_AssetImageCandidateRead_ } from './models/ApiResponse_AssetImageCandidateRead_';
 export type { ApiResponse_AsyncTaskCreateRead_ } from './models/ApiResponse_AsyncTaskCreateRead_';
@@ -81,6 +82,7 @@ export type { ApiResponse_TaskLinkAdoptRead_ } from './models/ApiResponse_TaskLi
 export type { ApiResponse_TaskResultRead_ } from './models/ApiResponse_TaskResultRead_';
 export type { ApiResponse_TaskStatusRead_ } from './models/ApiResponse_TaskStatusRead_';
 export type { ApiResponse_TokenPairRead_ } from './models/ApiResponse_TokenPairRead_';
+export type { ApiResponse_UserAdminRead_ } from './models/ApiResponse_UserAdminRead_';
 export type { ApiResponse_UserRead_ } from './models/ApiResponse_UserRead_';
 export type { ApiResponse_VariantAnalysisResult_ } from './models/ApiResponse_VariantAnalysisResult_';
 export type { ApiResponse_VideoGenerationOptionsRead_ } from './models/ApiResponse_VideoGenerationOptionsRead_';
@@ -252,7 +254,10 @@ export type { TaskResultRead } from './models/TaskResultRead';
 export type { TaskStatus } from './models/TaskStatus';
 export type { TaskStatusRead } from './models/TaskStatusRead';
 export type { TokenPairRead } from './models/TokenPairRead';
+export type { UserAdminRead } from './models/UserAdminRead';
+export type { UserCreate } from './models/UserCreate';
 export type { UserRead } from './models/UserRead';
+export type { UserUpdate } from './models/UserUpdate';
 export type { ValidationError } from './models/ValidationError';
 export type { VariantAnalysisRequest } from './models/VariantAnalysisRequest';
 export type { VariantAnalysisResult } from './models/VariantAnalysisResult';
@@ -262,6 +267,7 @@ export type { VideoGenerationOptionsRead } from './models/VideoGenerationOptions
 export type { VideoGenerationTaskRequest } from './models/VideoGenerationTaskRequest';
 export type { VideoPromptPreviewResponse } from './models/VideoPromptPreviewResponse';
 
+export { AdminService } from './services/AdminService';
 export { AuthService } from './services/AuthService';
 export { DefaultService } from './services/DefaultService';
 export { FilmService } from './services/FilmService';
