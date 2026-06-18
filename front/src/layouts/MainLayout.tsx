@@ -7,6 +7,7 @@ import {
   PictureOutlined,
   FileTextOutlined,
   ApiOutlined,
+  TeamOutlined,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
@@ -35,6 +36,7 @@ const MainLayout: React.FC = () => {
     if (location.pathname.startsWith('/agents')) return ['agents']
     if (location.pathname.startsWith('/models')) return ['models']
     if (location.pathname.startsWith('/settings')) return ['settings']
+    if (location.pathname.startsWith('/admin')) return ['admin-users']
     return []
   }, [location.pathname])
 
@@ -168,6 +170,15 @@ const MainLayout: React.FC = () => {
       label: <Link to="/settings">{t('menu.settings')}</Link>,
     },
   ]
+
+  // 仅管理员可见"用户管理"入口；末尾条件追加，避免影响非管理员的菜单。
+  if (authUser?.is_admin) {
+    menuItems.push({
+      key: 'admin-users',
+      icon: <TeamOutlined />,
+      label: <Link to="/admin/users">用户管理</Link>,
+    })
+  }
 
   const userMenuItems = [
     {
