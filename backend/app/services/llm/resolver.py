@@ -27,14 +27,24 @@ async def get_provider_by_id_or_obj(db: AsyncSession, provider_or_id: Provider |
     return await _resolve_provider(db, provider_or_id)
 
 
+async def _get_user_settings(db: AsyncSession, *, user_id: str) -> ModelSettings | None:
+    """读取某用户的模型设置行（每用户一行，按 user_id 查询；不存在返回 None）。"""
+    result = await db.execute(select(ModelSettings).where(ModelSettings.user_id == user_id))
+    return result.scalar_one_or_none()
+
+
 async def get_model_by_category(
     db: AsyncSession,
     category: ModelCategoryKey,
     *,
+    user_id: str,
     model_or_id: Model | str | None = None,
     allow_default_fallback: bool = True,
 ) -> Model:
-    """按类别解析模型，可传入显式模型（或 id），也可从默认设置解析。"""
+    """按类别解析模型，可传入显式模型（或 id），也可从该用户的默认设置解析。
+
+    `user_id`：解析默认模型时，从该用户的 `ModelSettings` 行读取（按用户隔离）。
+    """
     if model_or_id is not None:
         model = await _resolve_model(db, model_or_id)
         if model.category != category:
@@ -44,11 +54,11 @@ async def get_model_by_category(
             )
         return model
 
-    settings_row = await db.get(ModelSettings, 1)
+    settings_row = await _get_user_settings(db, user_id=user_id)
     settings_model_id = _settings_model_id(settings_row, category)
     if settings_model_id:
         try:
-            return await get_model_by_category(db, category, model_or_id=settings_model_id)
+            return await get_model_by_category(db, category, user_id=user_id, model_or_id=settings_model_id)
         except HTTPException as e:
             if e.status_code == status.HTTP_404_NOT_FOUND:
                 raise HTTPException(
@@ -64,9 +74,9 @@ async def get_model_by_category(
     )
 
 
-async def get_default_model_by_category(db: AsyncSession, category: ModelCategoryKey) -> Model:
-    """按类别解析默认模型，仅从单例 ModelSettings 读取。"""
-    return await get_model_by_category(db, category, allow_default_fallback=True)
+async def get_default_model_by_category(db: AsyncSession, category: ModelCategoryKey, *, user_id: str) -> Model:
+    """按类别解析某用户的默认模型，仅从该用户的 ModelSettings 读取。"""
+    return await get_model_by_category(db, category, user_id=user_id, allow_default_fallback=True)
 
 
 async def _resolve_model(db: AsyncSession, model_or_id: Model | str) -> Model:
@@ -133,10 +143,11 @@ async def build_chat_model_from_provider(
 async def build_default_text_llm(
     db: AsyncSession,
     *,
+    user_id: str,
     thinking: bool,
 ) -> BaseChatModel:
-    """基于默认文本模型构造 ChatOpenAI。"""
-    model = await get_default_model_by_category(db, ModelCategoryKey.text)
+    """基于某用户的默认文本模型构造 ChatOpenAI。"""
+    model = await get_default_model_by_category(db, ModelCategoryKey.text, user_id=user_id)
     provider = await get_provider_by_model_or_id(db, model)
     return _build_chat_openai_model(
         provider=provider,

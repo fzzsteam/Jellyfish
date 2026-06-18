@@ -55,13 +55,19 @@ async def require_admin(current_user: User = Depends(get_current_user)) -> User:
     return current_user
 
 
-async def get_llm(db: AsyncSession = Depends(get_db)) -> BaseChatModel:
-    """提供默认文本 LLM（ChatOpenAI）。"""
-    return await build_default_text_llm(db, thinking=True)
+async def get_llm(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BaseChatModel:
+    """提供当前用户默认文本 LLM（ChatOpenAI）。"""
+    return await build_default_text_llm(db, user_id=current_user.id, thinking=True)
 
-async def get_nothinking_llm(db: AsyncSession = Depends(get_db)) -> BaseChatModel:
-    """提供默认文本 LLM（ChatOpenAI，禁用 thinking）。"""
-    return await build_default_text_llm(db, thinking=False)
+async def get_nothinking_llm(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> BaseChatModel:
+    """提供当前用户默认文本 LLM（ChatOpenAI，禁用 thinking）。"""
+    return await build_default_text_llm(db, user_id=current_user.id, thinking=False)
 
 
 class _ImageHttpRunnable:
