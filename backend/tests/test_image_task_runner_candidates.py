@@ -29,11 +29,18 @@ def _scene(scene_id: str) -> Scene:
         visual_style=ProjectVisualStyle.live_action,
         view_count=1,
         tags=[],
+        user_id="test-user",
     )
 
 
 def _file(file_id: str) -> FileItem:
-    return FileItem(id=file_id, type="image", name=f"{file_id}.png", storage_key=f"files/{file_id}.png")
+    return FileItem(
+        id=file_id,
+        type="image",
+        name=f"{file_id}.png",
+        storage_key=f"files/{file_id}.png",
+        user_id="test-user",
+    )
 
 
 def _task(task_id: str) -> GenerationTask:
@@ -46,6 +53,7 @@ def _task(task_id: str) -> GenerationTask:
         payload={},
         result=None,
         error="",
+        user_id="test-user",
     )
 
 
