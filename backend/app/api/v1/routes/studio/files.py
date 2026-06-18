@@ -5,7 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db
+from app.dependencies import get_current_user, get_db
+from app.models.user import User
 from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, paginated_response, success_response
 from app.schemas.studio import FileDetailRead, FileRead, FileUpdate
 from app.services.studio.file_usages import list_files_by_scope_paginated
@@ -28,6 +29,7 @@ router = APIRouter()
 )
 async def list_files_api(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     q: str | None = Query(None, description="关键字，过滤 name"),
     order: str | None = Query(None),
     is_desc: bool = Query(False),
@@ -47,6 +49,7 @@ async def list_files_api(
     if project_id is not None:
         items, total = await list_files_by_scope_paginated(
             db,
+            user_id=current_user.id,
             project_id=project_id,
             chapter_title=chapter_title,
             shot_title=shot_title,
@@ -64,6 +67,7 @@ async def list_files_api(
         )
     return await list_files_paginated(
         db,
+        user_id=current_user.id,
         q=q,
         order=order,
         is_desc=is_desc,
@@ -82,6 +86,7 @@ async def upload_file_api(
     file: UploadFile = File(..., description="要上传的二进制文件"),
     name: str | None = None,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     project_id: str | None = Form(None, description="可选：写入 file_usages 的项目 ID"),
     chapter_id: str | None = Form(None),
     shot_id: str | None = Form(None),
@@ -90,6 +95,7 @@ async def upload_file_api(
 ) -> ApiResponse[FileRead]:
     obj = await upload_file(
         db,
+        user_id=current_user.id,
         file=file,
         name=name,
         project_id=project_id,
@@ -108,8 +114,9 @@ async def upload_file_api(
 async def download_file_api(
     file_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    return await build_download_response(db, file_id=file_id)
+    return await build_download_response(db, file_id=file_id, user_id=current_user.id)
 
 
 @router.get(
@@ -120,8 +127,9 @@ async def download_file_api(
 async def get_file_storage_info_api(
     file_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[dict]:
-    return success_response(await get_storage_info(db, file_id=file_id))
+    return success_response(await get_storage_info(db, file_id=file_id, user_id=current_user.id))
 
 
 @router.get(
@@ -132,8 +140,9 @@ async def get_file_storage_info_api(
 async def get_file_detail(
     file_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[FileDetailRead]:
-    return success_response(await get_file_detail_service(db, file_id=file_id))
+    return success_response(await get_file_detail_service(db, file_id=file_id, user_id=current_user.id))
 
 
 @router.patch(
@@ -145,8 +154,9 @@ async def update_file_meta(
     file_id: str,
     body: FileUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[FileRead]:
-    obj = await update_file_meta_service(db, file_id=file_id, body=body)
+    obj = await update_file_meta_service(db, file_id=file_id, body=body, user_id=current_user.id)
     return success_response(FileRead.model_validate(obj))
 
 
@@ -158,6 +168,7 @@ async def update_file_meta(
 async def delete_file_api(
     file_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[None]:
-    await delete_file(db, file_id=file_id)
+    await delete_file(db, file_id=file_id, user_id=current_user.id)
     return empty_response()
