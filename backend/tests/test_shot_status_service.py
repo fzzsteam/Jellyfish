@@ -25,6 +25,7 @@ from app.models.studio import (
     ShotExtractedDialogueCandidate,
     ShotStatus,
 )
+from app.models.user import User
 from app.schemas.skills.script_processing import StudioScriptExtractionDraft, StudioShotDraft
 from app.services.studio import (
     create_project_asset_link,
@@ -68,12 +69,14 @@ async def _build_session() -> tuple[AsyncSession, object]:
 
 
 async def _seed_graph(db: AsyncSession) -> Shot:
+    db.add(User(id="test-user", username="test-user", hashed_password="x"))
     project = Project(
         id="project-1",
         name="项目一",
         description="",
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
+        user_id="test-user",
     )
     chapter = Chapter(id="chapter-1", project_id="project-1", index=1, title="第一章")
     shot = Shot(id="shot-1", chapter_id="chapter-1", index=1, title="镜头一")
@@ -255,6 +258,7 @@ async def test_derive_video_preview_uses_prompt_pack() -> None:
                     variables=[],
                     is_default=True,
                     is_system=False,
+                    user_id="test-user",
                 ),
             ]
         )
@@ -262,6 +266,7 @@ async def test_derive_video_preview_uses_prompt_pack() -> None:
 
         result = await derive_video_preview(
             db,
+            user_id="test-user",
             base=build_video_base_draft(shot_id=shot.id, prompt=None),
             context=await build_video_context(
                 db,
@@ -583,6 +588,7 @@ async def test_create_project_asset_link_marks_matching_prop_candidate_as_linked
                 style=ProjectStyle.real_people_city,
                 view_count=1,
                 tags=[],
+                user_id="test-user",
                 visual_style=ProjectVisualStyle.live_action,
             )
         )
@@ -626,6 +632,7 @@ async def test_project_asset_links_paginated_deduplicates_project_level_assets()
                     style=ProjectStyle.real_people_city,
                     view_count=1,
                     tags=[],
+                    user_id="test-user",
                     visual_style=ProjectVisualStyle.live_action,
                 ),
             ]
@@ -673,6 +680,7 @@ async def test_delete_project_asset_link_marks_matching_prop_candidate_back_to_p
                 style=ProjectStyle.real_people_city,
                 view_count=1,
                 tags=[],
+                user_id="test-user",
                 visual_style=ProjectVisualStyle.live_action,
             )
         )
@@ -734,6 +742,7 @@ async def test_update_shot_detail_scene_marks_matching_scene_candidate_as_linked
                 style=ProjectStyle.real_people_city,
                 view_count=1,
                 tags=[],
+                user_id="test-user",
                 visual_style=ProjectVisualStyle.live_action,
             )
         )
@@ -789,6 +798,7 @@ async def test_update_shot_detail_scene_change_marks_old_candidate_back_to_pendi
                     style=ProjectStyle.real_people_city,
                     view_count=1,
                     tags=[],
+                    user_id="test-user",
                     visual_style=ProjectVisualStyle.live_action,
                 ),
                 Scene(
@@ -798,6 +808,7 @@ async def test_update_shot_detail_scene_change_marks_old_candidate_back_to_pendi
                     style=ProjectStyle.real_people_city,
                     view_count=1,
                     tags=[],
+                    user_id="test-user",
                     visual_style=ProjectVisualStyle.live_action,
                 ),
             ]
@@ -855,6 +866,7 @@ async def test_update_shot_detail_scene_clear_marks_old_candidate_back_to_pendin
                 style=ProjectStyle.real_people_city,
                 view_count=1,
                 tags=[],
+                user_id="test-user",
                 visual_style=ProjectVisualStyle.live_action,
             )
         )
