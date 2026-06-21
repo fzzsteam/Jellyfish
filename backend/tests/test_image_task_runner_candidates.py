@@ -9,7 +9,7 @@ from app.models.task import GenerationDeliveryMode, GenerationTask, GenerationTa
 from app.models.task_links import GenerationTaskLink
 from app.models.studio import AssetQualityLevel, AssetViewAngle, FileItem, ProjectStyle, ProjectVisualStyle, Scene, SceneImage
 from app.services.studio.asset_image_candidates import list_asset_image_candidates
-from app.services.studio.image_task_runner import _persist_images_to_assets
+from app.services.studio.image_task_runner import _persist_images_to_assets, run_image_generation_task
 
 
 async def _build_session() -> tuple[AsyncSession, object]:
@@ -177,4 +177,71 @@ async def test_persist_images_to_assets_does_not_overwrite_existing_current_imag
         assert refreshed.file_id == "file-current"
     finally:
         await db.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_image_generation_task_persists_provider_error_when_result_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db, engine = await _build_session()
+    try:
+        task_id = "task-provider-error"
+        provider_error = (
+            "[BailianImage] SDK failed: status=400, "
+            "code=InvalidParameter, message=real provider error"
+        )
+        db.add(
+            GenerationTask(
+                id=task_id,
+                mode=GenerationDeliveryMode.async_polling,
+                task_kind="image_generation",
+                status=GenerationTaskStatus.pending,
+                progress=0,
+                payload={},
+                result=None,
+                error="",
+                user_id="test-user",
+            )
+        )
+        await db.commit()
+        await db.close()
+
+        class FailingImageGenerationTask:
+            """模拟供应商失败：run 捕获真实错误后只在 status() 暴露。"""
+
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            async def run(self) -> None:
+                return None
+
+            async def get_result(self) -> None:
+                return None
+
+            async def status(self) -> dict[str, str]:
+                return {"error": provider_error}
+
+        async_session_local = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        monkeypatch.setattr("app.services.studio.image_task_runner.async_session_maker", async_session_local)
+        monkeypatch.setattr("app.services.studio.image_task_runner.ImageGenerationTask", FailingImageGenerationTask)
+
+        await run_image_generation_task(
+            task_id,
+            {
+                "provider": "aliyun_bailian",
+                "api_key": "test-key",
+                "base_url": None,
+                "relation_type": "scene_image",
+                "relation_entity_id": "1",
+                "input": {"prompt": "生成图片", "model": "qwen-image-2.0"},
+            },
+        )
+
+        async with async_session_local() as verify_db:
+            row = await verify_db.get(GenerationTask, task_id)
+            assert row is not None
+            assert row.status == GenerationTaskStatus.failed
+            assert row.error == provider_error
+    finally:
         await engine.dispose()
