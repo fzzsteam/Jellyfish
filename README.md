@@ -1,8 +1,11 @@
-# Jellyfish 本地开发环境
+# Jellyfish
 
-Jellyfish 是面向 AI 短剧生产的工作台。本文件说明如何在本地启动开发环境、执行数据库迁移并验证各项服务。
+Jellyfish 是面向 AI 短剧生产的工作台。本文件覆盖两类部署：
 
-推荐采用混合开发模式：MySQL、Redis 和 RustFS 运行在 Docker 中，Backend、Celery Worker 和 Frontend 运行在宿主机，便于热更新和查看日志。
+- **本地开发**：混合模式（MySQL/Redis/RustFS 跑 Docker，Backend/Celery/Frontend 跑宿主机），便于热更新与查看日志，见下文第 1–7 节。
+- **线上部署（SAE）**：单容器镜像（前端产物 + 后端 + Celery 由 supervisord 托管），见文末「线上部署（SAE）」一节。
+
+两类环境都需要执行 `backend/sql/` 下的数据库迁移，区别仅在执行方式：本地用 mysql 客户端、线上用仓库自带的 `backend/apply_migrations.py`（线上容器未安装 mysql 客户端）。
 
 ## 服务与端口
 
@@ -328,6 +331,67 @@ Unknown column 'generation_tasks.user_id'
 - `backend/.env` 中的 `REDIS_HOST` 为 `127.0.0.1`。
 - `backend/.env` 中的 `REDIS_PORT` 与 `deploy/compose/.env.local` 一致。
 - 如果设置了 `CELERY_BROKER_URL`，其中的地址没有覆盖成错误端口。
+
+## 线上部署（SAE）
+
+线上采用单容器部署：`deploy/docker/combined.Dockerfile` 构建一个镜像，包含前端静态产物 + 后端 + Celery，由 supervisord 统一托管（`web` = uvicorn，`worker` = celery）。适用于阿里云 SAE 等按容器镜像部署的 Serverless 平台。
+
+> 与本地不同：线上容器**未安装 mysql 命令行客户端**，数据库迁移只能用仓库自带的 Python 脚本 `backend/apply_migrations.py` 执行。
+
+### 1. 构建并推送镜像
+
+```bash
+docker build -f deploy/docker/combined.Dockerfile -t <registry>/jellyfish:<tag> .
+docker push <registry>/jellyfish:<tag>
+```
+
+`backend/apply_migrations.py` 与 `backend/sql/` 会随 `COPY backend/ ./` 一并打进镜像，部署前务必确认它们已提交到仓库。
+
+### 2. SAE 环境变量
+
+在 SAE 应用配置中注入以下环境变量（应用与迁移脚本共用同一份 `DATABASE_URL`）：
+
+| 变量 | 必要性 | 说明 |
+| --- | --- | --- |
+| `DATABASE_URL` | 必设 | 线上 MySQL，如 `mysql+aiomysql://user:pass@host:3306/jellyfish` |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | 必设 | Celery broker |
+| `S3_ENDPOINT_URL` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_BUCKET_NAME` | 必设 | 对象存储 |
+| `INITIAL_ADMIN_USERNAME` | 可选 | 默认 `admin` |
+| `INITIAL_ADMIN_PASSWORD` | 首次或无管理员时必设 | `users` 表无管理员时用它播种首个账号；不设且表空 → 应用拒绝启动 |
+| `JWT_SECRET_KEY` | 强烈建议改 | 默认为弱值，务必改为随机字符串 |
+| `CORS_ORIGINS` | 按需 | 前端域名（逗号分隔）；同源部署可不设 |
+| `OPENAI_API_KEY` 等 | 按需 | 真实调用大模型才需要 |
+
+### 3. 数据库迁移
+
+部署后通过 SAE Webshell（或「执行命令」）进入容器，按文件名顺序幂等执行 `backend/sql/*.sql`：
+
+```bash
+cd /app
+uv run python apply_migrations.py          # 执行全部 001-009
+# uv run python apply_migrations.py 009    # 仅执行 009（用户隔离）
+```
+
+脚本从 `DATABASE_URL` 取连接信息，无需额外配置密码；幂等，可重复执行。执行 `009` 前需保证应用至少成功启动过一次（已建 `users` 表并播种管理员），因为 `009` 要把历史数据回填给管理员。
+
+### 4. 升级已有环境
+
+线上环境数据库已运行、但尚未执行 `001-009` 时（典型升级场景），步骤如下：
+
+1. 构建并推送含最新代码与 `apply_migrations.py` 的镜像。
+2. SAE 部署新镜像——应用启动时 `create_all` 补建缺失的表，并按需播种管理员。
+3. 进入容器执行 `uv run python apply_migrations.py`，补齐 `001-009`（重点 `009` 的 `user_id` 用户隔离）。
+4. 验证：管理员可登录；业务表已含 `user_id` 列；历史数据已回填给管理员。
+
+> 多实例并发：`001-009` 设计为幂等（先探测列/约束是否存在再执行 DDL），重复执行安全。若多实例同时启动并各自执行迁移，偶发竞争重跑一次脚本即可恢复。
+
+### 5. 验证
+
+```bash
+curl -f http://<线上域名>/health      # 预期 200
+```
+
+并在前端完成管理员登录，确认用户管理、图片/视频生成等功能正常。
 
 ## OpenAPI 客户端同步
 
