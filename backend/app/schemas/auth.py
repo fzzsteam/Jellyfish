@@ -78,3 +78,17 @@ class UserProjectBrief(BaseModel):
 
     id: str = Field(..., description="项目 ID")
     name: str = Field(..., description="项目名称")
+
+
+class ChangePasswordRequest(BaseModel):
+    """当前用户自助修改密码的请求体。"""
+
+    current_password: str = Field(..., min_length=1, description="当前密码")
+    new_password: str = Field(..., min_length=6, description="新密码")
+
+
+class ResetPasswordRead(BaseModel):
+    """管理员重置密码后返回的一次性结果：用户信息 + 临时密码。"""
+
+    user: UserAdminRead
+    temporary_password: str = Field(..., description="一次性临时密码，仅本次返回")

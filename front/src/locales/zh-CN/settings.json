@@ -1,19 +1,16 @@
 {
-  "title": "系统设置",
-  "nickname": "昵称",
-  "role": "角色",
-  "darkMode": "深色模式",
-  "darkModeTooltip": "示例开关，实际项目中可接入主题切换",
-  "save": "保存设置",
-  "updated": "已更新基础信息（示例）",
-  "roleOptions": {
-    "admin": "系统管理员",
-    "operator": "运营人员",
-    "guest": "访客"
-  },
+  "title": "修改密码",
+  "currentPassword": "当前密码",
+  "newPassword": "新密码",
+  "confirmPassword": "确认新密码",
+  "success": "密码已修改，请使用新密码重新登录",
+  "wrongCurrent": "当前密码不正确",
+  "failed": "修改密码失败",
+  "mismatch": "两次输入的新密码不一致",
   "validation": {
-    "nicknameRequired": "请输入昵称",
-    "roleRequired": "请选择角色"
+    "currentRequired": "请输入当前密码",
+    "newRequired": "请输入新密码",
+    "newMin": "新密码至少 6 位",
+    "confirmRequired": "请再次输入新密码"
   }
 }
-

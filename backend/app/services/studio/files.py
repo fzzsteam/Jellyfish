@@ -208,15 +208,13 @@ async def build_download_response(
     db: AsyncSession,
     *,
     file_id: str,
-    user_id: str,
 ) -> StreamingResponse:
     """根据 file_id 构建下载响应。
 
-    数据隔离：仅允许下载归属当前用户的文件；他人文件按未找到处理。
+    下载接口用于浏览器原生媒体标签直接访问，因此保持匿名可读。
+    只要文件记录存在，就返回对应对象存储内容。
     """
     file_item = await get_or_404(db, FileItem, file_id, detail=entity_not_found("File"))
-    if file_item.user_id != user_id:
-        raise HTTPException(status_code=404, detail=entity_not_found("File"))
     content = await storage.download_file(key=file_item.storage_key)
 
     filename = Path(file_item.storage_key).name or "download"

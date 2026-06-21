@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Layout, Menu, theme, Dropdown, Space, Avatar } from 'antd'
 import {
-  SettingOutlined,
   UserOutlined,
   FolderOutlined,
   PictureOutlined,
@@ -15,6 +14,7 @@ import { useAuthStore } from '../store/useAuthStore'
 import { useTranslation } from 'react-i18next'
 import { TaskCenter } from '../pages/aiStudio/components/TaskCenter'
 import { TaskRuntimeProvider } from '../pages/aiStudio/components/TaskRuntimeProvider'
+import ChangePasswordModal from '../components/ChangePasswordModal'
 
 const { Header, Sider, Content } = Layout
 
@@ -27,6 +27,7 @@ const MainLayout: React.FC = () => {
   const collapsed = useAppStore((state) => state.siderCollapsed)
   const authUser = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
+  const [passwordOpen, setPasswordOpen] = useState(false)
 
   const selectedKeys = useMemo(() => {
     if (location.pathname === '/projects' || location.pathname.startsWith('/projects/')) return ['projects']
@@ -35,7 +36,6 @@ const MainLayout: React.FC = () => {
     if (location.pathname.startsWith('/files')) return ['files']
     if (location.pathname.startsWith('/agents')) return ['agents']
     if (location.pathname.startsWith('/models')) return ['models']
-    if (location.pathname.startsWith('/settings')) return ['settings']
     if (location.pathname.startsWith('/admin')) return ['admin-users']
     return []
   }, [location.pathname])
@@ -164,11 +164,6 @@ const MainLayout: React.FC = () => {
       icon: <ApiOutlined />,
       label: <Link to="/models">模型管理</Link>,
     },
-    {
-      key: 'settings',
-      icon: <SettingOutlined />,
-      label: <Link to="/settings">{t('menu.settings')}</Link>,
-    },
   ]
 
   // 仅管理员可见"用户管理"入口；末尾条件追加，避免影响非管理员的菜单。
@@ -182,9 +177,9 @@ const MainLayout: React.FC = () => {
 
   const userMenuItems = [
     {
-      key: 'profile',
-      label: t('user.profile'),
-      onClick: () => navigate('/settings'),
+      key: 'change-password',
+      label: t('user.changePassword'),
+      onClick: () => setPasswordOpen(true),
     },
     {
       type: 'divider' as const,
@@ -340,6 +335,7 @@ const MainLayout: React.FC = () => {
           </Content>
           <TaskCenter />
         </TaskRuntimeProvider>
+        <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
       </Layout>
     </Layout>
   )

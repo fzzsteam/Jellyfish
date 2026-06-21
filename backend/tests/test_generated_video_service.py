@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.db import Base
+from app.core.contracts.video_generation import VideoGenerationResult
 from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider, ProviderStatus
 from app.models.studio import (
     CameraAngle,
@@ -24,8 +25,10 @@ from app.models.studio import (
 )
 from app.services.film.generated_video import (
     build_run_args,
+    persist_generated_video_to_shot,
     preview_prompt_and_images,
     resolve_default_video_model,
+    run_video_generation_task,
     validate_images_count,
 )
 from app.bootstrap import bootstrap_all_registries
@@ -224,6 +227,141 @@ async def test_build_run_args_maps_reference_images(monkeypatch: pytest.MonkeyPa
         assert run_args["input"]["ratio"] == "9:16"
         assert run_args["input"]["seconds"] == 6
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_persist_generated_video_assigns_task_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    """视频生成文件必须继承任务归属，不能写入空 user_id。"""
+    db, engine = await _build_session()
+    async with db:
+        await _seed_shot_graph(db)
+        captured: dict[str, str] = {}
+
+        async def fake_create_file(_session: AsyncSession, *, user_id: str, **_kwargs):
+            """记录视频文件创建收到的用户，并返回最小文件对象。"""
+            captured["user_id"] = user_id
+            return type("File", (), {"id": "video-file-1"})()
+
+        async def fake_sync_usage(*_args, **_kwargs) -> None:
+            """隔离与本测试无关的文件使用关系写入。"""
+            return None
+
+        monkeypatch.setattr("app.services.film.generated_video.create_file_from_url_or_b64", fake_create_file)
+        monkeypatch.setattr("app.services.film.generated_video.sync_usage_from_shot_context", fake_sync_usage)
+
+        await persist_generated_video_to_shot(
+            db,
+            task_id="video-task-1",
+            user_id="owner-1",
+            shot_id="s1",
+            result=VideoGenerationResult(url="https://example.com/video.mp4", provider="openai"),
+            provider="openai",
+            api_key="k",
+        )
+
+        assert captured["user_id"] == "owner-1"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_video_generation_task_passes_task_owner_to_persistence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """视频 runner 必须从任务记录读取可信 owner，而不是依赖请求载荷。"""
+    captured: dict[str, str | None] = {}
+
+    class FakeTaskStore:
+        """提供视频 runner 所需的最小任务存储接口。"""
+
+        def __init__(self, _session: object) -> None:
+            """接受 runner 创建存储时传入的会话。"""
+            pass
+
+        async def get(self, _task_id: str):
+            """返回带可信用户归属的任务记录。"""
+            return type("TaskRecord", (), {"user_id": "owner-1"})()
+
+        async def set_status(self, *_args, **_kwargs) -> None:
+            """忽略与本测试断言无关的状态写入。"""
+            return None
+
+        async def set_progress(self, *_args, **_kwargs) -> None:
+            """忽略与本测试断言无关的进度写入。"""
+            return None
+
+        async def set_result(self, *_args, **_kwargs) -> None:
+            """忽略与本测试断言无关的结果写入。"""
+            return None
+
+    class FakeSession:
+        """提供 runner 事务边界所需的最小异步会话。"""
+
+        async def commit(self) -> None:
+            """模拟事务提交。"""
+            return None
+
+        async def rollback(self) -> None:
+            """模拟事务回滚。"""
+            return None
+
+    class FakeSessionContext:
+        """为 runner 提供异步上下文管理器。"""
+
+        async def __aenter__(self) -> FakeSession:
+            """进入上下文时返回测试会话。"""
+            return FakeSession()
+
+        async def __aexit__(self, *_args) -> bool:
+            """退出上下文且不屏蔽异常。"""
+            return False
+
+    class FakeVideoTask:
+        """绕过供应商调用并返回最小视频结果。"""
+
+        def __init__(self, *_args, **_kwargs) -> None:
+            """接受生产代码传入的供应商配置和输入。"""
+            pass
+
+        async def run(self) -> None:
+            """模拟完成供应商视频生成。"""
+            return None
+
+        async def get_result(self) -> VideoGenerationResult:
+            """返回可供落库的最小视频结果。"""
+            return VideoGenerationResult(url="https://example.com/video.mp4", provider="openai")
+
+    async def fake_cancel(**_kwargs) -> bool:
+        """测试路径不触发取消。"""
+        return False
+
+    async def fake_persist(*_args, **kwargs):
+        """记录 runner 向视频落库层传递的用户归属。"""
+        captured["user_id"] = kwargs.get("user_id")
+        return type("File", (), {"id": "video-file-1"})()
+
+    async def fake_recompute(*_args, **_kwargs) -> None:
+        """隔离与用户归属无关的镜头状态计算。"""
+        return None
+
+    monkeypatch.setattr("app.services.film.generated_video.SqlAlchemyTaskStore", FakeTaskStore)
+    monkeypatch.setattr("app.services.film.generated_video.async_session_maker", lambda: FakeSessionContext())
+    monkeypatch.setattr("app.services.film.generated_video.VideoGenerationTask", FakeVideoTask)
+    monkeypatch.setattr("app.services.film.generated_video.cancel_if_requested_async", fake_cancel)
+    monkeypatch.setattr("app.services.film.generated_video.persist_generated_video_to_shot", fake_persist)
+    monkeypatch.setattr("app.services.film.generated_video.recompute_shot_status", fake_recompute)
+    monkeypatch.setattr("app.services.film.generated_video.log_task_event", lambda *_args, **_kwargs: None)
+
+    await run_video_generation_task(
+        "video-task-1",
+        {
+            "provider": "openai",
+            "api_key": "k",
+            "base_url": None,
+            "shot_id": "s1",
+            "input": {"prompt": "p", "model": "sora-mini", "ratio": "16:9"},
+        },
+    )
+
+    assert captured["user_id"] == "owner-1"
 
 
 @pytest.mark.asyncio

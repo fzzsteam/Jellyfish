@@ -2,11 +2,8 @@
   "title": "FZZS",
   "subtitle": "AI 短剧工作台",
   "welcome": "欢迎使用 Jellyfish",
-  "menu": {
-    "settings": "系统设置"
-  },
   "user": {
-    "profile": "个人中心",
+    "changePassword": "修改密码",
     "logout": "退出登录"
   },
   "lang": {
@@ -14,4 +11,3 @@
     "en": "English"
   }
 }
-

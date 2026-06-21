@@ -7,8 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db
 from app.models.user import User
-from app.schemas.auth import AccessTokenRead, LoginRequest, RefreshRequest, TokenPairRead, UserRead
-from app.schemas.common import ApiResponse, success_response
+from app.schemas.auth import AccessTokenRead, ChangePasswordRequest, LoginRequest, RefreshRequest, TokenPairRead, UserRead
+from app.schemas.common import ApiResponse, empty_response, success_response
 from app.services import auth as auth_service
 
 router = APIRouter()
@@ -38,3 +38,24 @@ async def refresh(body: RefreshRequest, db: AsyncSession = Depends(get_db)) -> A
 async def get_me(current_user: User = Depends(get_current_user)) -> ApiResponse[UserRead]:
     """获取当前登录用户的基本信息。"""
     return success_response(UserRead.model_validate(current_user))
+
+
+@router.post("/change-password", response_model=ApiResponse[None], summary="修改当前用户密码")
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[None]:
+    """当前用户校验旧密码后修改自己的密码；成功后已签发的 token 立即失效。"""
+    try:
+        await auth_service.change_password(
+            db,
+            user_id=current_user.id,
+            current_password=body.current_password,
+            new_password=body.new_password,
+        )
+    except auth_service.InvalidCredentialsError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="current password is incorrect"
+        ) from exc
+    return empty_response()

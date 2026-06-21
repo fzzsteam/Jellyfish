@@ -68,7 +68,6 @@ async def test_list_files_paginated_filters_by_keyword() -> None:
         assert [item.id for item in resp.data.items] == ["f1"]
     await engine.dispose()
 
-
 @pytest.mark.asyncio
 async def test_get_file_detail_includes_usages() -> None:
     db, engine = await _build_session()

@@ -59,11 +59,12 @@ async def _persist_images_to_assets(
     session: AsyncSession,
     *,
     task_id: str,
+    user_id: str,
     relation_type: str,
     relation_entity_id: str,
     result: ImageGenerationResult,
 ) -> None:
-    """将图片生成结果落库到 FileItem 与业务图片表。"""
+    """将图片生成结果按任务所属用户落库到 FileItem 与业务图片表。"""
     images = result.images or []
     if not images:
         return
@@ -79,6 +80,7 @@ async def _persist_images_to_assets(
             continue
         file_obj = await create_file_from_url_or_b64(
             session,
+            user_id=user_id,
             url=item.url,
             name=f"{target_type}-{target_id}-{index + 1}",
             prefix=f"generated-images/{target_type}/{target_id}",
@@ -370,12 +372,17 @@ async def run_image_generation_task(
     task_id: str,
     run_args: dict,
 ) -> None:
+    """执行图片生成，并以任务记录的用户归属持久化所有生成文件。"""
     relation_type = str(run_args.get("relation_type") or "")
     relation_entity_id = str(run_args.get("relation_entity_id") or "")
 
     async with async_session_maker() as session:
         try:
             store = SqlAlchemyTaskStore(session)
+            task_record = await store.get(task_id)
+            user_id = (task_record.user_id or "").strip() if task_record is not None else ""
+            if not user_id:
+                raise RuntimeError(f"Image generation task has no owner: {task_id}")
             await store.set_status(task_id, TaskStatus.running)
             await store.set_progress(task_id, 10)
             await session.commit()
@@ -413,6 +420,7 @@ async def run_image_generation_task(
             await _persist_images_to_assets(
                 session,
                 task_id=task_id,
+                user_id=user_id,
                 relation_type=relation_type,
                 relation_entity_id=relation_entity_id,
                 result=result,

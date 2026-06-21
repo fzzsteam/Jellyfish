@@ -210,11 +210,13 @@ async def persist_generated_video_to_shot(
     session: AsyncSession,
     *,
     task_id: str,
+    user_id: str,
     shot_id: str,
     result: VideoGenerationResult,
     provider: str,
     api_key: str,
 ) -> FileItem:
+    """将生成视频按任务所属用户落库，并关联回任务与镜头。"""
     url = (result.url or "").strip()
     if not url:
         raise RuntimeError("Video generation result has no download url")
@@ -225,6 +227,7 @@ async def persist_generated_video_to_shot(
 
     file_obj = await create_file_from_url_or_b64(
         session,
+        user_id=user_id,
         url=url,
         name=f"shot-{shot_id}-video",
         prefix=f"generated-videos/shots/{shot_id}",
@@ -265,9 +268,14 @@ async def run_video_generation_task(
     task_id: str,
     run_args: dict,
 ) -> None:
+    """执行视频生成，并以任务记录的用户归属持久化生成文件。"""
     async with async_session_maker() as session:
         try:
             store = SqlAlchemyTaskStore(session)
+            task_record = await store.get(task_id)
+            user_id = (task_record.user_id or "").strip() if task_record is not None else ""
+            if not user_id:
+                raise RuntimeError(f"Video generation task has no owner: {task_id}")
             await store.set_status(task_id, TaskStatus.running)
             await store.set_progress(task_id, 10)
             await session.commit()
@@ -309,6 +317,7 @@ async def run_video_generation_task(
             file_obj = await persist_generated_video_to_shot(
                 session,
                 task_id=task_id,
+                user_id=user_id,
                 shot_id=shot_id,
                 result=result,
                 provider=provider,

@@ -3,8 +3,10 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { ApiResponse_AccessTokenRead_ } from '../models/ApiResponse_AccessTokenRead_';
+import type { ApiResponse_NoneType_ } from '../models/ApiResponse_NoneType_';
 import type { ApiResponse_TokenPairRead_ } from '../models/ApiResponse_TokenPairRead_';
 import type { ApiResponse_UserRead_ } from '../models/ApiResponse_UserRead_';
+import type { ChangePasswordRequest } from '../models/ChangePasswordRequest';
 import type { LoginRequest } from '../models/LoginRequest';
 import type { RefreshRequest } from '../models/RefreshRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
@@ -70,6 +72,32 @@ export class AuthService {
             headers: {
                 'authorization': authorization,
             },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 修改当前用户密码
+     * 当前用户校验旧密码后修改自己的密码；成功后已签发的 token 立即失效。
+     * @returns ApiResponse_NoneType_ Successful Response
+     * @throws ApiError
+     */
+    public static changePasswordApiV1AuthChangePasswordPost({
+        requestBody,
+        authorization,
+    }: {
+        requestBody: ChangePasswordRequest,
+        authorization?: (string | null),
+    }): CancelablePromise<ApiResponse_NoneType_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/auth/change-password',
+            headers: {
+                'authorization': authorization,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: `Validation Error`,
             },

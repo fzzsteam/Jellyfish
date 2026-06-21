@@ -7,6 +7,8 @@ token_version 以即时吊销旧 token、不允许禁用/降级最后一个管�
 
 from __future__ import annotations
 
+import secrets
+import string
 import uuid
 
 from sqlalchemy import func, select
@@ -112,3 +114,29 @@ async def update_user(
     await db.flush()
     await db.refresh(user)
     return user
+
+
+# 临时密码字符集：排除 0/O/1/l/I 等肉眼易混字符，便于人工抄写或口述。
+_TEMP_PASSWORD_ALPHABET = "".join(
+    c for c in (string.ascii_letters + string.digits) if c not in "0O1lI"
+)
+
+
+def _generate_temporary_password(length: int = 12) -> str:
+    """生成易读的随机临时密码（使用密码学安全的 secrets.choice）。"""
+    return "".join(secrets.choice(_TEMP_PASSWORD_ALPHABET) for _ in range(length))
+
+
+async def reset_password(db: AsyncSession, user_id: str) -> tuple[User, str]:
+    """管理员重置目标用户密码：生成随机临时密码并递增 token_version。
+
+    目标不存在抛 `UserNotFoundError`。返回 (user, temporary_password)，
+    临时密码仅本次返回，调用方需一次性展示给管理员。
+    """
+    user = await get_user(db, user_id)
+    temporary_password = _generate_temporary_password()
+    user.hashed_password = hash_password(temporary_password)
+    user.token_version += 1
+    await db.flush()
+    await db.refresh(user)
+    return user, temporary_password

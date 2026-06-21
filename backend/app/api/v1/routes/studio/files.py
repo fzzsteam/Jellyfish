@@ -20,6 +20,7 @@ from app.services.studio.files import (
     upload_file,
 )
 router = APIRouter()
+public_router = APIRouter()
 
 
 @router.get(
@@ -107,16 +108,16 @@ async def upload_file_api(
     return created_response(FileRead.model_validate(obj))
 
 
-@router.get(
+@public_router.get(
     "/{file_id}/download",
     summary="下载文件二进制内容",
 )
 async def download_file_api(
     file_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
 ):
-    return await build_download_response(db, file_id=file_id, user_id=current_user.id)
+    """公开下载文件二进制内容，供浏览器原生媒体请求直接访问。"""
+    return await build_download_response(db, file_id=file_id)
 
 
 @router.get(

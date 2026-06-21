@@ -42,7 +42,6 @@ def test_build_client_raises_without_endpoint(monkeypatch):
     with pytest.raises(RuntimeError, match="S3_ENDPOINT_URL"):
         _build_client()
 
-
 @pytest.mark.asyncio
 async def test_upload_file_returns_empty_url(monkeypatch):
     from app.core import storage

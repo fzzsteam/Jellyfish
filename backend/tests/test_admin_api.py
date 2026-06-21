@@ -81,6 +81,12 @@ def test_patch_user_disable(admin_client: TestClient) -> None:
     assert resp.json()["data"]["is_active"] is False
 
 
+def test_patch_self_active_forbidden_400(admin_client: TestClient) -> None:
+    """管理员不能修改自己的启用/禁用状态（与重置密码同样禁止操作自己）。"""
+    resp = admin_client.patch("/api/v1/admin/users/admin-1", json={"is_active": True})
+    assert resp.status_code == 400
+
+
 def test_list_user_projects_empty(admin_client: TestClient) -> None:
     resp = admin_client.get("/api/v1/admin/users/user-1/projects")
     assert resp.status_code == 200
@@ -99,3 +105,30 @@ def test_non_admin_forbidden() -> None:
         assert resp.status_code == 403
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_reset_password_returns_temporary_password(admin_client: TestClient) -> None:
+    """POST /admin/users/{id}/reset-password 返回一次性临时密码，且可登录。"""
+    resp = admin_client.post("/api/v1/admin/users/user-1/reset-password")
+
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["temporary_password"]
+    assert data["user"]["username"] == "bob"
+    # 临时密码可用于登录
+    login = admin_client.post(
+        "/api/v1/auth/login", json={"username": "bob", "password": data["temporary_password"]}
+    )
+    assert login.status_code == 200
+
+
+def test_reset_password_self_forbidden_400(admin_client: TestClient) -> None:
+    """管理员不能重置自己的密码（current_user=admin-1）。"""
+    resp = admin_client.post("/api/v1/admin/users/admin-1/reset-password")
+    assert resp.status_code == 400
+
+
+def test_reset_password_unknown_user_404(admin_client: TestClient) -> None:
+    """重置不存在的用户返回 404。"""
+    resp = admin_client.post("/api/v1/admin/users/no-such-user/reset-password")
+    assert resp.status_code == 404

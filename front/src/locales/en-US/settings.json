@@ -1,19 +1,16 @@
 {
-  "title": "System Settings",
-  "nickname": "Nickname",
-  "role": "Role",
-  "darkMode": "Dark Mode",
-  "darkModeTooltip": "Example switch, you can plug real theme toggle here.",
-  "save": "Save",
-  "updated": "Basic info updated (demo).",
-  "roleOptions": {
-    "admin": "Administrator",
-    "operator": "Operator",
-    "guest": "Guest"
-  },
+  "title": "Change Password",
+  "currentPassword": "Current Password",
+  "newPassword": "New Password",
+  "confirmPassword": "Confirm New Password",
+  "success": "Password changed. Please log in again with the new password.",
+  "wrongCurrent": "Current password is incorrect",
+  "failed": "Failed to change password",
+  "mismatch": "The new passwords do not match",
   "validation": {
-    "nicknameRequired": "Please input nickname",
-    "roleRequired": "Please select role"
+    "currentRequired": "Please enter the current password",
+    "newRequired": "Please enter the new password",
+    "newMin": "New password must be at least 6 characters",
+    "confirmRequired": "Please confirm the new password"
   }
 }
-

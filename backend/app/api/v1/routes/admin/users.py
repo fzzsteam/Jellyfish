@@ -8,8 +8,15 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db
-from app.schemas.auth import UserAdminRead, UserCreate, UserProjectBrief, UserUpdate
+from app.dependencies import get_current_user, get_db, require_admin
+from app.models.user import User
+from app.schemas.auth import (
+    ResetPasswordRead,
+    UserAdminRead,
+    UserCreate,
+    UserProjectBrief,
+    UserUpdate,
+)
 from app.schemas.common import (
     ApiResponse,
     PaginatedData,
@@ -57,7 +64,18 @@ async def get_user(user_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/{user_id}", response_model=ApiResponse[UserAdminRead], summary="修改用户")
-async def update_user(user_id: str, body: UserUpdate, db: AsyncSession = Depends(get_db)):
+async def update_user(
+    user_id: str,
+    body: UserUpdate,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    # 管理员不能修改自己的启用/禁用状态（与重置密码同样禁止操作自己）
+    if user_id == current_user.id and body.is_active is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="cannot change your own active status",
+        )
     try:
         user = await admin_service.update_user(
             db, user_id, password=body.password, is_active=body.is_active, is_admin=body.is_admin
@@ -69,6 +87,39 @@ async def update_user(user_id: str, body: UserUpdate, db: AsyncSession = Depends
             status_code=status.HTTP_400_BAD_REQUEST, detail="cannot disable or demote the last active admin"
         ) from exc
     return success_response(UserAdminRead.model_validate(user))
+
+
+@router.post(
+    "/{user_id}/reset-password",
+    response_model=ApiResponse[ResetPasswordRead],
+    summary="重置用户密码",
+)
+async def reset_password(
+    user_id: str,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[ResetPasswordRead]:
+    """管理员重置目标用户密码；后端生成一次性临时密码并返回。
+
+    不允许重置自己（应通过自助改密接口）；目标用户不存在返回 404。
+    """
+    if user_id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="cannot reset your own password, use change-password instead",
+        )
+    try:
+        user, temporary_password = await admin_service.reset_password(db, user_id)
+    except admin_service.UserNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=entity_not_found("User")
+        ) from exc
+    return success_response(
+        ResetPasswordRead(
+            user=UserAdminRead.model_validate(user),
+            temporary_password=temporary_password,
+        )
+    )
 
 
 @router.get(

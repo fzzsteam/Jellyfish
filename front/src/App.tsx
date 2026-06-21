@@ -1,7 +1,6 @@
 import type React from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import MainLayout from './layouts/MainLayout'
-import Settings from './pages/Settings'
 import NotFound from './pages/NotFound'
 import ProjectLobby from './pages/aiStudio/project/ProjectLobby'
 import ProjectWorkbench from './pages/aiStudio/project/ProjectWorkbench'
@@ -58,7 +57,6 @@ const App: React.FC = () => {
           <Route path="agents/:id/edit" element={<AgentEdit />} />
           <Route path="agents" element={<AgentManagement />} />
           <Route path="models" element={<ModelManagement />} />
-          <Route path="settings" element={<Settings />} />
           <Route element={<AdminRoute />}>
             <Route path="admin/users" element={<AdminUserListPage />} />
             <Route path="admin/users/:id" element={<AdminUserDetailPage />} />

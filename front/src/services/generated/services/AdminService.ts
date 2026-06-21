@@ -4,6 +4,7 @@
 /* eslint-disable */
 import type { ApiResponse_list_UserProjectBrief__ } from '../models/ApiResponse_list_UserProjectBrief__';
 import type { ApiResponse_PaginatedData_UserAdminRead__ } from '../models/ApiResponse_PaginatedData_UserAdminRead__';
+import type { ApiResponse_ResetPasswordRead_ } from '../models/ApiResponse_ResetPasswordRead_';
 import type { ApiResponse_UserAdminRead_ } from '../models/ApiResponse_UserAdminRead_';
 import type { UserCreate } from '../models/UserCreate';
 import type { UserUpdate } from '../models/UserUpdate';
@@ -116,6 +117,35 @@ export class AdminService {
             },
             body: requestBody,
             mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 重置用户密码
+     * 管理员重置目标用户密码；后端生成一次性临时密码并返回。
+     *
+     * 不允许重置自己（应通过自助改密接口）；目标用户不存在返回 404。
+     * @returns ApiResponse_ResetPasswordRead_ Successful Response
+     * @throws ApiError
+     */
+    public static resetPasswordApiV1AdminUsersUserIdResetPasswordPost({
+        userId,
+        authorization,
+    }: {
+        userId: string,
+        authorization?: (string | null),
+    }): CancelablePromise<ApiResponse_ResetPasswordRead_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/admin/users/{user_id}/reset-password',
+            path: {
+                'user_id': userId,
+            },
+            headers: {
+                'authorization': authorization,
+            },
             errors: {
                 422: `Validation Error`,
             },

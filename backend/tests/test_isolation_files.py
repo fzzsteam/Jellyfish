@@ -1,13 +1,14 @@
 """素材文件（files 表）按 user_id 隔离测试。
 
-验证 files service 的 list/get/delete/update/download/storage-info 仅命中归属
-当前用户的文件；访问他人文件按"未找到"处理。
+验证 files service 的 list/get/delete/update/storage-info 仅命中归属当前用户的文件；
+下载接口改为匿名可读，用于浏览器原生媒体请求直接访问素材内容。
 """
 
 from __future__ import annotations
 
 import pytest
 from fastapi import HTTPException
+from unittest.mock import AsyncMock
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.db import Base
@@ -99,14 +100,21 @@ async def test_update_others_file_404() -> None:
 
 
 @pytest.mark.asyncio
-async def test_download_others_file_404() -> None:
+async def test_download_is_public_for_existing_files() -> None:
     db, engine = await _session()
     async with db:
         db.add(_file("f2", "other", user_id="u2"))
         await db.flush()
-        with pytest.raises(HTTPException) as exc:
-            await build_download_response(db, file_id="f2", user_id="u1")
-        assert exc.value.status_code == 404
+        download_mock = AsyncMock(return_value=b"image-bytes")
+        monkeypatch = pytest.MonkeyPatch()
+        monkeypatch.setattr("app.services.studio.files.storage.download_file", download_mock)
+        try:
+            response = await build_download_response(db, file_id="f2")
+        finally:
+            monkeypatch.undo()
+
+        assert response.media_type == "image/png"
+        download_mock.assert_awaited_once_with(key="files/f2.png")
     await engine.dispose()
 
 

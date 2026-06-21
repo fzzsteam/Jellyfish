@@ -61,6 +61,7 @@ export type { ApiResponse_PropInfoAnalysisResult_ } from './models/ApiResponse_P
 export type { ApiResponse_ProviderRead_ } from './models/ApiResponse_ProviderRead_';
 export type { ApiResponse_RenderedPromptResponse_ } from './models/ApiResponse_RenderedPromptResponse_';
 export type { ApiResponse_RenderedShotFramePromptRead_ } from './models/ApiResponse_RenderedShotFramePromptRead_';
+export type { ApiResponse_ResetPasswordRead_ } from './models/ApiResponse_ResetPasswordRead_';
 export type { ApiResponse_SceneInfoAnalysisResult_ } from './models/ApiResponse_SceneInfoAnalysisResult_';
 export type { ApiResponse_ScriptConsistencyCheckResult_ } from './models/ApiResponse_ScriptConsistencyCheckResult_';
 export type { ApiResponse_ScriptDivisionResult_ } from './models/ApiResponse_ScriptDivisionResult_';
@@ -95,6 +96,7 @@ export type { Body_upload_file_api_api_v1_studio_files_upload_post } from './mod
 export type { CameraAngle } from './models/CameraAngle';
 export type { CameraMovement } from './models/CameraMovement';
 export type { CameraShotType } from './models/CameraShotType';
+export type { ChangePasswordRequest } from './models/ChangePasswordRequest';
 export type { ChapterCreate } from './models/ChapterCreate';
 export type { ChapterRead } from './models/ChapterRead';
 export type { ChapterStatus } from './models/ChapterStatus';
@@ -178,6 +180,7 @@ export type { ProviderUpdate } from './models/ProviderUpdate';
 export type { RefreshRequest } from './models/RefreshRequest';
 export type { RenderedPromptResponse } from './models/RenderedPromptResponse';
 export type { RenderedShotFramePromptRead } from './models/RenderedShotFramePromptRead';
+export type { ResetPasswordRead } from './models/ResetPasswordRead';
 export type { SceneInfoAnalysisRequest } from './models/SceneInfoAnalysisRequest';
 export type { SceneInfoAnalysisResult } from './models/SceneInfoAnalysisResult';
 export type { ScriptConsistencyCheckRequest } from './models/ScriptConsistencyCheckRequest';

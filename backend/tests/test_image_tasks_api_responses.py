@@ -277,6 +277,10 @@ def test_run_image_generation_task_persists_render_context(monkeypatch) -> None:
         def __init__(self, _session):
             pass
 
+        async def get(self, _task_id):
+            """模拟任务记录，提供生成文件应继承的可信用户归属。"""
+            return type("TaskRecord", (), {"user_id": "owner-1"})()
+
         async def set_status(self, *_args, **_kwargs):
             return None
 
@@ -317,7 +321,9 @@ def test_run_image_generation_task_persists_render_context(monkeypatch) -> None:
     async def _fake_cancel_if_requested_async(**_kwargs):
         return False
 
-    async def _fake_persist_images_to_assets(*_args, **_kwargs):
+    async def _fake_persist_images_to_assets(*_args, **kwargs):
+        """记录 runner 传入落库层的用户归属。"""
+        calls["persist_user_id"] = kwargs.get("user_id")
         return None
 
     async def _fake_resolve_related_shot_id(*_args, **_kwargs):
@@ -370,5 +376,6 @@ def test_run_image_generation_task_persists_render_context(monkeypatch) -> None:
     )
 
     assert calls["result_payload"]["render_context"]["images"] == ["file-1"]
+    assert calls["persist_user_id"] == "owner-1"
     assert calls["result_payload"]["render_context"]["selected_guidance_details"][0]["reason_tag"] == "导演主指令"
     assert calls["result_payload"]["render_context"]["dropped_guidance_details"][0]["reason_tag"] == "首帧降轴线"

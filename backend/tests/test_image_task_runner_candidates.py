@@ -85,10 +85,13 @@ async def test_persist_images_to_assets_keeps_all_generated_images(monkeypatch: 
         await db.commit()
 
         created_file_ids: list[str] = []
+        created_file_user_ids: list[str] = []
 
-        async def fake_create_file(session, *, url: str, name: str, prefix: str):
+        async def fake_create_file(session, *, user_id: str, url: str, name: str, prefix: str):
+            """记录图片落库收到的可信任务归属。"""
             file_id = f"file-{len(created_file_ids) + 1}"
             created_file_ids.append(file_id)
+            created_file_user_ids.append(user_id)
             file_obj = _file(file_id)
             session.add(file_obj)
             await session.flush()
@@ -107,6 +110,7 @@ async def test_persist_images_to_assets_keeps_all_generated_images(monkeypatch: 
         await _persist_images_to_assets(
             db,
             task_id="task-1",
+            user_id="test-user",
             relation_type="scene_image",
             relation_entity_id=str(image.id),
             result=result,
@@ -117,6 +121,7 @@ async def test_persist_images_to_assets_keeps_all_generated_images(monkeypatch: 
         refreshed = await db.get(SceneImage, image.id)
         link = await db.get(GenerationTaskLink, 1)
         assert created_file_ids == ["file-1", "file-2", "file-3"]
+        assert created_file_user_ids == ["test-user", "test-user", "test-user"]
         assert [row.file_id for row in rows] == ["file-3", "file-2", "file-1"]
         assert refreshed is not None
         assert refreshed.file_id == "file-1"
@@ -144,7 +149,9 @@ async def test_persist_images_to_assets_does_not_overwrite_existing_current_imag
         db.add_all([image, _task("task-2")])
         await db.commit()
 
-        async def fake_create_file(session, *, url: str, name: str, prefix: str):
+        async def fake_create_file(session, *, user_id: str, url: str, name: str, prefix: str):
+            """模拟按用户归属创建新候选文件。"""
+            assert user_id == "test-user"
             file_obj = _file("file-new")
             session.add(file_obj)
             await session.flush()
@@ -156,6 +163,7 @@ async def test_persist_images_to_assets_does_not_overwrite_existing_current_imag
         await _persist_images_to_assets(
             db,
             task_id="task-2",
+            user_id="test-user",
             relation_type="scene_image",
             relation_entity_id=str(image.id),
             result=result,

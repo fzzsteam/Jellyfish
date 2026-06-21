@@ -309,6 +309,123 @@ def test_async_delegating_executor_marks_cancelled_before_start(monkeypatch, tmp
     sync_engine.dispose()
 
 
+def test_async_delegating_executor_surfaces_runner_persisted_failure(monkeypatch, tmp_path) -> None:
+    """async runner 已落库失败时，外层执行器不能再记录成功。"""
+    db_path = tmp_path / "async-executor-runner-failed.db"
+    sync_engine = create_engine(f"sqlite:///{db_path}", future=True)
+    sync_session_local = sessionmaker(sync_engine, class_=Session, expire_on_commit=False)
+    Base.metadata.create_all(sync_engine)
+    with sync_session_local() as db:
+        db.add(
+            GenerationTask(
+                id="task-runner-failed",
+                user_id="test-user",
+                mode="async_polling",
+                task_kind="image_generation",
+                status="running",
+                progress=10,
+                payload={"task_kind": "image_generation", "run_args": {}},
+                result=None,
+                error="",
+            )
+        )
+        db.commit()
+
+    async def runner_marks_failed(_task_id: str, _run_args: dict) -> None:
+        """模拟业务 runner 捕获异常、落库失败后正常返回的现状。"""
+        with sync_session_local() as db:
+            row = db.get(GenerationTask, "task-runner-failed")
+            assert row is not None
+            row.status = "failed"
+            row.error = "file user_id missing"
+            db.commit()
+
+    async def fake_close_db() -> None:
+        """隔离全局异步引擎关闭。"""
+        return None
+
+    events: list[str] = []
+    monkeypatch.setattr("app.services.worker.task_executor.reset_db_runtime", lambda: None)
+    monkeypatch.setattr("app.services.worker.task_executor.close_db", fake_close_db)
+    monkeypatch.setattr(
+        "app.services.worker.task_executor.log_task_event",
+        lambda _kind, _task_id, event, **_fields: events.append(event),
+    )
+
+    executor = AbstractAsyncDelegatingExecutor(
+        task_kind="image_generation",
+        runner=runner_marks_failed,
+        timeout_seconds=10,
+        session_maker=sync_session_local,
+    )
+
+    with pytest.raises(RuntimeError, match="file user_id missing"):
+        executor.run("task-runner-failed")
+
+    assert "succeeded" not in events
+    assert events[-1] == "failed"
+    sync_engine.dispose()
+
+
+def test_async_delegating_executor_preserves_runner_cancellation(monkeypatch, tmp_path) -> None:
+    """runner 执行期间取消后，外层应记录取消且不改写成失败。"""
+    db_path = tmp_path / "async-executor-runner-cancelled.db"
+    sync_engine = create_engine(f"sqlite:///{db_path}", future=True)
+    sync_session_local = sessionmaker(sync_engine, class_=Session, expire_on_commit=False)
+    Base.metadata.create_all(sync_engine)
+    with sync_session_local() as db:
+        db.add(
+            GenerationTask(
+                id="task-runner-cancelled",
+                user_id="test-user",
+                mode="async_polling",
+                task_kind="image_generation",
+                status="running",
+                progress=10,
+                payload={"task_kind": "image_generation", "run_args": {}},
+                result=None,
+                error="",
+            )
+        )
+        db.commit()
+
+    async def runner_marks_cancelled(_task_id: str, _run_args: dict) -> None:
+        """模拟业务 runner 在执行阶段确认取消并正常返回。"""
+        with sync_session_local() as db:
+            row = db.get(GenerationTask, "task-runner-cancelled")
+            assert row is not None
+            row.status = "cancelled"
+            db.commit()
+
+    async def fake_close_db() -> None:
+        """隔离全局异步引擎关闭。"""
+        return None
+
+    events: list[str] = []
+    monkeypatch.setattr("app.services.worker.task_executor.reset_db_runtime", lambda: None)
+    monkeypatch.setattr("app.services.worker.task_executor.close_db", fake_close_db)
+    monkeypatch.setattr(
+        "app.services.worker.task_executor.log_task_event",
+        lambda _kind, _task_id, event, **_fields: events.append(event),
+    )
+
+    executor = AbstractAsyncDelegatingExecutor(
+        task_kind="image_generation",
+        runner=runner_marks_cancelled,
+        timeout_seconds=10,
+        session_maker=sync_session_local,
+    )
+    executor.run("task-runner-cancelled")
+
+    with sync_session_local() as db:
+        row = db.get(GenerationTask, "task-runner-cancelled")
+        assert row is not None
+        assert row.status == "cancelled"
+    assert "succeeded" not in events
+    assert events[-1] == "cancelled"
+    sync_engine.dispose()
+
+
 def test_async_delegating_executor_closes_db_in_same_event_loop(monkeypatch, tmp_path) -> None:
     db_path = tmp_path / "async-executor-close-loop.db"
     sync_engine = create_engine(f"sqlite:///{db_path}", future=True)
@@ -335,8 +452,14 @@ def test_async_delegating_executor_closes_db_in_same_event_loop(monkeypatch, tmp
 
     loops: dict[str, asyncio.AbstractEventLoop] = {}
 
-    async def _runner(_task_id: str, _run_args: dict) -> None:
+    async def _runner(task_id: str, _run_args: dict) -> None:
+        """记录 runner 事件循环并模拟业务 runner 落库成功终态。"""
         loops["runner"] = asyncio.get_running_loop()
+        with sync_session_local() as db:
+            row = db.get(GenerationTask, task_id)
+            assert row is not None
+            row.status = "succeeded"
+            db.commit()
 
     async def _close_db() -> None:
         loops["close_db"] = asyncio.get_running_loop()

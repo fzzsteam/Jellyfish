@@ -2,11 +2,8 @@
   "title": "FZZS",
   "subtitle": "AI Short-form Studio",
   "welcome": "Welcome to Jellyfish",
-  "menu": {
-    "settings": "Settings"
-  },
   "user": {
-    "profile": "Profile",
+    "changePassword": "Change Password",
     "logout": "Logout"
   },
   "lang": {
@@ -14,4 +11,3 @@
     "en": "English"
   }
 }
-

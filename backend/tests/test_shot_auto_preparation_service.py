@@ -326,6 +326,94 @@ def test_auto_prepare_links_no_image_assets_and_schedules_generation() -> None:
         engine.dispose()
 
 
+def test_auto_prepare_auto_created_scene_sets_user_id() -> None:
+    """自动建档的新场景必须写入归属 user_id，满足用户隔离约束。"""
+    db, engine = _build_session()
+    try:
+        _seed_project_graph(db)
+        db.add(
+            ShotExtractedCandidate(
+                shot_id="shot-4",
+                candidate_type=ShotCandidateType.scene,
+                candidate_name="林远的房间",
+                payload={"description": "夜晚，只有电脑显示器的冷光照明"},
+            )
+        )
+        db.flush()
+
+        summary = auto_prepare_chapter_shots_sync(db, user_id="test-user", project_id="project-1", chapter_id="chapter-1")
+
+        candidate = db.scalar(
+            select(ShotExtractedCandidate).where(ShotExtractedCandidate.candidate_name == "林远的房间")
+        )
+        scene = db.scalar(select(Scene).where(Scene.name == "林远的房间"))
+        assert candidate is not None
+        assert candidate.candidate_status == ShotCandidateStatus.linked
+        assert scene is not None
+        assert scene.user_id == "test-user"
+        assert candidate.linked_entity_id == scene.id
+        assert summary.auto_created_asset_count == 1
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_auto_prepare_candidate_creation_failure_does_not_poison_session(monkeypatch) -> None:
+    """单个候选自动建档失败后，后续候选仍可继续处理，不应触发 PendingRollbackError。"""
+    db, engine = _build_session()
+    try:
+        _seed_project_graph(db)
+        db.add_all(
+            [
+                ShotExtractedCandidate(
+                    shot_id="shot-1",
+                    candidate_type=ShotCandidateType.scene,
+                    candidate_name="林远卧室",
+                ),
+                ShotExtractedCandidate(
+                    shot_id="shot-2",
+                    candidate_type=ShotCandidateType.scene,
+                    candidate_name="滨海码头",
+                ),
+            ]
+        )
+        db.flush()
+
+        from app.services.studio import shot_auto_preparation as shot_auto_preparation_module
+        original_create_entity_sync = shot_auto_preparation_module._create_entity_sync
+
+        create_calls = {"count": 0}
+
+        def _fake_create_entity_sync(*args, **kwargs):  # noqa: ANN002, ANN003
+            create_calls["count"] += 1
+            if create_calls["count"] == 1:
+                raise RuntimeError("boom")
+            return original_create_entity_sync(*args, **kwargs)
+
+        monkeypatch.setattr(shot_auto_preparation_module, "_create_entity_sync", _fake_create_entity_sync)
+
+        summary = auto_prepare_chapter_shots_sync(db, user_id="test-user", project_id="project-1", chapter_id="chapter-1")
+
+        failed_candidate = db.scalar(
+            select(ShotExtractedCandidate).where(ShotExtractedCandidate.candidate_name == "林远卧室")
+        )
+        succeeded_candidate = db.scalar(
+            select(ShotExtractedCandidate).where(ShotExtractedCandidate.candidate_name == "滨海码头")
+        )
+        succeeded_scene = db.scalar(select(Scene).where(Scene.name == "滨海码头"))
+        assert failed_candidate is not None
+        assert failed_candidate.candidate_status == ShotCandidateStatus.pending
+        assert succeeded_candidate is not None
+        assert succeeded_candidate.candidate_status == ShotCandidateStatus.linked
+        assert succeeded_scene is not None
+        assert succeeded_scene.user_id == "test-user"
+        assert summary.pending_asset_count == 1
+        assert summary.auto_created_asset_count == 1
+    finally:
+        db.close()
+        engine.dispose()
+
+
 def test_auto_prepare_uses_conservative_fuzzy_matching() -> None:
     db, engine = _build_session()
     try:
