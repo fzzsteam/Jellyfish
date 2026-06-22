@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
+from app.models.points import UserPoints
 from app.models.user import User
 
 
@@ -44,6 +45,8 @@ async def create_user(db: AsyncSession, *, username: str, password: str, is_admi
     )
     db.add(user)
     await db.flush()
+    # 同事务内初始化积分账户（余额/冻结均为 0），避免用户创建后缺失积分账户导致后续试算/扣费兜底创建。
+    db.add(UserPoints(user_id=user.id, balance=0, frozen=0))
     await db.refresh(user)
     return user
 

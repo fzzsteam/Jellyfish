@@ -1,0 +1,103 @@
+"""积分用户端点：余额摘要、流水查询、试算。
+
+挂载时统一注入 `get_current_user`（见 app/api/v1/__init__.py），故此处只声明 db/user 依赖。
+保持路由层瘦身：收参 → 调 service → 返回 ApiResponse。
+"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.dependencies import get_current_user, get_db
+from app.models.user import User
+from app.schemas.common import ApiResponse, PaginatedData, paginated_response, success_response
+from app.schemas.points import (
+    PointTransactionRead,
+    PointsQuoteRequest,
+    PointsQuoteResponse,
+    PointsSummaryRead,
+)
+from app.services.points import UnsupportedResolutionError
+from app.services.points.billing import list_user_transactions, quote_points, to_summary
+from app.services.points.ledger import get_points
+
+router = APIRouter()
+
+
+@router.get("/me", response_model=ApiResponse[PointsSummaryRead], summary="当前用户积分摘要")
+async def get_my_points(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PointsSummaryRead]:
+    """返回当前用户余额/冻结/可用额度（纯读取，首次访问自动初始化为 0）。"""
+    pts = await get_points(db, user_id=current_user.id)
+    return success_response(to_summary(balance=pts.balance, frozen=pts.frozen))
+
+
+@router.get(
+    "/transactions",
+    response_model=ApiResponse[PaginatedData[PointTransactionRead]],
+    summary="当前用户积分流水",
+)
+async def list_my_transactions(
+    type: str | None = Query(None, description="按流水类型过滤：recharge/freeze/consume/unfreeze"),
+    business_type: str | None = Query(None, description="按业务类型过滤"),
+    billing_id: str | None = Query(None, description="按计费单据 ID 过滤"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PaginatedData[PointTransactionRead]]:
+    """分页查询当前用户积分流水，按 created_at 倒序。
+
+    非法 `type`（非 recharge/freeze/consume/unfreeze）→ 422。
+    """
+    try:
+        items, total = await list_user_transactions(
+            db,
+            user_id=current_user.id,
+            tx_type=type,
+            business_type=business_type,
+            billing_id=billing_id,
+            page=page,
+            page_size=page_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    return paginated_response(
+        [PointTransactionRead.model_validate(tx) for tx in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post("/quote", response_model=ApiResponse[PointsQuoteResponse], summary="积分试算")
+async def quote_my_points(
+    body: PointsQuoteRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[PointsQuoteResponse]:
+    """试算本次生成所需积分并签发短期 quote_token。
+
+    - 不支持的视频分辨率 → 400。
+    - 显式 model_id 归属他人 → PointsDomainError(403) 由 main.py 处理器序列化。
+    - 用户未配置默认模型 → 503（配置错误，由通用处理器兜底）。
+    """
+    try:
+        resp = await quote_points(
+            db,
+            user_id=current_user.id,
+            business_type=body.business_type,
+            category=body.category,
+            model_id=body.model_id,
+            duration_seconds=body.duration_seconds,
+            resolution=body.resolution,
+            generation_count=body.generation_count,
+        )
+    except UnsupportedResolutionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return success_response(resp)

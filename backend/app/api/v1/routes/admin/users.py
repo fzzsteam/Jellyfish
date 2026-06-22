@@ -24,8 +24,16 @@ from app.schemas.common import (
     paginated_response,
     success_response,
 )
+from app.schemas.points import PointTransactionRead, PointsRechargeRequest, PointsSummaryRead
 from app.services import admin as admin_service
 from app.services.common import entity_already_exists, entity_not_found
+from app.services.points import ledger as points_ledger
+from app.services.points.billing import (
+    PointsDomainError,
+    build_insufficient_error,
+    list_user_transactions,
+    to_summary,
+)
 from app.services.studio import projects as project_service
 
 router = APIRouter()
@@ -132,3 +140,94 @@ async def list_user_projects(user_id: str, db: AsyncSession = Depends(get_db)):
     # list_projects 返回 (items, total) 元组，这里只取项目列表。
     projects, _total = await project_service.list_projects(db, user_id=user_id)
     return success_response([UserProjectBrief.model_validate(p) for p in projects])
+
+
+# ---------------------------------------------------------------------------
+# 积分管理端点（挂载在 admin 路由下，整体 admin 鉴权）
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{user_id}/points",
+    response_model=ApiResponse[PointsSummaryRead],
+    summary="查看某用户积分摘要",
+)
+async def get_user_points(user_id: str, db: AsyncSession = Depends(get_db)):
+    """返回目标用户余额/冻结/可用额度。"""
+    pts = await points_ledger.get_points(db, user_id=user_id)
+    return success_response(to_summary(balance=pts.balance, frozen=pts.frozen))
+
+
+@router.get(
+    "/{user_id}/points/transactions",
+    response_model=ApiResponse[PaginatedData[PointTransactionRead]],
+    summary="查看某用户积分流水",
+)
+async def list_user_points_transactions(
+    user_id: str,
+    type: str | None = Query(None, description="流水类型"),
+    business_type: str | None = Query(None, description="业务类型"),
+    billing_id: str | None = Query(None, description="计费单据 ID"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    """分页查询目标用户积分流水，按 created_at 倒序。
+
+    非法 `type`（非 recharge/freeze/consume/unfreeze）→ 422。
+    """
+    try:
+        items, total = await list_user_transactions(
+            db,
+            user_id=user_id,
+            tx_type=type,
+            business_type=business_type,
+            billing_id=billing_id,
+            page=page,
+            page_size=page_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    return paginated_response(
+        [PointTransactionRead.model_validate(tx) for tx in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.post(
+    "/{user_id}/points/recharge",
+    response_model=ApiResponse[PointTransactionRead],
+    summary="管理员充值/扣减用户积分",
+)
+async def recharge_user_points(
+    user_id: str,
+    body: PointsRechargeRequest,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """对目标用户积分账户充值（正）或扣减（负）。
+
+    - 负充值必须带 remark（否则 ledger 抛 ValueError → 400）。
+    - 负充值不得侵蚀冻结额（否则抛 InsufficientPointsError → PointsDomainError 402）。
+    """
+    try:
+        tx = await points_ledger.recharge(
+            db,
+            user_id=user_id,
+            amount=body.amount,
+            created_by=current_user.id,
+            remark=body.remark,
+        )
+    except points_ledger.InsufficientPointsError as exc:
+        # 侵蚀冻结/余额不足：转结构化领域错误（HTTP 402）。
+        raise build_insufficient_error(
+            available=exc.available, required=exc.required, shortfall=exc.shortfall
+        ) from exc
+    except ValueError as exc:
+        # amount=0 / 负充值无备注等参数错误 → 400。
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return success_response(PointTransactionRead.model_validate(tx))

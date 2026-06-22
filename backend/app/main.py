@@ -14,6 +14,7 @@ from app.bootstrap import bootstrap_all_registries, seed_initial_admin
 from app.config import settings
 from app.core.db import async_session_maker, close_db, init_db
 from app.schemas.common import ApiResponse
+from app.services.points.billing import PointsDomainError
 
 
 def _error_message(detail: object) -> str:
@@ -55,6 +56,26 @@ async def validation_exception_handler(request: Request, exc: Exception) -> JSON
     return JSONResponse(status_code=422, content=body)
 
 
+async def points_domain_error_handler(request: Request, exc: "PointsDomainError") -> JSONResponse:
+    """积分领域错误处理器：保留稳定 code 与结构化 data。
+
+    为什么独立于通用 HTTPException 处理器：
+        `PointsDomainError` 需要在 data 中回带结构化字段（available/required/shortfall、
+        最新试算结果等），供前端按 `data.error_code` 精确分支。通用 HTTPException 处理器
+        会把 data 置 null，丢失这些字段，故注册专属处理器。
+    稳定字符串 code 放在 `data.error_code`（`ApiResponse.code` 已是 HTTP int 状态码）。
+    """
+    from app.services.points.billing import PointsDomainError  # 局部 import 避免循环依赖
+
+    assert isinstance(exc, PointsDomainError)
+    body = ApiResponse[dict](
+        code=exc.status_code,
+        message=exc.message,
+        data={**exc.data, "error_code": exc.code},
+    ).model_dump()
+    return JSONResponse(status_code=exc.status_code, content=body)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化，关闭时清理。"""
@@ -78,6 +99,9 @@ app = FastAPI(
 app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(HTTPException, http_exception_handler)
 app.add_exception_handler(Exception, http_exception_handler)
+# 积分领域错误：保留结构化 data.error_code，必须在通用 Exception 处理器之外独立注册
+# （PointsDomainError 非 HTTPException 子类，不会被上面的 HTTPException 处理器捕获）。
+app.add_exception_handler(PointsDomainError, points_domain_error_handler)
 
 app.add_middleware(
     CORSMiddleware,
