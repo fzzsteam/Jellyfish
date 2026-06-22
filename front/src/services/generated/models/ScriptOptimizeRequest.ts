@@ -22,5 +22,9 @@ export type ScriptOptimizeRequest = {
      * 一致性检查输出（ScriptConsistencyCheckResult 序列化）
      */
     consistency: Record<string, any>;
+    /**
+     * 积分试算凭证（异步与同步接口均必填，Task 5b/6 冻结积分；extract 命中缓存时可不传）
+     */
+    quote_token?: (string | null);
 };
 

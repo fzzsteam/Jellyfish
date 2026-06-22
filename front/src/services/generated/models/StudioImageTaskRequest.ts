@@ -30,5 +30,9 @@ export type StudioImageTaskRequest = {
      * 参考图 file_id 列表（可多张，顺序有效）。创建任务接口会基于 file_id 从数据中解析为参考图
      */
     images?: Array<string>;
+    /**
+     * 积分试算凭证（POST /points/quote 签发）；创建任务接口必填，Task 5b 冻结积分
+     */
+    quote_token?: (string | null);
 };
 

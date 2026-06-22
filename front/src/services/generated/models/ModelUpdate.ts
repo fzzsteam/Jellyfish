@@ -24,6 +24,10 @@ export type ModelUpdate = {
      */
     params?: (Record<string, any> | null);
     /**
+     * 积分单价
+     */
+    unit_points?: (number | null);
+    /**
      * 说明
      */
     description?: (string | null);

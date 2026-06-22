@@ -1,0 +1,115 @@
+/* generated using openapi-typescript-codegen -- do not edit */
+/* istanbul ignore file */
+/* tslint:disable */
+/* eslint-disable */
+import type { ApiResponse_PaginatedData_PointTransactionRead__ } from '../models/ApiResponse_PaginatedData_PointTransactionRead__';
+import type { ApiResponse_PointsQuoteResponse_ } from '../models/ApiResponse_PointsQuoteResponse_';
+import type { ApiResponse_PointsSummaryRead_ } from '../models/ApiResponse_PointsSummaryRead_';
+import type { PointsQuoteRequest } from '../models/PointsQuoteRequest';
+import type { CancelablePromise } from '../core/CancelablePromise';
+import { OpenAPI } from '../core/OpenAPI';
+import { request as __request } from '../core/request';
+export class PointsService {
+    /**
+     * 当前用户积分摘要
+     * 返回当前用户余额/冻结/可用额度（纯读取，首次访问自动初始化为 0）。
+     * @returns ApiResponse_PointsSummaryRead_ Successful Response
+     * @throws ApiError
+     */
+    public static getMyPointsApiV1PointsMeGet({
+        authorization,
+    }: {
+        authorization?: (string | null),
+    }): CancelablePromise<ApiResponse_PointsSummaryRead_> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/points/me',
+            headers: {
+                'authorization': authorization,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 当前用户积分流水
+     * 分页查询当前用户积分流水，按 created_at 倒序。
+     *
+     * 非法 `type`（非 recharge/freeze/consume/unfreeze）→ 422。
+     * @returns ApiResponse_PaginatedData_PointTransactionRead__ Successful Response
+     * @throws ApiError
+     */
+    public static listMyTransactionsApiV1PointsTransactionsGet({
+        type,
+        businessType,
+        billingId,
+        page = 1,
+        pageSize = 20,
+        authorization,
+    }: {
+        /**
+         * 按流水类型过滤：recharge/freeze/consume/unfreeze
+         */
+        type?: (string | null),
+        /**
+         * 按业务类型过滤
+         */
+        businessType?: (string | null),
+        /**
+         * 按计费单据 ID 过滤
+         */
+        billingId?: (string | null),
+        page?: number,
+        pageSize?: number,
+        authorization?: (string | null),
+    }): CancelablePromise<ApiResponse_PaginatedData_PointTransactionRead__> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/points/transactions',
+            headers: {
+                'authorization': authorization,
+            },
+            query: {
+                'type': type,
+                'business_type': businessType,
+                'billing_id': billingId,
+                'page': page,
+                'page_size': pageSize,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 积分试算
+     * 试算本次生成所需积分并签发短期 quote_token。
+     *
+     * - 不支持的视频分辨率 → 400。
+     * - 显式 model_id 归属他人 → PointsDomainError(403) 由 main.py 处理器序列化。
+     * - 用户未配置默认模型 → 503（配置错误，由通用处理器兜底）。
+     * @returns ApiResponse_PointsQuoteResponse_ Successful Response
+     * @throws ApiError
+     */
+    public static quoteMyPointsApiV1PointsQuotePost({
+        requestBody,
+        authorization,
+    }: {
+        requestBody: PointsQuoteRequest,
+        authorization?: (string | null),
+    }): CancelablePromise<ApiResponse_PointsQuoteResponse_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/points/quote',
+            headers: {
+                'authorization': authorization,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+}

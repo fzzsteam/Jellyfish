@@ -26,5 +26,9 @@ export type VariantAnalysisRequest = {
      * 脚本分镜结果（可选；ScriptDivisionResult 序列化），用于章节/段落分组
      */
     script_division?: (Record<string, any> | null);
+    /**
+     * 积分试算凭证（异步与同步接口均必填，Task 5b/6 冻结积分；extract 命中缓存时可不传）
+     */
+    quote_token?: (string | null);
 };
 

@@ -24,6 +24,10 @@ export type ModelRead = {
      */
     params?: Record<string, any>;
     /**
+     * 积分单价（单次调用消耗的积分数量）
+     */
+    unit_points?: number;
+    /**
      * 说明
      */
     description?: string;

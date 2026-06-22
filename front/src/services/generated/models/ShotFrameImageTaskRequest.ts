@@ -34,5 +34,9 @@ export type ShotFrameImageTaskRequest = {
      * 关键帧输出分辨率档位，默认 standard
      */
     resolution_profile?: ('standard' | 'high' | null);
+    /**
+     * 积分试算凭证（POST /points/quote 签发）；创建任务接口必填，Task 5b 冻结积分
+     */
+    quote_token?: (string | null);
 };
 
