@@ -52,6 +52,7 @@ async def _seed_shot_graph(db: AsyncSession) -> None:
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
         unify_style=True,
+        user_id="test-user",
     )
     chapter = Chapter(id="c1", project_id="p1", index=1, title="第一章")
     prev_shot = Shot(id="s0", chapter_id="c1", index=0, title="镜头零", script_excerpt="角色沿着墙边逼近门口。")
@@ -63,6 +64,7 @@ async def _seed_shot_graph(db: AsyncSession) -> None:
         description="短发、冷峻",
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
+        user_id="test-user",
     )
     costume = Costume(
         id="costume-1",
@@ -70,6 +72,7 @@ async def _seed_shot_graph(db: AsyncSession) -> None:
         description="修身长款、利落",
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
+        user_id="test-user",
     )
     character = Character(
         id="char-1",
@@ -87,6 +90,7 @@ async def _seed_shot_graph(db: AsyncSession) -> None:
         description="昏暗、潮湿、狭长",
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
+        user_id="test-user",
     )
     prop = Prop(
         id="prop-1",
@@ -94,6 +98,7 @@ async def _seed_shot_graph(db: AsyncSession) -> None:
         description="金属外壳，冷白光束",
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
+        user_id="test-user",
     )
     detail = ShotDetail(
         id="s1",
@@ -171,6 +176,7 @@ async def _seed_fear_reaction_shot_graph(db: AsyncSession) -> None:
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
         unify_style=True,
+        user_id="test-user",
     )
     chapter = Chapter(id="fear-c1", project_id="fear-p1", index=1, title="温室")
     shot = Shot(
@@ -316,6 +322,7 @@ async def test_build_run_args_requires_shot_detail() -> None:
             description="",
             style=ProjectStyle.real_people_city,
             visual_style=ProjectVisualStyle.live_action,
+            user_id="test-user",
         )
         chapter = Chapter(id="c1", project_id="p1", index=1, title="第一章")
         shot = Shot(id="s1", chapter_id="c1", index=1, title="镜头一")

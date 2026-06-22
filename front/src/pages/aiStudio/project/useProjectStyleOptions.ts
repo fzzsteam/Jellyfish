@@ -77,8 +77,8 @@ async function loadProjectStyleOptionsSnapshot(): Promise<ProjectStyleOptionsSna
   loadingSnapshotPromise = (async () => {
     try {
       const [styleRes, videoRes] = await Promise.all([
-        StudioProjectsService.getProjectStyleOptionsApiV1StudioProjectsStyleOptionsGet(),
-        LlmService.getVideoGenerationOptionsApiV1LlmVideoGenerationOptionsGet(),
+        StudioProjectsService.getProjectStyleOptionsApiV1StudioProjectsStyleOptionsGet({}),
+        LlmService.getVideoGenerationOptionsApiV1LlmVideoGenerationOptionsGet({}),
       ])
       const styleData = styleRes.data
       const videoData = videoRes.data

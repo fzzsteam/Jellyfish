@@ -3,6 +3,9 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { ShotPreparationLinkEntityType } from './ShotPreparationLinkEntityType';
+/**
+ * 准备页替换关联实体请求：解除 old_entity_id 关联，关联 new_entity_id。
+ */
 export type ShotPreparationReplaceRequest = {
     /**
      * 项目 ID
@@ -25,3 +28,4 @@ export type ShotPreparationReplaceRequest = {
      */
     new_entity_id: string;
 };
+

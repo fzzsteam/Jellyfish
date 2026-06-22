@@ -9,10 +9,11 @@ from app.services.studio.generation.video.derive_preview import derive_video_pre
 async def build_video_submission_payload(
     db,
     *,
+    user_id: str,
     base: VideoBaseDraft,
     context: VideoGenerationContext,
 ) -> GenerationSubmissionPayload:
-    derived = await derive_video_preview(db, base=base, context=context)
+    derived = await derive_video_preview(db, user_id=user_id, base=base, context=context)
     return GenerationSubmissionPayload(
         kind="video",
         prompt=derived.rendered_prompt,

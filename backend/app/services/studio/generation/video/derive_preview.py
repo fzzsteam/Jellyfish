@@ -30,6 +30,7 @@ class VideoDerivedPreview(GenerationDerivedPreview):
 async def derive_video_preview(
     db,
     *,
+    user_id: str,
     base: VideoBaseDraft,
     context: VideoGenerationContext,
 ) -> VideoDerivedPreview:
@@ -50,7 +51,7 @@ async def derive_video_preview(
             warnings=[],
         )
 
-    template = await _resolve_video_prompt_template(db, template_id=context.template_id)
+    template = await _resolve_video_prompt_template(db, user_id=user_id, template_id=context.template_id)
     warnings: list[str] = []
     if template is None:
         warnings.append("未配置视频提示词模板，已使用系统默认拼装提示词")

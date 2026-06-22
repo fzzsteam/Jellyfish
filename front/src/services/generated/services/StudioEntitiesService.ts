@@ -53,8 +53,8 @@ export class StudioEntitiesService {
         isDesc = false,
         page = 1,
         pageSize = 10,
-        authorization,
         projectId,
+        authorization,
     }: {
         entityType: string,
         /**
@@ -73,13 +73,11 @@ export class StudioEntitiesService {
         isDesc?: boolean,
         page?: number,
         pageSize?: number,
-        authorization?: (string | null),
-
         /**
          * 按项目过滤（仅对 character 类型有效）
          */
         projectId?: (string | null),
-
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_dict_str__Any___> {
         return __request(OpenAPI, {
             method: 'GET',

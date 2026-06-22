@@ -76,7 +76,7 @@ def test_get_task_status_not_found_returns_api_response(client: TestClient, monk
         def __init__(self, _db) -> None:
             pass
 
-        async def get_status_view(self, _task_id: str):
+        async def get_status_view(self, _task_id: str, *, user_id=None):
             return None
 
     monkeypatch.setattr(task_status_route, "SqlAlchemyTaskStore", _FakeStore)
@@ -95,6 +95,19 @@ def test_cancel_task_returns_success_envelope(client: TestClient, monkeypatch) -
     class _FakeStore:
         def __init__(self, _db) -> None:
             pass
+
+        async def get(self, task_id: str, *, user_id=None):
+            from app.core.task_manager.types import TaskRecord
+
+            return TaskRecord(
+                id=task_id,
+                mode=DeliveryMode.async_polling,
+                task_kind="test_task",
+                status=TaskStatus.running,
+                progress=0,
+                payload={},
+                user_id=user_id,
+            )
 
         async def request_cancel(self, task_id: str, _reason: str | None = None):
             from app.core.task_manager.types import TaskRecord
@@ -147,6 +160,19 @@ def test_cancel_task_revokes_celery_and_marks_cancelled(client: TestClient, monk
     class _FakeStore:
         def __init__(self, _db) -> None:
             pass
+
+        async def get(self, task_id: str, *, user_id=None):
+            from app.core.task_manager.types import TaskRecord
+
+            return TaskRecord(
+                id=task_id,
+                mode=DeliveryMode.async_polling,
+                task_kind="video_generation",
+                status=TaskStatus.running,
+                progress=40,
+                payload={},
+                user_id=user_id,
+            )
 
         async def request_cancel(self, task_id: str, _reason: str | None = None):
             from app.core.task_manager.types import TaskRecord
@@ -351,6 +377,7 @@ def test_get_task_result_returns_success_envelope(client: TestClient) -> None:
     finished_at = started_at
     task = GenerationTask(
         id="task-1",
+        user_id="test-user",
         mode=GenerationDeliveryMode.async_polling,
         status=GenerationTaskStatus.succeeded,
         progress=100,
@@ -386,7 +413,7 @@ def test_get_task_status_returns_timing_fields(client: TestClient, monkeypatch) 
         def __init__(self, _db) -> None:
             pass
 
-        async def get_status_view(self, _task_id: str):
+        async def get_status_view(self, _task_id: str, *, user_id=None):
             from app.core.task_manager.types import TaskStatusView
 
             return TaskStatusView(

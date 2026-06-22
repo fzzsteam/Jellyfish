@@ -579,6 +579,7 @@ def _create_entity_sync(
     description: str,
     style: ProjectStyle,
     visual_style: ProjectVisualStyle,
+    user_id: str,
     project_id: str,
 ) -> str:
     """同步创建资产实体，scene/prop/costume 同时初始化正面视角图片槽位，返回 entity_id。"""
@@ -589,17 +590,44 @@ def _create_entity_sync(
         db.add(CharacterImage(character_id=entity_id, view_angle=AssetViewAngle.front))
         db.flush()
     elif candidate_type == ShotCandidateType.scene:
-        db.add(Scene(id=entity_id, name=name, description=description, style=style, visual_style=visual_style))
+        db.add(
+            Scene(
+                id=entity_id,
+                name=name,
+                description=description,
+                style=style,
+                visual_style=visual_style,
+                user_id=user_id,
+            )
+        )
         db.flush()
         db.add(SceneImage(scene_id=entity_id, view_angle=AssetViewAngle.front))
         db.flush()
     elif candidate_type == ShotCandidateType.prop:
-        db.add(Prop(id=entity_id, name=name, description=description, style=style, visual_style=visual_style))
+        db.add(
+            Prop(
+                id=entity_id,
+                name=name,
+                description=description,
+                style=style,
+                visual_style=visual_style,
+                user_id=user_id,
+            )
+        )
         db.flush()
         db.add(PropImage(prop_id=entity_id, view_angle=AssetViewAngle.front))
         db.flush()
     elif candidate_type == ShotCandidateType.costume:
-        db.add(Costume(id=entity_id, name=name, description=description, style=style, visual_style=visual_style))
+        db.add(
+            Costume(
+                id=entity_id,
+                name=name,
+                description=description,
+                style=style,
+                visual_style=visual_style,
+                user_id=user_id,
+            )
+        )
         db.flush()
         db.add(CostumeImage(costume_id=entity_id, view_angle=AssetViewAngle.front))
         db.flush()
@@ -663,12 +691,15 @@ def _get_or_create_image_slot_sync(
 def _load_image_run_args_sync(
     db: Session,
     *,
+    user_id: str,
     relation_type: str,
     relation_entity_id: str,
     prompt: str,
 ) -> dict | None:
-    """从 DB 加载默认图片模型配置并构建 run_args；未配置时返回 None。"""
-    settings = db.get(ModelSettings, 1)
+    """从 DB 加载该用户默认图片模型配置并构建 run_args；未配置时返回 None。"""
+    settings = db.execute(
+        select(ModelSettings).where(ModelSettings.user_id == user_id)
+    ).scalar_one_or_none()
     if settings is None or not settings.default_image_model_id:
         return None
     model = db.get(Model, settings.default_image_model_id)
@@ -698,15 +729,17 @@ def _load_image_run_args_sync(
 def _schedule_image_task_sync(
     db: Session,
     *,
+    user_id: str,
     run_args: dict,
     summary: AutoPreparationSummary,
 ) -> None:
-    """在当前事务的 SAVEPOINT 中创建图片生成任务记录；失败则静默回滚并跳过。"""
+    """在当前事务的 SAVEPOINT 中创建归属 user_id 的图片生成任务记录；失败则静默回滚并跳过。"""
     task_id = str(_uuid_mod.uuid4())
     try:
         with db.begin_nested():
             db.add(GenerationTask(
                 id=task_id,
+                user_id=user_id,
                 mode=GenerationDeliveryMode.async_polling,
                 task_kind="image_generation",
                 status=GenerationTaskStatus.pending,
@@ -732,6 +765,7 @@ def _schedule_image_task_sync(
 def _auto_create_and_link_sync(
     db: Session,
     *,
+    user_id: str,
     candidate: ShotExtractedCandidate,
     project_id: str,
     chapter_id: str,
@@ -760,6 +794,7 @@ def _auto_create_and_link_sync(
     entity_id = _find_entity_by_name_sync(
         db, candidate_type=candidate_type, candidate_name=candidate_name, project_id=project_id
     )
+    created_new_entity = False
     if entity_id is None:
         # Before creating a new entity, check if any existing entity has a
         # name-overlap relationship with this candidate (substring in either direction).
@@ -786,41 +821,52 @@ def _auto_create_and_link_sync(
         if _has_name_overlap_with_existing(candidate_name, existing_names):
             _logger.debug("auto_prep: 候选 '%s' 与现有资产存在名称重叠，保留 pending", candidate_name)
             return False
-        try:
-            entity_id = _create_entity_sync(
-                db,
-                candidate_type=candidate_type,
-                name=candidate_name,
-                description=description,
-                style=style,
-                visual_style=visual_style,
-                project_id=project_id,
-            )
-            summary.auto_created_asset_count += 1
-        except Exception:  # noqa: BLE001
-            _logger.warning("auto_prep: 资产创建失败，候选 '%s'(%s) 保留 pending", candidate_name, candidate_type)
-            return False
-
     try:
-        slot_info = _get_or_create_image_slot_sync(db, candidate_type=candidate_type, entity_id=entity_id)
-        if slot_info is not None:
-            relation_type, relation_entity_id = slot_info
-            run_args = _load_image_run_args_sync(
-                db, relation_type=relation_type, relation_entity_id=relation_entity_id, prompt=prompt
-            )
-            if run_args is not None:
-                _schedule_image_task_sync(db, run_args=run_args, summary=summary)
-    except Exception:  # noqa: BLE001
-        _logger.warning("auto_prep: 图片生成调度失败，候选 '%s' 仍将完成关联", candidate_name)
+        with db.begin_nested():
+            if entity_id is None:
+                entity_id = _create_entity_sync(
+                    db,
+                    candidate_type=candidate_type,
+                    name=candidate_name,
+                    description=description,
+                    style=style,
+                    visual_style=visual_style,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
+                created_new_entity = True
 
-    option = _AssetOption(entity_id=entity_id, name=candidate_name, has_image=False)
-    _link_candidate(db, project_id=project_id, chapter_id=chapter_id, candidate=candidate, option=option)
+            try:
+                slot_info = _get_or_create_image_slot_sync(db, candidate_type=candidate_type, entity_id=entity_id)
+                if slot_info is not None:
+                    relation_type, relation_entity_id = slot_info
+                    run_args = _load_image_run_args_sync(
+                        db,
+                        user_id=user_id,
+                        relation_type=relation_type,
+                        relation_entity_id=relation_entity_id,
+                        prompt=prompt,
+                    )
+                    if run_args is not None:
+                        _schedule_image_task_sync(db, user_id=user_id, run_args=run_args, summary=summary)
+            except Exception:  # noqa: BLE001
+                _logger.warning("auto_prep: 图片生成调度失败，候选 '%s' 仍将完成关联", candidate_name)
+
+            option = _AssetOption(entity_id=entity_id, name=candidate_name, has_image=False)
+            _link_candidate(db, project_id=project_id, chapter_id=chapter_id, candidate=candidate, option=option)
+    except Exception:  # noqa: BLE001
+        _logger.warning("auto_prep: 资产创建失败，候选 '%s'(%s) 保留 pending", candidate_name, candidate_type)
+        return False
+
+    if created_new_entity:
+        summary.auto_created_asset_count += 1
     return True
 
 
 def auto_prepare_chapter_shots_sync(
     db: Session,
     *,
+    user_id: str,
     project_id: str,
     chapter_id: str,
 ) -> AutoPreparationSummary:
@@ -889,12 +935,13 @@ def auto_prepare_chapter_shots_sync(
                     relation_type, relation_entity_id = slot_info
                     run_args = _load_image_run_args_sync(
                         db,
+                        user_id=user_id,
                         relation_type=relation_type,
                         relation_entity_id=relation_entity_id,
                         prompt=prompt,
                     )
                     if run_args is not None:
-                        _schedule_image_task_sync(db, run_args=run_args, summary=summary)
+                        _schedule_image_task_sync(db, user_id=user_id, run_args=run_args, summary=summary)
             except Exception:  # noqa: BLE001
                 _logger.warning(
                     "auto_prep: 第一轮角色图片调度失败，候选 '%s'", candidate.candidate_name
@@ -930,6 +977,7 @@ def auto_prepare_chapter_shots_sync(
         candidate_type = ShotCandidateType(str(candidate.candidate_type))
         succeeded = _auto_create_and_link_sync(
             db,
+            user_id=user_id,
             candidate=candidate,
             project_id=project_id,
             chapter_id=chapter_id,

@@ -18,7 +18,11 @@ from app.services.studio.shot_character_links import upsert as upsert_shot_chara
 from app.utils.project_links import upsert_project_link
 
 ENTITY_ORDER_FIELDS = {"name", "style", "visual_style", "created_at", "updated_at"}
-GLOBAL_NAME_UNIQUE_ENTITY_TYPES = {"actor", "scene", "prop", "costume"}
+# 直接归属用户的资产类型：模型自身带 user_id 列，按用户隔离/判重。
+# character 不在其中——它通过 project_id → projects.user_id 间接隔离，自身无 user_id 列。
+USER_OWNED_ENTITY_TYPES = {"actor", "scene", "prop", "costume"}
+# 历史命名保留：原"全局判重"集合即现在的"按用户判重"集合。
+GLOBAL_NAME_UNIQUE_ENTITY_TYPES = USER_OWNED_ENTITY_TYPES
 
 
 def _asset_read_payload(obj: Any, thumbnail: str) -> dict[str, Any]:
@@ -35,20 +39,25 @@ def _asset_read_payload(obj: Any, thumbnail: str) -> dict[str, Any]:
     }
 
 
-async def _ensure_global_name_available(
+async def _ensure_user_name_available(
     db: AsyncSession,
     *,
     entity_type: str,
     model: type,
+    user_id: str,
     name: str | None,
     exclude_id: str | None = None,
 ) -> None:
-    """在写库前校验全局资产名称唯一性，避免数据库唯一约束异常泄漏到业务流程。"""
+    """在写库前校验当前用户内资产名称唯一性，避免数据库唯一约束异常泄漏到业务流程。
+
+    资产唯一约束已收紧为 `(user_id, name)`，因此判重也限定在当前用户范围内——
+    不同用户允许使用同名资产。
+    """
     normalized_name = str(name or "").strip()
-    if entity_type not in GLOBAL_NAME_UNIQUE_ENTITY_TYPES or not normalized_name:
+    if entity_type not in USER_OWNED_ENTITY_TYPES or not normalized_name:
         return
 
-    stmt = select(model.id).where(model.name == normalized_name)
+    stmt = select(model.id).where(model.name == normalized_name, model.user_id == user_id)
     if exclude_id:
         stmt = stmt.where(model.id != exclude_id)
     existing_id = (await db.execute(stmt.limit(1))).scalars().first()
@@ -60,6 +69,7 @@ async def list_entities_paginated(
     db: AsyncSession,
     *,
     entity_type: str,
+    user_id: str,
     q: str | None,
     style: str | None,
     visual_style: str | None,
@@ -72,6 +82,10 @@ async def list_entities_paginated(
     entity_type_norm = normalize_entity_type(entity_type)
     spec = entity_spec(entity_type_norm)
     stmt = select(spec.model)
+    # 资产类型按 user_id 隔离：用户只能看到自己的 actor/scene/prop/costume。
+    # character 无 user_id 列，靠 project_id 间接隔离，这里不加该过滤。
+    if entity_type_norm in USER_OWNED_ENTITY_TYPES:
+        stmt = stmt.where(spec.model.user_id == user_id)
     stmt = apply_keyword_filter(stmt, q=q, fields=[spec.model.name, spec.model.description])
     # character 是项目级实体，可按 project_id 过滤以只展示当前项目的角色
     if project_id and entity_type_norm in {"actor", "character"} and hasattr(spec.model, "project_id"):
@@ -111,6 +125,7 @@ async def create_entity(
     db: AsyncSession,
     *,
     entity_type: str,
+    user_id: str,
     body: dict[str, Any],
 ) -> dict[str, Any]:
     entity_type_norm = normalize_entity_type(entity_type)
@@ -133,10 +148,11 @@ async def create_entity(
     exists = await db.get(spec.model, data["id"])
     if exists is not None:
         raise HTTPException(status_code=400, detail=entity_already_exists(spec.model.__name__))
-    await _ensure_global_name_available(
+    await _ensure_user_name_available(
         db,
         entity_type=entity_type_norm,
         model=spec.model,
+        user_id=user_id,
         name=data.get("name"),
     )
 
@@ -167,6 +183,9 @@ async def create_entity(
             if chapter is not None and shot.chapter_id != chapter.id:
                 raise HTTPException(status_code=400, detail="Shot does not belong to the specified chapter")
 
+    # 资产类型写入归属用户；character 无 user_id 列，不注入。
+    if entity_type_norm in USER_OWNED_ENTITY_TYPES:
+        data["user_id"] = user_id
     obj = spec.model(**data)
     db.add(obj)
     await db.flush()
@@ -226,12 +245,14 @@ async def get_entity(
     db: AsyncSession,
     *,
     entity_type: str,
+    user_id: str,
     entity_id: str,
 ) -> dict[str, Any]:
     entity_type_norm = normalize_entity_type(entity_type)
     spec = entity_spec(entity_type_norm)
     obj = await db.get(spec.model, entity_id)
-    if obj is None:
+    # 归属不符按"未找到"处理，避免泄漏他人资产是否存在。
+    if obj is None or (entity_type_norm in USER_OWNED_ENTITY_TYPES and obj.user_id != user_id):
         raise HTTPException(status_code=404, detail=entity_not_found(spec.model.__name__))
 
     thumbnails = await resolve_thumbnails(
@@ -251,20 +272,23 @@ async def update_entity(
     db: AsyncSession,
     *,
     entity_type: str,
+    user_id: str,
     entity_id: str,
     body: dict[str, Any],
 ) -> dict[str, Any]:
     entity_type_norm = normalize_entity_type(entity_type)
     spec = entity_spec(entity_type_norm)
     obj = await db.get(spec.model, entity_id)
-    if obj is None:
+    # 归属不符按"未找到"处理。
+    if obj is None or (entity_type_norm in USER_OWNED_ENTITY_TYPES and obj.user_id != user_id):
         raise HTTPException(status_code=404, detail=entity_not_found(spec.model.__name__))
 
     update_data = spec.update_model.model_validate(body).model_dump(exclude_unset=True)
-    await _ensure_global_name_available(
+    await _ensure_user_name_available(
         db,
         entity_type=entity_type_norm,
         model=spec.model,
+        user_id=user_id,
         name=update_data.get("name"),
         exclude_id=entity_id,
     )
@@ -293,11 +317,14 @@ async def delete_entity(
     db: AsyncSession,
     *,
     entity_type: str,
+    user_id: str,
     entity_id: str,
 ) -> None:
-    spec = entity_spec(entity_type)
+    entity_type_norm = normalize_entity_type(entity_type)
+    spec = entity_spec(entity_type_norm)
     obj = await db.get(spec.model, entity_id)
-    if obj is None:
+    # 不存在或归属他人时静默返回（删除幂等，不泄漏他人资产）。
+    if obj is None or (entity_type_norm in USER_OWNED_ENTITY_TYPES and obj.user_id != user_id):
         return
     await db.delete(obj)
     await db.flush()

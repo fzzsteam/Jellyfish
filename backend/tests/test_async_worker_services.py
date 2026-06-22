@@ -19,6 +19,7 @@ from app.models.studio import (
     VFXType,
 )
 from app.models.task import GenerationTask, GenerationTaskStatus
+from app.models.user import User
 from app.services.film.generated_video import run_video_generation_task
 from app.services.film.shot_frame_prompt_tasks import run_shot_frame_prompt_task
 from app.services.studio.image_task_runner import run_image_generation_task
@@ -36,11 +37,14 @@ async def test_run_video_generation_task_marks_cancelled_before_execute(monkeypa
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
+        db.add(User(id="test-user", username="test-user", hashed_password="x"))
+        await db.flush()
         store = SqlAlchemyTaskStore(db)
         task = await store.create(
             payload={"task_kind": "video_generation", "run_args": {"shot_id": "shot-1"}},
             mode=DeliveryMode.async_polling,
             task_kind="video_generation",
+            user_id="test-user",
         )
         await store.request_cancel(task.id, "用户取消")
         await db.commit()
@@ -70,6 +74,8 @@ async def test_run_image_generation_task_marks_cancelled_before_execute(monkeypa
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
+        db.add(User(id="test-user", username="test-user", hashed_password="x"))
+        await db.flush()
         store = SqlAlchemyTaskStore(db)
         task = await store.create(
             payload={
@@ -78,6 +84,7 @@ async def test_run_image_generation_task_marks_cancelled_before_execute(monkeypa
             },
             mode=DeliveryMode.async_polling,
             task_kind="image_generation",
+            user_id="test-user",
         )
         await store.request_cancel(task.id, "用户取消")
         await db.commit()
@@ -110,11 +117,14 @@ async def test_run_shot_frame_prompt_task_marks_cancelled_before_execute(monkeyp
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
+        db.add(User(id="test-user", username="test-user", hashed_password="x"))
+        await db.flush()
         store = SqlAlchemyTaskStore(db)
         task = await store.create(
             payload={"task_kind": "shot_frame_prompt", "run_args": {"shot_id": "shot-1", "frame_type": "first"}},
             mode=DeliveryMode.async_polling,
             task_kind="shot_frame_prompt",
+            user_id="test-user",
         )
         await store.request_cancel(task.id, "用户取消")
         await db.commit()
@@ -144,6 +154,7 @@ async def test_run_shot_frame_prompt_task_persists_debug_context(monkeypatch, tm
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
+        db.add(User(id="test-user", username="test-user", hashed_password="x"))
         db.add_all(
             [
                 Project(
@@ -152,6 +163,7 @@ async def test_run_shot_frame_prompt_task_persists_debug_context(monkeypatch, tm
                     description="",
                     style=ProjectStyle.real_people_city,
                     visual_style=ProjectVisualStyle.live_action,
+                    user_id="test-user",
                 ),
                 Chapter(id="chapter-1", project_id="project-1", index=1, title="第一章"),
                 Shot(id="shot-1", chapter_id="chapter-1", index=1, title="镜头一", script_excerpt="主角回头。"),
@@ -168,6 +180,7 @@ async def test_run_shot_frame_prompt_task_persists_debug_context(monkeypatch, tm
                 ),
             ]
         )
+        await db.flush()
         store = SqlAlchemyTaskStore(db)
         task = await store.create(
             payload={
@@ -180,6 +193,7 @@ async def test_run_shot_frame_prompt_task_persists_debug_context(monkeypatch, tm
             },
             mode=DeliveryMode.async_polling,
             task_kind="shot_frame_prompt",
+            user_id="test-user",
         )
         await db.commit()
 
@@ -232,6 +246,7 @@ async def test_run_shot_frame_prompt_task_retries_when_result_contains_mapping_t
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
+        db.add(User(id="test-user", username="test-user", hashed_password="x"))
         db.add_all(
             [
                 Project(
@@ -240,6 +255,7 @@ async def test_run_shot_frame_prompt_task_retries_when_result_contains_mapping_t
                     description="",
                     style=ProjectStyle.real_people_city,
                     visual_style=ProjectVisualStyle.live_action,
+                    user_id="test-user",
                 ),
                 Chapter(id="chapter-1", project_id="project-1", index=1, title="第一章"),
                 Shot(id="shot-1", chapter_id="chapter-1", index=1, title="镜头一", script_excerpt="主角回头。"),
@@ -256,6 +272,7 @@ async def test_run_shot_frame_prompt_task_retries_when_result_contains_mapping_t
                 ),
             ]
         )
+        await db.flush()
         store = SqlAlchemyTaskStore(db)
         task = await store.create(
             payload={
@@ -268,6 +285,7 @@ async def test_run_shot_frame_prompt_task_retries_when_result_contains_mapping_t
             },
             mode=DeliveryMode.async_polling,
             task_kind="shot_frame_prompt",
+            user_id="test-user",
         )
         await db.commit()
 

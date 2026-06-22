@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.db import Base
 from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider
+from app.models.user import User
 from app.services.llm import (
     build_default_text_llm,
     build_chat_model_from_provider,
@@ -28,13 +29,14 @@ async def test_get_default_model_by_category_uses_model_settings() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
-        model = Model(id="m_text", name="gpt-4o-mini", category=ModelCategoryKey.text, provider_id="p1")
-        settings = ModelSettings(id=1, default_text_model_id="m_text")
+        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_text", user_id="u1", name="gpt-4o-mini", category=ModelCategoryKey.text, provider_id="p1")
+        settings = ModelSettings(user_id="u1", default_text_model_id="m_text")
+        db.add(User(id="u1", username="u1", hashed_password="h"))
         db.add_all([provider, model, settings])
         await db.commit()
 
-        resolved = await get_default_model_by_category(db, ModelCategoryKey.text)
+        resolved = await get_default_model_by_category(db, ModelCategoryKey.text, user_id="u1")
         assert resolved.id == "m_text"
 
     await engine.dispose()
@@ -48,18 +50,20 @@ async def test_get_default_model_by_category_requires_model_settings_entry() -> 
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
         model = Model(
             id="m_text",
+            user_id="u1",
             name="gpt-4o-mini",
             category=ModelCategoryKey.text,
             provider_id="p1",
         )
+        db.add(User(id="u1", username="u1", hashed_password="h"))
         db.add_all([provider, model])
         await db.commit()
 
         with pytest.raises(HTTPException) as exc_info:
-            await get_default_model_by_category(db, ModelCategoryKey.text)
+            await get_default_model_by_category(db, ModelCategoryKey.text, user_id="u1")
         assert "No default model configured for category=text" in str(exc_info.value)
 
     await engine.dispose()
@@ -73,8 +77,9 @@ async def test_get_provider_by_model_or_id_supports_both_inputs() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
-        model = Model(id="m_text", name="gpt-4o-mini", category=ModelCategoryKey.text, provider_id="p1")
+        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_text", user_id="u1", name="gpt-4o-mini", category=ModelCategoryKey.text, provider_id="p1")
+        db.add(User(id="u1", username="u1", hashed_password="h"))
         db.add_all([provider, model])
         await db.commit()
 
@@ -94,14 +99,16 @@ async def test_get_model_by_category_supports_explicit_id_without_default_fallba
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
-        model = Model(id="m_img", name="gpt-image-1", category=ModelCategoryKey.image, provider_id="p1")
+        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_img", user_id="u1", name="gpt-image-1", category=ModelCategoryKey.image, provider_id="p1")
+        db.add(User(id="u1", username="u1", hashed_password="h"))
         db.add_all([provider, model])
         await db.commit()
 
         resolved = await get_model_by_category(
             db,
             ModelCategoryKey.image,
+            user_id="u1",
             model_or_id="m_img",
             allow_default_fallback=False,
         )
@@ -118,7 +125,8 @@ async def test_get_provider_by_id_or_obj_supports_both_inputs() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        db.add(User(id="u1", username="u1", hashed_password="h"))
         db.add(provider)
         await db.commit()
 
@@ -146,14 +154,16 @@ async def test_build_chat_model_from_provider_builds_chatopenai_with_model_param
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
         model = Model(
             id="m_text",
+            user_id="u1",
             name="gpt-4o-mini",
             category=ModelCategoryKey.text,
             provider_id="p1",
             params={"temperature": 0.2, "max_tokens": 256},
         )
+        db.add(User(id="u1", username="u1", hashed_password="h"))
         db.add_all([provider, model])
         await db.commit()
 
@@ -185,20 +195,22 @@ async def test_build_default_text_llm_supports_thinking_toggle(monkeypatch: pyte
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
         model = Model(
             id="m_text",
+            user_id="u1",
             name="gpt-4o-mini",
             category=ModelCategoryKey.text,
             provider_id="p1",
             params={"temperature": 0.2},
         )
-        settings = ModelSettings(id=1, default_text_model_id="m_text")
+        settings = ModelSettings(user_id="u1", default_text_model_id="m_text")
+        db.add(User(id="u1", username="u1", hashed_password="h"))
         db.add_all([provider, model, settings])
         await db.commit()
 
-        thinking_llm = await build_default_text_llm(db, thinking=True)
-        nothinking_llm = await build_default_text_llm(db, thinking=False)
+        thinking_llm = await build_default_text_llm(db, user_id="u1", thinking=True)
+        nothinking_llm = await build_default_text_llm(db, user_id="u1", thinking=False)
 
         assert isinstance(thinking_llm, FakeChatOpenAI)
         assert "extra_body" not in thinking_llm.kwargs

@@ -655,7 +655,7 @@ const ChapterStudio: React.FC = () => {
     let active = true
     void (async () => {
       try {
-        const res = await LlmService.getImageGenerationOptionsApiV1LlmImageGenerationOptionsGet()
+        const res = await LlmService.getImageGenerationOptionsApiV1LlmImageGenerationOptionsGet({})
         if (!active) return
         setImageGenerationOptions(res.data ?? null)
       } catch {

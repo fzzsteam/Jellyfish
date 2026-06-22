@@ -89,6 +89,9 @@ def _seed_project(db: _FakeStudioDB, project_id: str = "proj-1") -> Project:
     now = datetime.now(UTC)
     obj = Project(
         id=project_id,
+        # user_id 与 conftest 的 _auto_auth_bypass 注入的测试用户保持一致，
+        # 否则按 user_id 隔离的 get/update/delete 会判定为非归属（404）。
+        user_id="test-user",
         name="测试项目",
         description="项目说明",
         style=ProjectStyle.real_people_city,

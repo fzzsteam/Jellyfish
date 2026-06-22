@@ -3,12 +3,21 @@
 from fastapi import APIRouter, Depends
 
 from app.api.v1.routes import auth, film, health, llm, studio, script_processing
-from app.dependencies import get_current_user
+from app.api.v1.routes.admin import users as admin_users
+from app.api.v1.routes.studio.files import public_router as public_studio_files_router
+from app.dependencies import get_current_user, require_admin
 
 router = APIRouter()
 
 router.include_router(health.router, tags=["health"])
 router.include_router(auth.router, prefix="/auth", tags=["auth"])
+router.include_router(public_studio_files_router, prefix="/studio/files", tags=["studio/files"])
+router.include_router(
+    admin_users.router,
+    prefix="/admin/users",
+    tags=["admin"],
+    dependencies=[Depends(require_admin)],
+)
 router.include_router(film.router, prefix="/film", tags=["film"], dependencies=[Depends(get_current_user)])
 router.include_router(llm.router, prefix="/llm", tags=["llm"], dependencies=[Depends(get_current_user)])
 router.include_router(studio.router, prefix="/studio", dependencies=[Depends(get_current_user)])

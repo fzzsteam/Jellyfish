@@ -19,6 +19,7 @@ from app.models.studio import (
     ShotCharacterLink,
     ShotExtractedCandidate,
 )
+from app.models.user import User
 from app.schemas.studio.cast import ShotCharacterLinkCreate
 from app.services.studio.shot_character_links import list_by_shot, upsert
 
@@ -32,12 +33,14 @@ async def _build_session() -> tuple[AsyncSession, object]:
 
 
 async def _seed_base_graph(db: AsyncSession) -> None:
+    db.add(User(id="test-user", username="test-user", hashed_password="x"))
     project = Project(
         id="p1",
         name="项目一",
         description="",
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
+        user_id="test-user",
     )
     other_project = Project(
         id="p2",
@@ -45,6 +48,7 @@ async def _seed_base_graph(db: AsyncSession) -> None:
         description="",
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
+        user_id="test-user",
     )
     chapter = Chapter(id="c1", project_id="p1", index=1, title="第一章")
     shot = Shot(id="s1", chapter_id="c1", index=1, title="镜头一")

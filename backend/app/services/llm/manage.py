@@ -34,20 +34,19 @@ from app.services.llm.provider_registry import (
 from app.bootstrap import bootstrap_all_registries
 from app.services.common import (
     create_and_refresh,
-    delete_if_exists,
     entity_already_exists,
     entity_not_found,
     ensure_not_exists,
     flush_and_refresh,
     get_or_404,
     patch_model,
-    require_entity,
 )
 
 
 async def list_providers_paginated(
     db: AsyncSession,
     *,
+    user_id: str,
     q: str | None,
     order: str | None,
     is_desc: bool,
@@ -55,8 +54,8 @@ async def list_providers_paginated(
     page_size: int,
     allow_fields: set[str],
 ) -> ApiResponse[PaginatedData[ProviderRead]]:
-    """分页查询供应商。"""
-    stmt = select(Provider)
+    """分页查询当前用户拥有的供应商（按 user_id 隔离）。"""
+    stmt = select(Provider).where(Provider.user_id == user_id)
     stmt = apply_keyword_filter(stmt, q=q, fields=[Provider.name, Provider.description])
     stmt = apply_order(
         stmt,
@@ -78,9 +77,10 @@ async def list_providers_paginated(
 async def create_provider(
     db: AsyncSession,
     *,
+    user_id: str,
     body: ProviderCreate,
 ) -> Provider:
-    """创建供应商。"""
+    """创建供应商并写入归属 user_id（created_by 仍记录审计用户名）。"""
     await ensure_not_exists(
         db,
         Provider,
@@ -92,6 +92,7 @@ async def create_provider(
         db,
         Provider(
             id=body.id,
+            user_id=user_id,
             name=body.name,
             base_url=body.base_url,
             image_base_url=body.image_base_url,
@@ -105,23 +106,36 @@ async def create_provider(
     )
 
 
+async def _get_owned_provider(db: AsyncSession, *, provider_id: str, user_id: str) -> Provider:
+    """获取归属当前用户的供应商；不存在或非本人所有时按"未找到"处理（隔离）。"""
+    provider = await db.get(Provider, provider_id)
+    if provider is None or provider.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=entity_not_found("Provider"),
+        )
+    return provider
+
+
 async def get_provider(
     db: AsyncSession,
     *,
+    user_id: str,
     provider_id: str,
 ) -> Provider:
-    """获取供应商。"""
-    return await get_or_404(db, Provider, provider_id, detail=entity_not_found("Provider"))
+    """获取当前用户的供应商（按 user_id 隔离）。"""
+    return await _get_owned_provider(db, provider_id=provider_id, user_id=user_id)
 
 
 async def update_provider(
     db: AsyncSession,
     *,
+    user_id: str,
     provider_id: str,
     body: ProviderUpdate,
 ) -> Provider:
-    """更新供应商。"""
-    provider = await get_or_404(db, Provider, provider_id, detail=entity_not_found("Provider"))
+    """更新当前用户的供应商（按 user_id 隔离）。"""
+    provider = await _get_owned_provider(db, provider_id=provider_id, user_id=user_id)
     patch_model(provider, body.model_dump(exclude_unset=True))
     return await flush_and_refresh(db, provider)
 
@@ -129,15 +143,21 @@ async def update_provider(
 async def delete_provider(
     db: AsyncSession,
     *,
+    user_id: str,
     provider_id: str,
 ) -> None:
-    """删除供应商。"""
-    await delete_if_exists(db, Provider, provider_id)
+    """删除当前用户的供应商（非本人所有时静默忽略）。"""
+    provider = await db.get(Provider, provider_id)
+    if provider is None or provider.user_id != user_id:
+        return
+    await db.delete(provider)
+    await db.flush()
 
 
 async def list_models_paginated(
     db: AsyncSession,
     *,
+    user_id: str,
     provider_id: str | None,
     category: ModelCategoryKey | None,
     q: str | None,
@@ -147,8 +167,8 @@ async def list_models_paginated(
     page_size: int,
     allow_fields: set[str],
 ) -> ApiResponse[PaginatedData[ModelRead]]:
-    """分页查询模型。"""
-    stmt = select(Model)
+    """分页查询当前用户拥有的模型（按 user_id 隔离）。"""
+    stmt = select(Model).where(Model.user_id == user_id)
     if provider_id is not None:
         stmt = stmt.where(Model.provider_id == provider_id)
     if category is not None:
@@ -171,12 +191,24 @@ async def list_models_paginated(
     )
 
 
+async def _require_owned_provider(db: AsyncSession, *, provider_id: str, user_id: str) -> Provider:
+    """模型创建/更新时校验 provider 归属当前用户；不符按 400 处理（隔离 + 输入校验）。"""
+    provider = await db.get(Provider, provider_id)
+    if provider is None or provider.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=entity_not_found("Provider"),
+        )
+    return provider
+
+
 async def create_model(
     db: AsyncSession,
     *,
+    user_id: str,
     body: ModelCreate,
 ) -> Model:
-    """创建模型。"""
+    """创建模型并写入归属 user_id（provider 必须属于同一用户）。"""
     await ensure_not_exists(
         db,
         Model,
@@ -184,18 +216,13 @@ async def create_model(
         detail=entity_already_exists("Model"),
         status_code=400,
     )
-    provider = await require_entity(
-        db,
-        Provider,
-        body.provider_id,
-        detail=entity_not_found("Provider"),
-        status_code=400,
-    )
+    provider = await _require_owned_provider(db, provider_id=body.provider_id, user_id=user_id)
     _ensure_provider_supports_category(provider=provider, category=body.category)
     return await create_and_refresh(
         db,
         Model(
             id=body.id,
+            user_id=user_id,
             name=body.name,
             category=body.category,
             provider_id=body.provider_id,
@@ -206,41 +233,40 @@ async def create_model(
     )
 
 
+async def _get_owned_model(db: AsyncSession, *, model_id: str, user_id: str) -> Model:
+    """获取归属当前用户的模型；不存在或非本人所有时按"未找到"处理（隔离）。"""
+    model = await db.get(Model, model_id)
+    if model is None or model.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=entity_not_found("Model"),
+        )
+    return model
+
+
 async def get_model(
     db: AsyncSession,
     *,
+    user_id: str,
     model_id: str,
 ) -> Model:
-    """获取模型。"""
-    return await get_or_404(db, Model, model_id, detail=entity_not_found("Model"))
+    """获取当前用户的模型（按 user_id 隔离）。"""
+    return await _get_owned_model(db, model_id=model_id, user_id=user_id)
 
 
 async def update_model(
     db: AsyncSession,
     *,
+    user_id: str,
     model_id: str,
     body: ModelUpdate,
 ) -> Model:
-    """更新模型。"""
-    model = await get_or_404(db, Model, model_id, detail=entity_not_found("Model"))
+    """更新当前用户的模型（按 user_id 隔离，目标 provider 也须归属本人）。"""
+    model = await _get_owned_model(db, model_id=model_id, user_id=user_id)
     update_data = body.model_dump(exclude_unset=True)
-    if "provider_id" in update_data:
-        await require_entity(
-            db,
-            Provider,
-            update_data["provider_id"],
-            detail=entity_not_found("Provider"),
-            status_code=400,
-        )
     target_category = update_data.get("category", model.category)
     target_provider_id = update_data.get("provider_id", model.provider_id)
-    target_provider = await require_entity(
-        db,
-        Provider,
-        target_provider_id,
-        detail=entity_not_found("Provider"),
-        status_code=400,
-    )
+    target_provider = await _require_owned_provider(db, provider_id=target_provider_id, user_id=user_id)
     _ensure_provider_supports_category(provider=target_provider, category=target_category)
     patch_model(model, update_data)
     return await flush_and_refresh(db, model)
@@ -249,10 +275,15 @@ async def update_model(
 async def delete_model(
     db: AsyncSession,
     *,
+    user_id: str,
     model_id: str,
 ) -> None:
-    """删除模型。"""
-    await delete_if_exists(db, Model, model_id)
+    """删除当前用户的模型（非本人所有时静默忽略）。"""
+    model = await db.get(Model, model_id)
+    if model is None or model.user_id != user_id:
+        return
+    await db.delete(model)
+    await db.flush()
 
 
 async def get_or_create_settings(db: AsyncSession, *, user_id: str) -> ModelSettings:
@@ -296,9 +327,11 @@ async def update_model_settings(
 
 async def get_video_generation_options(
     db: AsyncSession,
+    *,
+    user_id: str,
 ) -> VideoGenerationOptionsRead:
-    """返回当前默认视频模型的动态 ratio 枚举。"""
-    settings = await get_or_create_settings(db)
+    """返回当前用户默认视频模型的动态 ratio 枚举。"""
+    settings = await get_or_create_settings(db, user_id=user_id)
     model_id = settings.default_video_model_id
     if not model_id:
         return VideoGenerationOptionsRead(
@@ -329,9 +362,11 @@ async def get_video_generation_options(
 
 async def get_image_generation_options(
     db: AsyncSession,
+    *,
+    user_id: str,
 ) -> ImageGenerationOptionsRead:
-    """返回当前默认图片模型对应的关键帧比例/像素规格选项。"""
-    settings = await get_or_create_settings(db)
+    """返回当前用户默认图片模型对应的关键帧比例/像素规格选项。"""
+    settings = await get_or_create_settings(db, user_id=user_id)
     model_id = settings.default_image_model_id
     if not model_id:
         return ImageGenerationOptionsRead(

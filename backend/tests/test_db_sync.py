@@ -21,10 +21,13 @@ def test_sync_task_store_roundtrip() -> None:
     SessionLocal = sessionmaker(bind=engine, class_=Session, expire_on_commit=False)
 
     import app.models.task  # noqa: F401
+    import app.models.user  # noqa: F401
 
     Base.metadata.create_all(engine)
 
     with SessionLocal() as db:
+        db.add(app.models.user.User(id="test-user", username="test-user", hashed_password="x"))
+        db.flush()
         row = GenerationTask(
             id="task-1",
             mode=GenerationDeliveryMode.async_polling,
@@ -33,6 +36,7 @@ def test_sync_task_store_roundtrip() -> None:
             payload={"hello": "world"},
             result=None,
             error="",
+            user_id="test-user",
         )
         db.add(row)
         db.commit()

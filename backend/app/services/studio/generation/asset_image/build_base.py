@@ -57,6 +57,7 @@ def _enum_value(value: Any) -> str:
 async def _build_asset_prompt(
     db,
     *,
+    user_id: str,
     relation_type: str,
     name: str,
     description: str,
@@ -71,6 +72,7 @@ async def _build_asset_prompt(
     )
     return await build_prompt_with_template(
         db,
+        user_id=user_id,
         category=category,
         variables={
             "name": name,
@@ -108,6 +110,7 @@ async def _resolve_front_ref(
 async def build_actor_image_base_draft(
     db,
     *,
+    user_id: str,
     actor_id: str,
     image_id: int | None,
 ) -> AssetImageBaseDraft:
@@ -117,6 +120,7 @@ async def build_actor_image_base_draft(
     image_row = await validate_actor_image(db, actor_id=actor_id, image_id=image_id)
     prompt = await _build_asset_prompt(
         db,
+        user_id=user_id,
         relation_type="actor_image",
         name=actor.name,
         description=actor.description,
@@ -148,6 +152,7 @@ async def build_actor_image_base_draft(
 async def build_asset_image_base_draft(
     db,
     *,
+    user_id: str,
     asset_type: str,
     asset_id: str,
     image_id: int | None,
@@ -179,6 +184,7 @@ async def build_asset_image_base_draft(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=entity_not_found("AssetImage"))
     prompt = await _build_asset_prompt(
         db,
+        user_id=user_id,
         relation_type=relation_type,
         name=asset.name,
         description=asset.description,
@@ -209,6 +215,7 @@ async def build_asset_image_base_draft(
 async def build_character_image_base_draft(
     db,
     *,
+    user_id: str,
     character_id: str,
     image_id: int | None,
 ) -> AssetImageBaseDraft:
@@ -218,6 +225,7 @@ async def build_character_image_base_draft(
     image_row = await validate_character_image(db, character_id=character_id, image_id=image_id)
     prompt = await build_prompt_with_template(
         db,
+        user_id=user_id,
         category=PromptCategory.combined,
         variables={
             "name": character.name,

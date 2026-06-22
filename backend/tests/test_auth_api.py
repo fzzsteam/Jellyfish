@@ -113,3 +113,40 @@ def test_protected_route_with_valid_token_succeeds(auth_client: TestClient) -> N
     resp = auth_client.get("/api/v1/studio/projects", headers={"Authorization": f"Bearer {access_token}"})
 
     assert resp.status_code == 200
+
+
+def test_change_password_wrong_current_returns_400(auth_client: TestClient) -> None:
+    """POST /api/v1/auth/change-password 旧密码错误返回 400，且密码保持不变。"""
+    login_resp = auth_client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin-pass"})
+    access_token = login_resp.json()["data"]["access_token"]
+
+    resp = auth_client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "wrong", "new_password": "newpass123"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert resp.status_code == 400
+    # 密码未被修改：旧密码仍可登录
+    relogin = auth_client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin-pass"})
+    assert relogin.status_code == 200
+
+
+def test_change_password_success_revokes_old_token(auth_client: TestClient) -> None:
+    """改密成功后旧 token 立即失效（token_version 递增），且新密码可登录。"""
+    login_resp = auth_client.post("/api/v1/auth/login", json={"username": "admin", "password": "admin-pass"})
+    access_token = login_resp.json()["data"]["access_token"]
+
+    resp = auth_client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "admin-pass", "new_password": "newpass123"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert resp.status_code == 200
+    # 旧 token 因 token_version 不匹配而失效
+    me_resp = auth_client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {access_token}"})
+    assert me_resp.status_code == 401
+    # 新密码可登录
+    relogin = auth_client.post("/api/v1/auth/login", json={"username": "admin", "password": "newpass123"})
+    assert relogin.status_code == 200

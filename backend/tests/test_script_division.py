@@ -63,6 +63,7 @@ async def test_write_division_result_to_empty_chapter_creates_shots_and_details(
             description="",
             style=ProjectStyle.real_people_city,
             visual_style=ProjectVisualStyle.live_action,
+            user_id="test-user",
         )
         chapter = Chapter(id="c1", project_id="p1", index=1, title="第一章")
         db.add_all([project, chapter])
@@ -94,6 +95,7 @@ async def test_write_division_result_refuses_when_chapter_already_has_shots() ->
             description="",
             style=ProjectStyle.real_people_city,
             visual_style=ProjectVisualStyle.live_action,
+            user_id="test-user",
         )
         chapter = Chapter(id="c1", project_id="p1", index=1, title="第一章")
         existing_shot = Shot(id="s1", chapter_id="c1", index=1, title="已有镜头")

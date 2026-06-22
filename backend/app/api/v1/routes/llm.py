@@ -5,8 +5,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db
+from app.dependencies import get_current_user, get_db
 from app.models.llm import ModelCategoryKey
+from app.models.user import User
 from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, success_response
 from app.schemas.llm import (
     ImageGenerationOptionsRead,
@@ -58,6 +59,7 @@ MAX_PAGE_SIZE = 100
 )
 async def list_providers(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     q: str | None = Query(None, description="关键字，过滤 name/description"),
     order: str | None = Query(None, description="排序字段：name, created_at, updated_at"),
     is_desc: bool = Query(False, description="是否倒序"),
@@ -66,6 +68,7 @@ async def list_providers(
 ) -> ApiResponse[PaginatedData[ProviderRead]]:
     return await list_providers_paginated(
         db,
+        user_id=current_user.id,
         q=q,
         order=order,
         is_desc=is_desc,
@@ -94,8 +97,9 @@ async def list_supported_providers(
 )
 async def get_image_generation_options(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ImageGenerationOptionsRead]:
-    data = await get_image_generation_options_service(db)
+    data = await get_image_generation_options_service(db, user_id=current_user.id)
     return success_response(data)
 
 
@@ -106,8 +110,9 @@ async def get_image_generation_options(
 )
 async def get_video_generation_options(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[VideoGenerationOptionsRead]:
-    data = await get_video_generation_options_service(db)
+    data = await get_video_generation_options_service(db, user_id=current_user.id)
     return success_response(data)
 
 
@@ -120,8 +125,9 @@ async def get_video_generation_options(
 async def create_provider(
     body: ProviderCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ProviderRead]:
-    provider = await create_provider_service(db, body=body)
+    provider = await create_provider_service(db, user_id=current_user.id, body=body)
     return created_response(ProviderRead.model_validate(provider))
 
 
@@ -133,8 +139,9 @@ async def create_provider(
 async def get_provider(
     provider_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ProviderRead]:
-    provider = await get_provider_service(db, provider_id=provider_id)
+    provider = await get_provider_service(db, user_id=current_user.id, provider_id=provider_id)
     return success_response(ProviderRead.model_validate(provider))
 
 
@@ -147,8 +154,9 @@ async def update_provider(
     provider_id: str,
     body: ProviderUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ProviderRead]:
-    provider = await update_provider_service(db, provider_id=provider_id, body=body)
+    provider = await update_provider_service(db, user_id=current_user.id, provider_id=provider_id, body=body)
     return success_response(ProviderRead.model_validate(provider))
 
 
@@ -161,8 +169,9 @@ async def update_provider(
 async def delete_provider(
     provider_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[None]:
-    await delete_provider_service(db, provider_id=provider_id)
+    await delete_provider_service(db, user_id=current_user.id, provider_id=provider_id)
     return empty_response()
 
 
@@ -176,6 +185,7 @@ async def delete_provider(
 )
 async def list_models(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     provider_id: str | None = Query(None, description="按供应商过滤"),
     category: ModelCategoryKey | None = Query(None, description="按模型类别过滤"),
     q: str | None = Query(None, description="关键字，过滤 name/description"),
@@ -186,6 +196,7 @@ async def list_models(
 ) -> ApiResponse[PaginatedData[ModelRead]]:
     return await list_models_paginated(
         db,
+        user_id=current_user.id,
         provider_id=provider_id,
         category=category,
         q=q,
@@ -206,8 +217,9 @@ async def list_models(
 async def create_model(
     body: ModelCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ModelRead]:
-    model = await create_model_service(db, body=body)
+    model = await create_model_service(db, user_id=current_user.id, body=body)
     return created_response(ModelRead.model_validate(model))
 
 
@@ -219,8 +231,9 @@ async def create_model(
 async def get_model(
     model_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ModelRead]:
-    model = await get_model_service(db, model_id=model_id)
+    model = await get_model_service(db, user_id=current_user.id, model_id=model_id)
     return success_response(ModelRead.model_validate(model))
 
 
@@ -233,8 +246,9 @@ async def update_model(
     model_id: str,
     body: ModelUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ModelRead]:
-    model = await update_model_service(db, model_id=model_id, body=body)
+    model = await update_model_service(db, user_id=current_user.id, model_id=model_id, body=body)
     return success_response(ModelRead.model_validate(model))
 
 
@@ -247,34 +261,37 @@ async def update_model(
 async def delete_model(
     model_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[None]:
-    await delete_model_service(db, model_id=model_id)
+    await delete_model_service(db, user_id=current_user.id, model_id=model_id)
     return empty_response()
 
 
-# ---------- ModelSettings（单例） ----------
+# ---------- ModelSettings（每用户一行） ----------
 
 
 @router.get(
     "/model-settings",
     response_model=ApiResponse[ModelSettingsRead],
-    summary="获取模型全局设置（单例）",
+    summary="获取当前用户的模型设置",
 )
 async def get_model_settings(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ModelSettingsRead]:
-    settings = await get_model_settings_service(db)
+    settings = await get_model_settings_service(db, user_id=current_user.id)
     return success_response(ModelSettingsRead.model_validate(settings))
 
 
 @router.put(
     "/model-settings",
     response_model=ApiResponse[ModelSettingsRead],
-    summary="更新模型全局设置（单例）",
+    summary="更新当前用户的模型设置",
 )
 async def update_model_settings(
     body: ModelSettingsUpdate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ModelSettingsRead]:
-    settings = await update_model_settings_service(db, body=body)
+    settings = await update_model_settings_service(db, user_id=current_user.id, body=body)
     return success_response(ModelSettingsRead.model_validate(settings))

@@ -29,6 +29,7 @@ async def _build_session() -> tuple[AsyncSession, object]:
 async def _seed_scope_graph(db: AsyncSession) -> None:
     project = Project(
         id="p1",
+        user_id="test-user",
         name="项目一",
         description="",
         style=ProjectStyle.real_people_city,
@@ -46,14 +47,15 @@ async def test_list_files_paginated_filters_by_keyword() -> None:
     async with db:
         db.add_all(
             [
-                FileItem(id="f1", type=FileType.image, name="角色主图", thumbnail="", tags=[], storage_key="files/a.png"),
-                FileItem(id="f2", type=FileType.video, name="片段视频", thumbnail="", tags=[], storage_key="files/b.mp4"),
+                FileItem(id="f1", user_id="test-user", type=FileType.image, name="角色主图", thumbnail="", tags=[], storage_key="files/a.png"),
+                FileItem(id="f2", user_id="test-user", type=FileType.video, name="片段视频", thumbnail="", tags=[], storage_key="files/b.mp4"),
             ]
         )
         await db.commit()
 
         resp = await list_files_paginated(
             db,
+            user_id="test-user",
             q="角色",
             order="name",
             is_desc=False,
@@ -66,7 +68,6 @@ async def test_list_files_paginated_filters_by_keyword() -> None:
         assert [item.id for item in resp.data.items] == ["f1"]
     await engine.dispose()
 
-
 @pytest.mark.asyncio
 async def test_get_file_detail_includes_usages() -> None:
     db, engine = await _build_session()
@@ -75,6 +76,7 @@ async def test_get_file_detail_includes_usages() -> None:
         db.add(
             FileItem(
                 id="f1",
+                user_id="test-user",
                 type=FileType.image,
                 name="角色主图",
                 thumbnail="thumb",
@@ -87,6 +89,7 @@ async def test_get_file_detail_includes_usages() -> None:
         await update_file_meta(
             db,
             file_id="f1",
+            user_id="test-user",
             body=FileUpdate(
                 usage={
                     "project_id": "p1",
@@ -98,7 +101,7 @@ async def test_get_file_detail_includes_usages() -> None:
             ),
         )
 
-        detail = await get_file_detail(db, file_id="f1")
+        detail = await get_file_detail(db, file_id="f1", user_id="test-user")
 
         assert detail.id == "f1"
         assert len(detail.usages) == 1
@@ -117,6 +120,7 @@ async def test_update_file_meta_updates_fields_and_upserts_usage() -> None:
         db.add(
             FileItem(
                 id="f1",
+                user_id="test-user",
                 type=FileType.image,
                 name="旧名称",
                 thumbnail="old",
@@ -129,6 +133,7 @@ async def test_update_file_meta_updates_fields_and_upserts_usage() -> None:
         updated = await update_file_meta(
             db,
             file_id="f1",
+            user_id="test-user",
             body=FileUpdate(
                 name="新名称",
                 thumbnail="new-thumb",
@@ -145,6 +150,7 @@ async def test_update_file_meta_updates_fields_and_upserts_usage() -> None:
         updated_again = await update_file_meta(
             db,
             file_id="f1",
+            user_id="test-user",
             body=FileUpdate(
                 usage={
                     "project_id": "p1",
@@ -155,7 +161,7 @@ async def test_update_file_meta_updates_fields_and_upserts_usage() -> None:
                 }
             ),
         )
-        detail = await get_file_detail(db, file_id="f1")
+        detail = await get_file_detail(db, file_id="f1", user_id="test-user")
 
         assert updated.name == "新名称"
         assert updated.thumbnail == "new-thumb"

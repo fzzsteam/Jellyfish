@@ -23,8 +23,10 @@ from app.services.studio.entity_images import (
 class StudioEntitiesService:
     """封装 studio 通用实体与图片的协调调用。"""
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, *, user_id: str) -> None:
+        # user_id 来自路由层的 current_user，用于资产 CRUD 的按用户隔离/判重。
         self._db = db
+        self._user_id = user_id
 
     async def check_names_existence(
         self,
@@ -62,6 +64,7 @@ class StudioEntitiesService:
         return await list_entities_paginated(
             self._db,
             entity_type=entity_type,
+            user_id=self._user_id,
             q=q,
             style=style,
             visual_style=visual_style,
@@ -73,10 +76,10 @@ class StudioEntitiesService:
         )
 
     async def create_entity(self, *, entity_type: str, body: dict[str, object]) -> dict[str, object]:
-        return await create_entity_service(self._db, entity_type=entity_type, body=body)
+        return await create_entity_service(self._db, entity_type=entity_type, user_id=self._user_id, body=body)
 
     async def get_entity(self, *, entity_type: str, entity_id: str) -> dict[str, object]:
-        return await get_entity_service(self._db, entity_type=entity_type, entity_id=entity_id)
+        return await get_entity_service(self._db, entity_type=entity_type, user_id=self._user_id, entity_id=entity_id)
 
     async def update_entity(
         self,
@@ -88,12 +91,13 @@ class StudioEntitiesService:
         return await update_entity_service(
             self._db,
             entity_type=entity_type,
+            user_id=self._user_id,
             entity_id=entity_id,
             body=body,
         )
 
     async def delete_entity(self, *, entity_type: str, entity_id: str) -> None:
-        await delete_entity_service(self._db, entity_type=entity_type, entity_id=entity_id)
+        await delete_entity_service(self._db, entity_type=entity_type, user_id=self._user_id, entity_id=entity_id)
 
     async def list_entity_images(
         self,

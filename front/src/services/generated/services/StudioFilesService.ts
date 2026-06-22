@@ -14,6 +14,28 @@ import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class StudioFilesService {
     /**
+     * 下载文件二进制内容
+     * 公开下载文件二进制内容，供浏览器原生媒体请求直接访问。
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static downloadFileApiApiV1StudioFilesFileIdDownloadGet({
+        fileId,
+    }: {
+        fileId: string,
+    }): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/studio/files/{file_id}/download',
+            path: {
+                'file_id': fileId,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * 文件列表（分页）
      * @returns ApiResponse_PaginatedData_FileRead__ Successful Response
      * @throws ApiError
@@ -97,32 +119,6 @@ export class StudioFilesService {
             },
             formData: formData,
             mediaType: 'multipart/form-data',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * 下载文件二进制内容
-     * @returns any Successful Response
-     * @throws ApiError
-     */
-    public static downloadFileApiApiV1StudioFilesFileIdDownloadGet({
-        fileId,
-        authorization,
-    }: {
-        fileId: string,
-        authorization?: (string | null),
-    }): CancelablePromise<any> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/v1/studio/files/{file_id}/download',
-            path: {
-                'file_id': fileId,
-            },
-            headers: {
-                'authorization': authorization,
-            },
             errors: {
                 422: `Validation Error`,
             },

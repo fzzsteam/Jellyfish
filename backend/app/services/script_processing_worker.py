@@ -63,9 +63,10 @@ class DivideResultGenerator(AbstractLLMResultGenerator):
 class ExtractResultGenerator(AbstractLLMResultGenerator):
     thinking = False
 
-    def generate(self, db: Session, run_args: dict[str, Any]) -> tuple[Any, bool]:
+    def generate(self, db: Session, run_args: dict[str, Any], *, user_id: str) -> tuple[Any, bool]:
         return generate_extraction_result(
             db=db,
+            user_id=user_id,
             project_id=str(run_args.get("project_id") or ""),
             chapter_id=str(run_args.get("chapter_id") or ""),
             script_division=dict(run_args.get("script_division") or {}),
@@ -158,7 +159,7 @@ class DivideTaskExecutor(AbstractWorkerTaskExecutor):
         self._pending_image_task_ids: list[str] = []
 
     def execute(self, ctx: WorkerTaskContext, run_args: dict[str, Any]) -> ScriptDivisionResult:
-        return self._generator.generate(ctx.db, run_args)
+        return self._generator.generate(ctx.db, run_args, user_id=ctx.task.user_id)
 
     def should_apply(self, ctx: WorkerTaskContext, run_args: dict[str, Any], result: ScriptDivisionResult) -> bool:  # noqa: ARG002
         return bool(run_args.get("write_to_db"))
@@ -168,7 +169,9 @@ class DivideTaskExecutor(AbstractWorkerTaskExecutor):
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required for write_to_db=true")
         apply_division_result(ctx.db, chapter_id=chapter_id, result=result)
-        summary = apply_auto_extraction_after_division(ctx.db, chapter_id=chapter_id, result=result)
+        summary = apply_auto_extraction_after_division(
+            ctx.db, user_id=ctx.task.user_id, chapter_id=chapter_id, result=result
+        )
         self._pending_image_task_ids = summary.image_task_ids if summary is not None else []
 
     def after_apply_commit(self, task_id: str, run_args: dict[str, Any], result: Any) -> None:
@@ -191,7 +194,7 @@ class ExtractTaskExecutor(AbstractWorkerTaskExecutor):
         self._pending_image_task_ids: list[str] = []
 
     def execute(self, ctx: WorkerTaskContext, run_args: dict[str, Any]) -> tuple[Any, bool]:
-        return self._generator.generate(ctx.db, run_args)
+        return self._generator.generate(ctx.db, run_args, user_id=ctx.task.user_id)
 
     def serialize_result(self, result: tuple[Any, bool]) -> dict[str, Any]:
         draft, from_cache = result
@@ -209,7 +212,9 @@ class ExtractTaskExecutor(AbstractWorkerTaskExecutor):
         apply_extraction_result(ctx.db, chapter_id=chapter_id, draft=draft)
         project_id = str(run_args.get("project_id") or "")
         if project_id and chapter_id:
-            summary = auto_prepare_chapter_shots_sync(ctx.db, project_id=project_id, chapter_id=chapter_id)
+            summary = auto_prepare_chapter_shots_sync(
+                ctx.db, user_id=ctx.task.user_id, project_id=project_id, chapter_id=chapter_id
+            )
             self._pending_image_task_ids = summary.image_task_ids
 
     def after_apply_commit(self, task_id: str, run_args: dict[str, Any], result: Any) -> None:
@@ -232,7 +237,7 @@ class ConsistencyTaskExecutor(AbstractWorkerTaskExecutor):
         self._generator = ConsistencyResultGenerator()
 
     def execute(self, ctx: WorkerTaskContext, run_args: dict[str, Any]) -> ScriptConsistencyCheckResult:
-        return self._generator.generate(ctx.db, run_args)
+        return self._generator.generate(ctx.db, run_args, user_id=ctx.task.user_id)
 
 
 class _SimpleLLMTaskExecutor(AbstractWorkerTaskExecutor):
@@ -245,7 +250,7 @@ class _SimpleLLMTaskExecutor(AbstractWorkerTaskExecutor):
         self._generator = self.generator_class()
 
     def execute(self, ctx: WorkerTaskContext, run_args: dict[str, Any]) -> Any:
-        return self._generator.generate(ctx.db, run_args)
+        return self._generator.generate(ctx.db, run_args, user_id=ctx.task.user_id)
 
 
 class CharacterPortraitTaskExecutor(_SimpleLLMTaskExecutor):
@@ -281,9 +286,10 @@ class ScriptSimplificationTaskExecutor(_SimpleLLMTaskExecutor):
 def generate_division_result(
     *,
     db: Session,
+    user_id: str,
     script_text: str,
 ) -> ScriptDivisionResult:
-    llm = build_default_text_llm_sync(db, thinking=False)
+    llm = build_default_text_llm_sync(db, user_id=user_id, thinking=False)
     agent = ScriptDividerAgent(llm)
     return agent.divide_script(script_text=script_text)
 
@@ -300,6 +306,7 @@ def apply_division_result(
 def generate_extraction_result(
     *,
     db: Session,
+    user_id: str,
     project_id: str,
     chapter_id: str,
     script_division: dict[str, Any],
@@ -320,7 +327,7 @@ def generate_extraction_result(
         from_cache = result is not None
 
     if result is None:
-        llm = build_default_text_llm_sync(db, thinking=False)
+        llm = build_default_text_llm_sync(db, user_id=user_id, thinking=False)
         agent = ElementExtractorAgent(llm)
         result = agent.extract(
             project_id=project_id,
@@ -349,6 +356,7 @@ def apply_extraction_result(
 def apply_auto_extraction_after_division(
     db: Session,
     *,
+    user_id: str,
     chapter_id: str,
     result: ScriptDivisionResult,
 ) -> AutoPreparationSummary:
@@ -359,6 +367,7 @@ def apply_auto_extraction_after_division(
         raise HTTPException(status_code=404, detail="Chapter not found")
     draft, _from_cache = generate_extraction_result(
         db=db,
+        user_id=user_id,
         project_id=chapter.project_id,
         chapter_id=chapter_id,
         script_division=result.model_dump(),
@@ -366,7 +375,9 @@ def apply_auto_extraction_after_division(
         refresh_cache=False,
     )
     apply_extraction_result(db, chapter_id=chapter_id, draft=draft)
-    return auto_prepare_chapter_shots_sync(db, project_id=chapter.project_id, chapter_id=chapter_id)
+    return auto_prepare_chapter_shots_sync(
+        db, user_id=user_id, project_id=chapter.project_id, chapter_id=chapter_id
+    )
 
 
 def run_divide_task_sync(task_id: str) -> None:

@@ -9,8 +9,9 @@ from pydantic import BaseModel, Field
 from app.api.utils import apply_order, paginate
 from app.core.task_manager import SqlAlchemyTaskStore
 from app.core.task_manager.types import TaskStatus
-from app.dependencies import get_db
+from app.dependencies import get_current_user, get_db
 from app.models.task_links import GenerationTaskLink
+from app.models.user import User
 from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, paginated_response, success_response
 from app.services.common import entity_not_found
 from app.tasks.execute_task import revoke_task_execution
@@ -77,6 +78,7 @@ class GenerationTaskLinkRead(GenerationTaskLinkBase):
 )
 async def list_tasks(
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     statuses: list[TaskStatus] | None = Query(None, description="按任务状态过滤，可多选"),
     task_kind: str | None = Query(None, description="按 task_kind 过滤"),
     relation_type: str | None = Query(None, description="按 relation_type 过滤"),
@@ -87,6 +89,7 @@ async def list_tasks(
 ) -> ApiResponse[PaginatedData[TaskListItemRead]]:
     store = SqlAlchemyTaskStore(db)
     items, total = await store.list_task_views(
+        user_id=current_user.id,
         statuses=statuses,
         task_kind=task_kind,
         relation_type=relation_type,
@@ -133,9 +136,10 @@ async def list_tasks(
 async def get_task_status(
     task_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[TaskStatusRead]:
     store = SqlAlchemyTaskStore(db)
-    view = await store.get_status_view(task_id)
+    view = await store.get_status_view(task_id, user_id=current_user.id)
     if view is None:
         raise HTTPException(status_code=404, detail=entity_not_found("Task"))
     return success_response(
@@ -160,9 +164,10 @@ async def get_task_status(
 async def get_task_result(
     task_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[TaskResultRead]:
     store = SqlAlchemyTaskStore(db)
-    rec = await store.get(task_id)
+    rec = await store.get(task_id, user_id=current_user.id)
     if rec is None:
         raise HTTPException(status_code=404, detail=entity_not_found("Task"))
     return success_response(
@@ -190,8 +195,13 @@ async def cancel_task(
     task_id: str,
     body: TaskCancelRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[TaskCancelRead]:
     store = SqlAlchemyTaskStore(db)
+    # 先按用户归属校验任务存在性（隔离：非本人任务按未找到处理，避免取消他人任务）。
+    owned = await store.get(task_id, user_id=current_user.id)
+    if owned is None:
+        raise HTTPException(status_code=404, detail=entity_not_found("Task"))
     rec = await store.request_cancel(task_id, body.reason)
     if rec is None:
         raise HTTPException(status_code=404, detail=entity_not_found("Task"))
