@@ -42,8 +42,8 @@ class PointTransactionType(str, Enum):
 class UserPoints(Base, TimestampMixin):
     """用户积分账户（每用户一行）。
 
-    `balance` 为可用余额，`frozen` 为已冻结额；`balance - frozen` 即用户当前可下单的
-    可用额度。通过 CHECK 约束保证：余额非负、冻结非负、冻结不超过余额。
+    `balance` 为账户总额（含已冻结部分），`frozen` 为已冻结额；`available = balance - frozen`
+    为可用额度。CHECK 约束保证：余额非负、冻结非负、冻结不超过余额。
     """
 
     __tablename__ = "user_points"

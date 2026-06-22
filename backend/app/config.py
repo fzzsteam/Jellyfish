@@ -39,6 +39,14 @@ class Settings(BaseSettings):
     # 其他积分计费配置（锁定超时、对账阈值等）由后续任务按需追加。
     points_quote_expire_seconds: int = 300
 
+    # 积分账户 Redis 原子锁配置（Task 3）
+    # - points_lock_ttl_ms：持锁 TTL，覆盖一次完整的账户变更（冻结/扣减/解冻/充值）。
+    # - points_lock_wait_ms：竞争时最长等待时间，超时抛 PointsOperationBusyError，绝不绕过 Redis。
+    # - points_lock_retry_max_backoff_ms：指数退避上限，避免在 Redis 抢锁时打满 CPU。
+    points_lock_ttl_ms: int = 30_000
+    points_lock_wait_ms: int = 3_000
+    points_lock_retry_max_backoff_ms: int = 250
+
     # 初始管理员账号（仅在 users 表为空时用于播种）
     initial_admin_username: str = "admin"
     initial_admin_password: str | None = None
