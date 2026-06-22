@@ -28,6 +28,9 @@ import { handleTaskResultSafely } from '../../components/taskResultHelpers'
 import { useRelationTaskNotification } from '../../components/taskNotificationHelpers'
 import { useTaskPageContext } from '../../components/taskPageContext'
 import { TASK_COPY } from '../../components/taskCopy'
+import { usePointsQuote } from '../../../../hooks/usePointsQuote'
+import { PointsCostHint } from '../../../../components/points/PointsCostHint'
+import { makePointsAwareGetErrorMessage } from '../../../../components/points/pointsTaskError'
 import { useLocation } from 'react-router-dom'
 import {
   CHARACTER_PORTRAIT_ANALYSIS_RELATION_TYPE,
@@ -281,6 +284,31 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     [relationType],
   )
 
+  // 资产智能检测：根据 relationType 映射到对应文本类业务计费标签。
+  // 4 种分析（角色/场景/道具/服装）共享同一类调用入口但 business_type 不同，故动态解析。
+  const smartDetectBusinessType = useMemo(() => {
+    switch (relationType) {
+      case 'actor_image':
+      case 'character_image':
+        return 'script_character_portrait'
+      case 'scene_image':
+        return 'script_scene_info'
+      case 'prop_image':
+        return 'script_prop_info'
+      case 'costume_image':
+        return 'script_costume_info'
+      default:
+        return ''
+    }
+  }, [relationType])
+  const smartDetectDesc = (formDesc || '').trim()
+  const smartDetectQuote = usePointsQuote({
+    businessType: smartDetectBusinessType,
+    category: 'text',
+    modelId: null,
+    enabled: !!smartDetectBusinessType && !!smartDetectDesc,
+  })
+
   // Loads selectable image models so asset image generation can target a concrete model.
   useEffect(() => {
     let active = true
@@ -522,6 +550,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
               relation_entity_id: smartDetectRelationEntityId,
               character_description: description,
               character_context: (character_context || '').trim() || null,
+              quote_token: smartDetectQuote.quoteToken,
             },
           })
         }
@@ -532,6 +561,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
               relation_entity_id: smartDetectRelationEntityId,
               scene_description: description,
               scene_context: (scene_context || '').trim() || null,
+              quote_token: smartDetectQuote.quoteToken,
             },
           })
         }
@@ -542,6 +572,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
               relation_entity_id: smartDetectRelationEntityId,
               prop_description: description,
               prop_context: (prop_context || '').trim() || null,
+              quote_token: smartDetectQuote.quoteToken,
             },
           })
         }
@@ -551,6 +582,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
             relation_entity_id: smartDetectRelationEntityId,
             costume_description: description,
             costume_context: (costume_context || '').trim() || null,
+            quote_token: smartDetectQuote.quoteToken,
           },
         })
       }
@@ -562,6 +594,12 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
         reusedMessage: taskCopy.reusedMessage,
         fallbackErrorMessage: '智能检测失败',
         getErrorMessage: (error, fallbackMessage) => {
+          // 积分相关错误（积分不足/报价已变更）优先识别并触发刷新，返回语义文案。
+          const pointsAware = makePointsAwareGetErrorMessage(smartDetectQuote.refresh)
+          const pointsMessage = pointsAware(error, fallbackMessage)
+          if (pointsMessage !== fallbackMessage) {
+            return pointsMessage
+          }
           const maybeAny = error as { response?: { status?: number }; status?: number }
           const status = maybeAny?.response?.status ?? maybeAny?.status
           if (status === 404) {
@@ -869,10 +907,11 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                             size="small"
                             onClick={() => void handleSmartDetectMissing()}
                             loading={smartDetectLoading}
-                            disabled={Boolean(loading) || !!smartDetectTask}
+                            disabled={Boolean(loading) || !!smartDetectTask || !smartDetectQuote.canSubmit}
                           >
                             {smartDetectTask ? '检测中' : '智能检测'}
                           </Button>
+                          <PointsCostHint quote={smartDetectQuote.quote} loading={smartDetectQuote.loading} error={smartDetectQuote.error} />
                           {smartDetectTask ? (
                             <Button
                               size="small"

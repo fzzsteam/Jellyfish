@@ -22,6 +22,9 @@ import { handleTaskResultSafely } from '../../components/taskResultHelpers'
 import { useRelationTaskNotification } from '../../components/taskNotificationHelpers'
 import { useTaskPageContext } from '../../components/taskPageContext'
 import { TASK_COPY } from '../../components/taskCopy'
+import { usePointsQuote } from '../../../../hooks/usePointsQuote'
+import { PointsCostHint } from '../../../../components/points/PointsCostHint'
+import { makePointsAwareGetErrorMessage } from '../../../../components/points/pointsTaskError'
 
 type EditorMode = 'raw' | 'condensed' | 'compare'
 
@@ -62,6 +65,14 @@ export function ChapterRawTextEditorModal({
   const [compareRaw, setCompareRaw] = useState('')
   const [compareCondensed, setCompareCondensed] = useState('')
   const [consistencyResult, setConsistencyResult] = useState<ScriptConsistencyCheckResult | null>(null)
+
+  // 积分试算：三类文本操作各占一个独立 hook（business_type 不同，后端按各自定价）。
+  // modelId 传 null：文本类由后端按用户默认文本模型解析。enabled 仅在弹窗打开且有原文时启用。
+  const rawTextEnabled = open && !!rawText.trim()
+  const simplifyQuote = usePointsQuote({ businessType: 'script_simplify', category: 'text', modelId: null, enabled: rawTextEnabled })
+  const consistencyQuote = usePointsQuote({ businessType: 'script_consistency', category: 'text', modelId: null, enabled: rawTextEnabled })
+  // 一键优化须先完成一致性检查，故仅在已有 consistencyResult 时才试算。
+  const optimizeQuote = usePointsQuote({ businessType: 'script_optimize', category: 'text', modelId: null, enabled: rawTextEnabled && !!consistencyResult })
 
   const applyConsistencyTaskResult = useCallback(async (taskId: string) => {
     await handleTaskResultSafely(taskId, {
@@ -232,12 +243,14 @@ export function ChapterRawTextEditorModal({
             requestBody: {
               chapter_id: chapterId ?? null,
               script_text: rawText,
+              quote_token: simplifyQuote.quoteToken,
             },
           }),
         trackTaskData: trackSimplifyTaskData,
         startedMessage: simplifyTaskCopy.startedMessage,
         reusedMessage: simplifyTaskCopy.reusedMessage,
         fallbackErrorMessage: '智能精简失败',
+        getErrorMessage: makePointsAwareGetErrorMessage(simplifyQuote.refresh),
       })
     } catch {
       // executeAsyncTaskCreate 已统一处理错误提示
@@ -263,12 +276,13 @@ export function ChapterRawTextEditorModal({
       await executeAsyncTaskCreate({
         request: () =>
           ScriptProcessingService.checkConsistencyAsyncApiV1ScriptProcessingCheckConsistencyAsyncPost({
-            requestBody: { script_text: scriptText, chapter_id: chapterId ?? null },
+            requestBody: { script_text: scriptText, chapter_id: chapterId ?? null, quote_token: consistencyQuote.quoteToken },
           }),
         trackTaskData: trackConsistencyTaskData,
         startedMessage: consistencyTaskCopy.startedMessage,
         reusedMessage: consistencyTaskCopy.reusedMessage,
         fallbackErrorMessage: '一致性检查失败',
+        getErrorMessage: makePointsAwareGetErrorMessage(consistencyQuote.refresh),
       })
     } catch {
       // executeAsyncTaskCreate 已统一处理错误提示
@@ -318,12 +332,14 @@ export function ChapterRawTextEditorModal({
               chapter_id: chapterId ?? null,
               script_text: scriptText,
               consistency: consistencyResult as any,
+              quote_token: optimizeQuote.quoteToken,
             },
           }),
         trackTaskData: trackOptimizeTaskData,
         startedMessage: optimizeTaskCopy.startedMessage,
         reusedMessage: optimizeTaskCopy.reusedMessage,
         fallbackErrorMessage: '一键优化失败',
+        getErrorMessage: makePointsAwareGetErrorMessage(optimizeQuote.refresh),
       })
     } catch {
       // executeAsyncTaskCreate 已统一处理错误提示
@@ -528,7 +544,7 @@ export function ChapterRawTextEditorModal({
                 size="small"
                 icon={<ReloadOutlined />}
                 loading={checkingConsistency || !!consistencyTask}
-                disabled={actionsLoading || !!consistencyTask}
+                disabled={actionsLoading || !!consistencyTask || !consistencyQuote.canSubmit}
                 onClick={() => void handleCheckConsistency()}
               >
                 {consistencyTask ? '检查中' : '角色混淆检查'}
@@ -548,7 +564,7 @@ export function ChapterRawTextEditorModal({
                 size="small"
                 icon={<ThunderboltOutlined />}
                 loading={extracting || !!simplifyTask}
-                disabled={actionsLoading || !!simplifyTask}
+                disabled={actionsLoading || !!simplifyTask || !simplifyQuote.canSubmit}
                 onClick={() => void handleSmartSimplify()}
               >
                 {simplifyTask ? '精简中' : '智能精简'}
@@ -601,6 +617,11 @@ export function ChapterRawTextEditorModal({
               <Button size="small" icon={<HistoryOutlined />} loading={actionsLoading} disabled={actionsLoading} onClick={() => setHistoryOpen(true)}>
                 版本历史
               </Button>
+              <PointsCostHint
+                quote={simplifyQuote.quote || consistencyQuote.quote || optimizeQuote.quote}
+                loading={simplifyQuote.loading || consistencyQuote.loading || optimizeQuote.loading}
+                error={simplifyQuote.error || consistencyQuote.error || optimizeQuote.error}
+              />
             </Space>
           </div>
         }
@@ -676,7 +697,7 @@ export function ChapterRawTextEditorModal({
                       type="primary"
                       icon={<ThunderboltOutlined />}
                       loading={optimizingScript || !!optimizeTask}
-                      disabled={actionsLoading || !!optimizeTask}
+                      disabled={actionsLoading || !!optimizeTask || !optimizeQuote.canSubmit}
                       onClick={() => void handleOneClickOptimize()}
                     >
                       {optimizeTask ? '优化中' : '一键优化'}

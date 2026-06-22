@@ -35,6 +35,9 @@ import { useRelationTaskNotification } from '../components/taskNotificationHelpe
 import { useTaskPageContext } from '../components/taskPageContext'
 import { createTaskSettledReloader } from '../components/taskResultHelpers'
 import { TASK_COPY } from '../components/taskCopy'
+import { usePointsQuote } from '../../../hooks/usePointsQuote'
+import { PointsCostHint } from '../../../components/points/PointsCostHint'
+import { makePointsAwareGetErrorMessage } from '../../../components/points/pointsTaskError'
 import {
   SCRIPT_EXTRACTION_RELATION_TYPE,
   useCancelableRelationTask,
@@ -214,6 +217,9 @@ export function ChapterShotEditPage() {
   const extractInFlightRef = useRef(false)
   const [selectedShotIds, setSelectedShotIds] = useState<string[]>(shotId ? [shotId] : [])
   const pendingExternalAssetCreateRef = useRef(false)
+
+  // 积分试算：单条与批量提取均调用同一个 script_extract 接口，共享同一份 quote_token。
+  const extractQuote = usePointsQuote({ businessType: 'script_extract', category: 'text', modelId: null, enabled: !!projectId && !!chapterId })
 
   // 资产替换 Drawer 状态：选中的待替换资产、抽屉开关、提交中标记
   const [replaceDrawerOpen, setReplaceDrawerOpen] = useState(false)
@@ -865,12 +871,14 @@ export function ChapterShotEditPage() {
               script_division: scriptDivision as any,
               consistency: undefined,
               refresh_cache: true,
+              quote_token: extractQuote.quoteToken,
             } as any,
           }),
         trackTaskData: trackExtractTaskData,
         startedMessage: extractTaskCopy.startedMessage,
         reusedMessage: extractTaskCopy.reusedMessage,
         fallbackErrorMessage: '提取失败',
+        getErrorMessage: makePointsAwareGetErrorMessage(extractQuote.refresh),
       })
     } catch {
       // executeAsyncTaskCreate 已统一处理错误提示
@@ -878,7 +886,7 @@ export function ChapterShotEditPage() {
       setExtractingAssets(false)
       extractInFlightRef.current = false
     }
-  }, [chapterId, extractTask, projectId, shot])
+  }, [chapterId, extractTask, projectId, shot, extractQuote.quoteToken, extractQuote.refresh])
 
   const batchExtractAssets = useCallback(async () => {
     if (!projectId || !chapterId || selectedShots.length === 0) return
@@ -921,12 +929,14 @@ export function ChapterShotEditPage() {
               script_division: scriptDivision as any,
               consistency: undefined,
               refresh_cache: true,
+              quote_token: extractQuote.quoteToken,
             } as any,
           }),
         trackTaskData: trackExtractTaskData,
         startedMessage: actionableShots.length > 1 ? `已开始提取 ${actionableShots.length} 条镜头` : extractTaskCopy.startedMessage,
         reusedMessage: extractTaskCopy.reusedMessage,
         fallbackErrorMessage: '批量提取失败',
+        getErrorMessage: makePointsAwareGetErrorMessage(extractQuote.refresh),
       })
     } catch {
       // executeAsyncTaskCreate 已统一处理错误提示
@@ -934,7 +944,7 @@ export function ChapterShotEditPage() {
       setBatchExtractingAssets(false)
       extractInFlightRef.current = false
     }
-  }, [chapterId, extractTask, projectId, selectedShots])
+  }, [chapterId, extractTask, projectId, selectedShots, extractQuote.quoteToken, extractQuote.refresh])
 
   const cancelExtractTask = useCallback(async () => {
     if (!extractTask?.taskId) return
@@ -1546,11 +1556,12 @@ export function ChapterShotEditPage() {
                 type="default"
                 size="small"
                 loading={extractingAssets || extractTaskActive}
-                disabled={extractTaskActive}
+                disabled={extractTaskActive || !extractQuote.canSubmit}
                 onClick={() => void extractAssets()}
               >
                 重新提取/刷新候选
               </Button>
+              <PointsCostHint quote={extractQuote.quote} loading={extractQuote.loading} error={extractQuote.error} />
               {extractTask ? (
                 <Button
                   size="small"
@@ -1717,7 +1728,8 @@ export function ChapterShotEditPage() {
                       )}
                     </Space>
                     {multiSelectActive ? (
-                      <Space size={6} className="shrink-0">
+                      <Space size={6} className="shrink-0 items-center">
+                        <PointsCostHint quote={extractQuote.quote} loading={extractQuote.loading} error={extractQuote.error} />
                         <Tooltip title="批量提取并刷新">
                           <Button
                             size="small"
@@ -1725,7 +1737,7 @@ export function ChapterShotEditPage() {
                             shape="circle"
                             icon={<ReloadOutlined />}
                             loading={batchExtractingAssets || extractTaskActive}
-                            disabled={extractTaskActive}
+                            disabled={extractTaskActive || !extractQuote.canSubmit}
                             onClick={() => void batchExtractAssets()}
                           />
                         </Tooltip>

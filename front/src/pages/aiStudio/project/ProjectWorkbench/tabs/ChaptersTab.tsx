@@ -24,6 +24,9 @@ import { executeAsyncTaskCreate, executeTaskCancel } from '../../../components/t
 import { TASK_COPY } from '../../../components/taskCopy'
 import { useTaskPageContext } from '../../../components/taskPageContext'
 import { useTaskUiStore } from '../../../components/taskUiStore'
+import { usePointsQuote } from '../../../../../hooks/usePointsQuote'
+import { PointsCostHint } from '../../../../../components/points/PointsCostHint'
+import { makePointsAwareGetErrorMessage } from '../../../../../components/points/pointsTaskError'
 import {
   createRelationTaskState,
   upsertRelationTaskStateInMap,
@@ -63,6 +66,14 @@ export function ChaptersTab() {
     onTasksSettled: async () => {
       await refresh()
     },
+  })
+
+  // 积分试算：分镜提取为文本类业务（script_divide），定价与具体章节无关，全表共享一份 quote_token。
+  const divideQuote = usePointsQuote({
+    businessType: 'script_divide',
+    category: 'text',
+    modelId: null,
+    enabled: chapters.length > 0,
   })
 
   const createParam = searchParams.get(CREATE_PARAM)
@@ -264,6 +275,7 @@ export function ChaptersTab() {
               chapter_id: record.id,
               script_text: scriptText,
               write_to_db: true,
+              quote_token: divideQuote.quoteToken,
             },
           }),
         trackTaskData: (data) => {
@@ -274,6 +286,7 @@ export function ChaptersTab() {
         startedMessage: taskCopy.startedMessage,
         reusedMessage: taskCopy.reusedMessage,
         fallbackErrorMessage: '启动分镜提取失败',
+        getErrorMessage: makePointsAwareGetErrorMessage(divideQuote.refresh),
       })
     } catch {
       // executeAsyncTaskCreate 已统一处理错误提示
@@ -481,9 +494,12 @@ export function ChaptersTab() {
             : '查看提取进度'
           : state.primaryAction
         const primaryLoading = chapterDivisionActionId === record.id && state.key === 'extract_shots' && !activeTask
+        // 仅在分镜提取这一可计费动作下，按积分试算结果阻断提交；其他状态（编辑/查看）不受影响。
+        const divideBlocked = state.key === 'extract_shots' && !activeTask && !divideQuote.canSubmit
 
         return (
-          <Space size={8}>
+          <Space size={8} direction="vertical" className="items-start">
+            <Space size={8}>
             <Button
               type="primary"
               size="small"
@@ -497,6 +513,7 @@ export function ChaptersTab() {
               style={{ minWidth: 132, justifyContent: 'center' }}
               icon={primaryIcon}
               loading={primaryLoading}
+              disabled={divideBlocked}
             >
               {primaryText}
             </Button>
@@ -511,6 +528,10 @@ export function ChaptersTab() {
                 loading={chapterDivisionActionId === record.id && !!activeTask}
               />
             </Dropdown>
+            </Space>
+            {state.key === 'extract_shots' && !activeTask ? (
+              <PointsCostHint quote={divideQuote.quote} loading={divideQuote.loading} error={divideQuote.error} />
+            ) : null}
           </Space>
         )
       },
