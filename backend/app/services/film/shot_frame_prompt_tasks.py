@@ -780,6 +780,8 @@ async def run_shot_frame_prompt_task(
     async with async_session_maker() as session:
         try:
             store = SqlAlchemyTaskStore(session)
+            task_record = await store.get(task_id)
+            task_user_id = task_record.user_id if task_record is not None else None
             await store.set_status(task_id, TaskStatus.running)
             await store.set_progress(task_id, 10)
             await session.commit()
@@ -791,7 +793,10 @@ async def run_shot_frame_prompt_task(
             frame_type = str(run_args.get("frame_type") or "")
             shot_id = str(run_args.get("shot_id") or "")
             input_dict = dict(run_args.get("input") or {})
-            llm = await session.run_sync(lambda sync_db: build_default_text_llm_sync(sync_db, thinking=False))
+            # 按任务归属用户解析其默认文本模型（任务隔离）。
+            llm = await session.run_sync(
+                lambda sync_db: build_default_text_llm_sync(sync_db, user_id=task_user_id, thinking=False)
+            )
 
             if frame_type == "first":
                 agent = ShotFirstFramePromptAgent(llm)

@@ -43,11 +43,12 @@ class WorkerTaskContext:
 class AbstractLLMResultGenerator(ABC):
     thinking: bool = True
 
-    def build_llm(self, db: Session) -> BaseChatModel:
-        return build_default_text_llm_sync(db, thinking=self.thinking)
+    def build_llm(self, db: Session, *, user_id: str) -> BaseChatModel:
+        # 按任务归属用户解析其默认文本模型（任务隔离）。
+        return build_default_text_llm_sync(db, user_id=user_id, thinking=self.thinking)
 
-    def generate(self, db: Session, run_args: dict[str, Any]) -> Any:
-        llm = self.build_llm(db)
+    def generate(self, db: Session, run_args: dict[str, Any], *, user_id: str) -> Any:
+        llm = self.build_llm(db, user_id=user_id)
         return self.generate_with_llm(llm, run_args)
 
     @abstractmethod
@@ -66,6 +67,7 @@ class AbstractWorkerTaskExecutor(ABC):
         self._session_maker = session_maker
 
     def run(self, task_id: str) -> None:
+        """执行同步任务的加载、生成、应用与终态持久化生命周期。"""
         started_at = time.monotonic()
         self._log_event("started", task_id)
         try:
@@ -219,6 +221,7 @@ class AbstractAsyncDelegatingExecutor(AbstractWorkerTaskExecutor):
         self.timeout_seconds = timeout_seconds
 
     def run(self, task_id: str) -> None:
+        """执行 async runner，并以数据库最终状态决定 Celery 执行结果。"""
         started_at = time.monotonic()
         self._log_event("started", task_id)
         if self._mark_cancelled_if_requested(task_id):
@@ -229,6 +232,16 @@ class AbstractAsyncDelegatingExecutor(AbstractWorkerTaskExecutor):
             run_args = self._load_run_args(task_id)
             timeout_seconds = self._resolve_timeout_seconds(run_args)
             asyncio.run(self._run_async_with_runtime(task_id, run_args, timeout_seconds))
+            final_status, error = self._load_persisted_outcome(task_id)
+            if final_status == TaskStatus.cancelled:
+                self._log_event("cancelled", task_id, elapsed_ms=self._elapsed_ms(started_at))
+                return
+            if final_status == TaskStatus.failed:
+                raise RuntimeError(error or f"{self.task_kind} runner marked task as failed")
+            if final_status != TaskStatus.succeeded:
+                raise RuntimeError(
+                    f"{self.task_kind} runner returned with non-terminal status: {final_status.value}"
+                )
             self._log_event("succeeded", task_id, elapsed_ms=self._elapsed_ms(started_at))
         except TimeoutError as exc:
             error = str(exc)
@@ -245,6 +258,15 @@ class AbstractAsyncDelegatingExecutor(AbstractWorkerTaskExecutor):
             if row is None:
                 raise RuntimeError(f"Task not found: {task_id}")
             return dict((row.payload or {}).get("run_args") or {})
+
+    def _load_persisted_outcome(self, task_id: str) -> tuple[TaskStatus, str]:
+        """读取 runner 落库的最终状态，使外层日志与任务状态保持一致。"""
+        with self._session_maker() as db:
+            row = db.get(GenerationTask, task_id)
+            if row is None:
+                raise RuntimeError(f"Task not found after runner completed: {task_id}")
+            raw_status = row.status.value if hasattr(row.status, "value") else str(row.status)
+            return TaskStatus(raw_status), row.error or ""
 
     async def _run_async_with_runtime(
         self,

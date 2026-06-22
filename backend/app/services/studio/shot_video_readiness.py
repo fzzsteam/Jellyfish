@@ -98,8 +98,12 @@ async def _reference_frames_ready(
     return _check("reference_frames_ready", True, "参考帧已就绪")
 
 
-async def _video_model_and_provider_ready(db: AsyncSession) -> tuple[ShotVideoReadinessCheck, ShotVideoReadinessCheck]:
-    settings = await db.get(ModelSettings, 1)
+async def _video_model_and_provider_ready(
+    db: AsyncSession, *, user_id: str
+) -> tuple[ShotVideoReadinessCheck, ShotVideoReadinessCheck]:
+    settings = (
+        await db.execute(select(ModelSettings).where(ModelSettings.user_id == user_id))
+    ).scalar_one_or_none()
     model_id = settings.default_video_model_id if settings else None
     if not model_id:
         return (
@@ -137,6 +141,7 @@ async def _video_model_and_provider_ready(db: AsyncSession) -> tuple[ShotVideoRe
 async def get_shot_video_readiness(
     db: AsyncSession,
     *,
+    user_id: str,
     shot_id: str,
     reference_mode: str,
 ) -> ShotVideoReadinessRead:
@@ -168,6 +173,7 @@ async def get_shot_video_readiness(
     try:
         preview = await derive_video_preview(
             db,
+            user_id=user_id,
             base=build_video_base_draft(shot_id=shot_id, prompt=None),
             context=await build_video_context(
                 db,
@@ -183,7 +189,7 @@ async def get_shot_video_readiness(
         prompt_message = f"视频提示词渲染失败：{exc}"
 
     active_video_task = await _has_active_video_task(db, shot_id=shot_id)
-    model_check, provider_check = await _video_model_and_provider_ready(db)
+    model_check, provider_check = await _video_model_and_provider_ready(db, user_id=user_id)
     checks = [
         _check("extraction_ready", extraction_ok, extraction_msg),
         duration_check,

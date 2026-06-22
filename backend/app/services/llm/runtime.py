@@ -8,6 +8,8 @@ from fastapi import HTTPException
 from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy.orm import Session
 
+from sqlalchemy import select
+
 from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider
 from app.services.llm.provider_resolver import resolve_effective_base_url
 
@@ -25,9 +27,13 @@ def _default_model_id(settings_row: ModelSettings | None, category: ModelCategor
 def _require_provider_and_model_sync(
     db: Session,
     *,
+    user_id: str,
     category: ModelCategoryKey,
 ) -> tuple[Provider, Model]:
-    settings_row = db.get(ModelSettings, 1)
+    # 按 user_id 读取该用户的模型设置行（每用户一行），解析其默认模型。
+    settings_row = db.execute(
+        select(ModelSettings).where(ModelSettings.user_id == user_id)
+    ).scalar_one_or_none()
     model_id = _default_model_id(settings_row, category)
     if not model_id:
         raise HTTPException(status_code=503, detail=f"No default model configured for category={category.value}")
@@ -46,9 +52,10 @@ def _require_provider_and_model_sync(
 def build_default_text_llm_sync(
     db: Session,
     *,
+    user_id: str,
     thinking: bool,
 ) -> BaseChatModel:
-    provider, model = _require_provider_and_model_sync(db, category=ModelCategoryKey.text)
+    provider, model = _require_provider_and_model_sync(db, user_id=user_id, category=ModelCategoryKey.text)
 
     api_key = (provider.api_key or "").strip()
     if not api_key:

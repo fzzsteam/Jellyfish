@@ -6,10 +6,11 @@ from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
+from fastapi.responses import Response
 from fastapi.testclient import TestClient
 
 from app.api.v1.routes.studio import files as files_route
-from app.dependencies import get_db
+from app.dependencies import get_current_user, get_db
 from app.main import app
 from app.models.studio import FileItem
 from app.models.types import FileType
@@ -70,6 +71,25 @@ def test_get_file_detail_not_found_returns_api_response(client: TestClient, monk
 
     assert response.status_code == 404
     assert response.json() == {"code": 404, "message": "File not found", "data": None}
+
+
+def test_download_file_allows_anonymous_media_requests(client: TestClient, monkeypatch) -> None:
+    """文件下载保持匿名可读，确保浏览器原生 img/video 请求无需 Bearer Token。"""
+    db = _DummyDB()
+
+    async def _fake_build_download_response(*_args, **_kwargs) -> Response:
+        return Response(content=b"binary", media_type="image/png")
+
+    monkeypatch.setattr(files_route, "build_download_response", _fake_build_download_response)
+    app.dependency_overrides[get_db] = _override_db(db)
+    app.dependency_overrides.pop(get_current_user, None)
+    try:
+        response = client.get("/api/v1/studio/files/file-1/download")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/png")
 
 
 def test_delete_file_returns_empty_envelope(client: TestClient, monkeypatch) -> None:

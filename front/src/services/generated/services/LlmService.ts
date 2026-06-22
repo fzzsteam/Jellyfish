@@ -32,6 +32,7 @@ export class LlmService {
         isDesc = false,
         page = 1,
         pageSize = 10,
+        authorization,
     }: {
         /**
          * 关键字，过滤 name/description
@@ -53,10 +54,14 @@ export class LlmService {
          * 每页条数
          */
         pageSize?: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_ProviderRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/llm/providers',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'q': q,
                 'order': order,
@@ -76,12 +81,17 @@ export class LlmService {
      */
     public static createProviderApiV1LlmProvidersPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ProviderCreate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ProviderRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/llm/providers',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -96,15 +106,20 @@ export class LlmService {
      */
     public static listSupportedProvidersApiV1LlmProvidersSupportedGet({
         category,
+        authorization,
     }: {
         /**
          * 按模型类别过滤：text/image/video
          */
         category?: (ModelCategoryKey | null),
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_list_ProviderSupportedRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/llm/providers/supported',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'category': category,
             },
@@ -118,10 +133,20 @@ export class LlmService {
      * @returns ApiResponse_ImageGenerationOptionsRead_ Successful Response
      * @throws ApiError
      */
-    public static getImageGenerationOptionsApiV1LlmImageGenerationOptionsGet(): CancelablePromise<ApiResponse_ImageGenerationOptionsRead_> {
+    public static getImageGenerationOptionsApiV1LlmImageGenerationOptionsGet({
+        authorization,
+    }: {
+        authorization?: (string | null),
+    }): CancelablePromise<ApiResponse_ImageGenerationOptionsRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/llm/image-generation-options',
+            headers: {
+                'authorization': authorization,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
         });
     }
     /**
@@ -129,10 +154,20 @@ export class LlmService {
      * @returns ApiResponse_VideoGenerationOptionsRead_ Successful Response
      * @throws ApiError
      */
-    public static getVideoGenerationOptionsApiV1LlmVideoGenerationOptionsGet(): CancelablePromise<ApiResponse_VideoGenerationOptionsRead_> {
+    public static getVideoGenerationOptionsApiV1LlmVideoGenerationOptionsGet({
+        authorization,
+    }: {
+        authorization?: (string | null),
+    }): CancelablePromise<ApiResponse_VideoGenerationOptionsRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/llm/video-generation-options',
+            headers: {
+                'authorization': authorization,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
         });
     }
     /**
@@ -142,14 +177,19 @@ export class LlmService {
      */
     public static getProviderApiV1LlmProvidersProviderIdGet({
         providerId,
+        authorization,
     }: {
         providerId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ProviderRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/llm/providers/{provider_id}',
             path: {
                 'provider_id': providerId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -164,15 +204,20 @@ export class LlmService {
     public static updateProviderApiV1LlmProvidersProviderIdPatch({
         providerId,
         requestBody,
+        authorization,
     }: {
         providerId: string,
         requestBody: ProviderUpdate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ProviderRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/llm/providers/{provider_id}',
             path: {
                 'provider_id': providerId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -188,14 +233,19 @@ export class LlmService {
      */
     public static deleteProviderApiV1LlmProvidersProviderIdDelete({
         providerId,
+        authorization,
     }: {
         providerId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/llm/providers/{provider_id}',
             path: {
                 'provider_id': providerId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -215,6 +265,7 @@ export class LlmService {
         isDesc = false,
         page = 1,
         pageSize = 10,
+        authorization,
     }: {
         /**
          * 按供应商过滤
@@ -244,10 +295,14 @@ export class LlmService {
          * 每页条数
          */
         pageSize?: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_ModelRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/llm/models',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'provider_id': providerId,
                 'category': category,
@@ -269,12 +324,17 @@ export class LlmService {
      */
     public static createModelApiV1LlmModelsPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ModelCreate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ModelRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/llm/models',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -289,14 +349,19 @@ export class LlmService {
      */
     public static getModelApiV1LlmModelsModelIdGet({
         modelId,
+        authorization,
     }: {
         modelId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ModelRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/llm/models/{model_id}',
             path: {
                 'model_id': modelId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -311,15 +376,20 @@ export class LlmService {
     public static updateModelApiV1LlmModelsModelIdPatch({
         modelId,
         requestBody,
+        authorization,
     }: {
         modelId: string,
         requestBody: ModelUpdate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ModelRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/llm/models/{model_id}',
             path: {
                 'model_id': modelId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -335,8 +405,10 @@ export class LlmService {
      */
     public static deleteModelApiV1LlmModelsModelIdDelete({
         modelId,
+        authorization,
     }: {
         modelId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
@@ -344,35 +416,53 @@ export class LlmService {
             path: {
                 'model_id': modelId,
             },
+            headers: {
+                'authorization': authorization,
+            },
             errors: {
                 422: `Validation Error`,
             },
         });
     }
     /**
-     * 获取模型全局设置（单例）
+     * 获取当前用户的模型设置
      * @returns ApiResponse_ModelSettingsRead_ Successful Response
      * @throws ApiError
      */
-    public static getModelSettingsApiV1LlmModelSettingsGet(): CancelablePromise<ApiResponse_ModelSettingsRead_> {
+    public static getModelSettingsApiV1LlmModelSettingsGet({
+        authorization,
+    }: {
+        authorization?: (string | null),
+    }): CancelablePromise<ApiResponse_ModelSettingsRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/llm/model-settings',
+            headers: {
+                'authorization': authorization,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
         });
     }
     /**
-     * 更新模型全局设置（单例）
+     * 更新当前用户的模型设置
      * @returns ApiResponse_ModelSettingsRead_ Successful Response
      * @throws ApiError
      */
     public static updateModelSettingsApiV1LlmModelSettingsPut({
         requestBody,
+        authorization,
     }: {
         requestBody: ModelSettingsUpdate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ModelSettingsRead_> {
         return __request(OpenAPI, {
             method: 'PUT',
             url: '/api/v1/llm/model-settings',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {

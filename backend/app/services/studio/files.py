@@ -62,14 +62,18 @@ def _resolve_download_media_type(filename: str) -> str:
 async def list_files_paginated(
     db: AsyncSession,
     *,
+    user_id: str,
     q: str | None,
     order: str | None,
     is_desc: bool,
     page: int,
     page_size: int,
 ) -> ApiResponse[PaginatedData[FileRead]]:
-    """分页查询文件。"""
-    stmt = select(FileItem)
+    """分页查询文件。
+
+    数据隔离：仅返回归属当前用户（user_id）的文件。
+    """
+    stmt = select(FileItem).where(FileItem.user_id == user_id)
     stmt = apply_keyword_filter(stmt, q=q, fields=[FileItem.name])
     stmt = apply_order(
         stmt,
@@ -92,9 +96,17 @@ async def get_file_detail(
     db: AsyncSession,
     *,
     file_id: str,
+    user_id: str,
 ) -> FileDetailRead:
-    """获取文件详情。"""
-    stmt = select(FileItem).options(selectinload(FileItem.usages)).where(FileItem.id == file_id)
+    """获取文件详情。
+
+    数据隔离：仅命中归属当前用户的文件；他人文件按未找到处理。
+    """
+    stmt = (
+        select(FileItem)
+        .options(selectinload(FileItem.usages))
+        .where(FileItem.id == file_id, FileItem.user_id == user_id)
+    )
     res = await db.execute(stmt)
     obj = res.scalars().first()
     if obj is None:
@@ -109,9 +121,15 @@ async def update_file_meta(
     *,
     file_id: str,
     body: FileUpdate,
+    user_id: str,
 ) -> FileItem:
-    """更新文件元信息，并按需写入 usage。"""
+    """更新文件元信息，并按需写入 usage。
+
+    数据隔离：仅允许更新归属当前用户的文件；他人文件按未找到处理。
+    """
     obj = await get_or_404(db, FileItem, file_id, detail=entity_not_found("File"))
+    if obj.user_id != user_id:
+        raise HTTPException(status_code=404, detail=entity_not_found("File"))
     data = body.model_dump(exclude_unset=True)
     usage_payload = data.pop("usage", None)
     patch_model(obj, data)
@@ -132,6 +150,7 @@ async def update_file_meta(
 async def upload_file(
     db: AsyncSession,
     *,
+    user_id: str,
     file: UploadFile,
     name: str | None = None,
     project_id: str | None = None,
@@ -140,7 +159,10 @@ async def upload_file(
     usage_kind: str | None = None,
     source_ref: str | None = None,
 ) -> FileItem:
-    """上传文件到对象存储，并创建 FileItem 记录。"""
+    """上传文件到对象存储，并创建 FileItem 记录。
+
+    数据隔离：新建的 FileItem 归属当前用户（user_id）。
+    """
     if not file.filename:
         raise HTTPException(status_code=400, detail="上传文件缺少文件名")
 
@@ -159,6 +181,7 @@ async def upload_file(
         db,
         FileItem(
             id=str(uuid.uuid4()),
+            user_id=user_id,
             type=file_type,
             name=display_name,
             thumbnail="",
@@ -186,7 +209,11 @@ async def build_download_response(
     *,
     file_id: str,
 ) -> StreamingResponse:
-    """根据 file_id 构建下载响应。"""
+    """根据 file_id 构建下载响应。
+
+    下载接口用于浏览器原生媒体标签直接访问，因此保持匿名可读。
+    只要文件记录存在，就返回对应对象存储内容。
+    """
     file_item = await get_or_404(db, FileItem, file_id, detail=entity_not_found("File"))
     content = await storage.download_file(key=file_item.storage_key)
 
@@ -204,9 +231,16 @@ async def get_storage_info(
     db: AsyncSession,
     *,
     file_id: str,
+    user_id: str,
 ) -> dict[str, Any]:
-    """读取对象存储信息。"""
+    """读取单个文件的对象存储信息（head_object）。
+
+    数据隔离：仅命中归属当前用户的文件；他人文件按未找到处理。
+    （本函数针对单个 file_id 查询，并非全量统计，故按单条归属校验即可。）
+    """
     file_item = await get_or_404(db, FileItem, file_id, detail=entity_not_found("File"))
+    if file_item.user_id != user_id:
+        raise HTTPException(status_code=404, detail=entity_not_found("File"))
     info = await storage.get_file_info(key=file_item.storage_key)
     return {
         "key": info.key,
@@ -221,10 +255,15 @@ async def delete_file(
     db: AsyncSession,
     *,
     file_id: str,
+    user_id: str,
 ) -> None:
-    """删除文件记录与对象存储中的内容；若记录不存在则静默返回。"""
+    """删除文件记录与对象存储中的内容；若记录不存在则静默返回。
+
+    数据隔离：仅删除归属当前用户的文件；记录不存在或属于他人时均静默返回
+    （对外表现为"未找到"，不泄露他人文件存在性）。
+    """
     file_item = await db.get(FileItem, file_id)
-    if file_item is None:
+    if file_item is None or file_item.user_id != user_id:
         return
 
     try:

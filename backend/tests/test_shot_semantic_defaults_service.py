@@ -31,6 +31,7 @@ async def _seed_async_graph(db: AsyncSession) -> str:
         name="项目一",
         style=ProjectStyle.guoman,
         visual_style=ProjectVisualStyle.anime,
+        user_id="test-user",
     )
     chapter = Chapter(id="chapter-1", project_id=project.id, index=1, title="章节一")
     shot = Shot(id="shot-1", chapter_id=chapter.id, index=1, title="镜头一", script_excerpt="原始摘录")
@@ -54,6 +55,7 @@ def _seed_sync_graph(db: Session) -> str:
         name="项目一",
         style=ProjectStyle.guoman,
         visual_style=ProjectVisualStyle.anime,
+        user_id="test-user",
     )
     chapter = Chapter(id="chapter-1", project_id=project.id, index=1, title="章节一")
     shot = Shot(id="shot-1", chapter_id=chapter.id, index=1, title="镜头一", script_excerpt="原始摘录")

@@ -7,7 +7,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_db
+from app.dependencies import get_current_user, get_db
+from app.models.user import User
 from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, paginated_response, success_response
 from app.schemas.studio.entity_existence import (
     EntityNameExistenceCheckRequest,
@@ -34,8 +35,9 @@ router = APIRouter()
 async def check_entity_names_existence(
     body: EntityNameExistenceCheckRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[EntityNameExistenceCheckResponse]:
-    service = StudioEntitiesService(db)
+    service = StudioEntitiesService(db, user_id=current_user.id)
     data = await service.check_names_existence(
         project_id=body.project_id,
         shot_id=body.shot_id,
@@ -59,8 +61,9 @@ async def list_entities(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     project_id: str | None = Query(None, description="按项目过滤（仅对 character 类型有效）"),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[PaginatedData[dict[str, Any]]]:
-    service = StudioEntitiesService(db)
+    service = StudioEntitiesService(db, user_id=current_user.id)
     payload, total = await service.list_entities(
         entity_type=entity_type,
         q=q,
@@ -80,15 +83,21 @@ async def create_entity(
     entity_type: str,
     body: dict[str, Any],
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[dict[str, Any]]:
-    service = StudioEntitiesService(db)
+    service = StudioEntitiesService(db, user_id=current_user.id)
     payload = await service.create_entity(entity_type=entity_type, body=body)
     return created_response(payload)
 
 
 @router.get("/{entity_type}/{entity_id}", response_model=ApiResponse[dict[str, Any]], summary="统一获取实体")
-async def get_entity(entity_type: str, entity_id: str, db: AsyncSession = Depends(get_db)) -> ApiResponse[dict[str, Any]]:
-    service = StudioEntitiesService(db)
+async def get_entity(
+    entity_type: str,
+    entity_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ApiResponse[dict[str, Any]]:
+    service = StudioEntitiesService(db, user_id=current_user.id)
     payload = await service.get_entity(entity_type=entity_type, entity_id=entity_id)
     return success_response(payload)
 
@@ -99,15 +108,21 @@ async def update_entity(
     entity_id: str,
     body: dict[str, Any],
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[dict[str, Any]]:
-    service = StudioEntitiesService(db)
+    service = StudioEntitiesService(db, user_id=current_user.id)
     payload = await service.update_entity(entity_type=entity_type, entity_id=entity_id, body=body)
     return success_response(payload)
 
 
 @router.delete("/{entity_type}/{entity_id}", response_model=ApiResponse[None], summary="统一删除实体")
-async def delete_entity(entity_type: str, entity_id: str, db: AsyncSession = Depends(get_db)) -> ApiResponse[None]:
-    service = StudioEntitiesService(db)
+async def delete_entity(
+    entity_type: str,
+    entity_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ApiResponse[None]:
+    service = StudioEntitiesService(db, user_id=current_user.id)
     await service.delete_entity(entity_type=entity_type, entity_id=entity_id)
     return empty_response()
 
@@ -125,8 +140,9 @@ async def list_entity_images(
     is_desc: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[PaginatedData[dict[str, Any]]]:
-    service = StudioEntitiesService(db)
+    service = StudioEntitiesService(db, user_id=current_user.id)
     payload, total = await service.list_entity_images(
         entity_type=entity_type,
         entity_id=entity_id,
@@ -149,8 +165,9 @@ async def create_entity_image(
     entity_id: str,
     body: dict[str, Any],
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[dict[str, Any]]:
-    service = StudioEntitiesService(db)
+    service = StudioEntitiesService(db, user_id=current_user.id)
     payload = await service.create_entity_image(entity_type=entity_type, entity_id=entity_id, body=body)
     return created_response(payload)
 
@@ -166,8 +183,9 @@ async def update_entity_image(
     image_id: int,
     body: dict[str, Any],
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[dict[str, Any]]:
-    service = StudioEntitiesService(db)
+    service = StudioEntitiesService(db, user_id=current_user.id)
     payload = await service.update_entity_image(
         entity_type=entity_type,
         entity_id=entity_id,
@@ -276,7 +294,8 @@ async def delete_entity_image(
     entity_id: str,
     image_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[None]:
-    service = StudioEntitiesService(db)
+    service = StudioEntitiesService(db, user_id=current_user.id)
     await service.delete_entity_image(entity_type=entity_type, entity_id=entity_id, image_id=image_id)
     return empty_response()

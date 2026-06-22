@@ -8,12 +8,29 @@ from datetime import UTC, datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from app.dependencies import get_db
+from app.dependencies import get_current_user, get_db
 from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider, ProviderStatus
+from app.models.user import User
 from tests.support.llm_api_app import build_llm_only_app
 
 # 仅挂载 /api/v1/llm，避免导入 app.main 时连带加载 film 路由与 Celery。
 llm_app = build_llm_only_app()
+
+# 测试统一以该用户身份发起请求；隔离改造后所有 provider/model/settings 端点需注入 current_user。
+_TEST_USER_ID = "test-user"
+
+
+async def _override_current_user() -> User:
+    return User(id=_TEST_USER_ID, username=_TEST_USER_ID, hashed_password="h")
+
+
+@pytest.fixture(autouse=True)
+def _auth_override() -> Iterator[None]:
+    llm_app.dependency_overrides[get_current_user] = _override_current_user
+    try:
+        yield
+    finally:
+        llm_app.dependency_overrides.pop(get_current_user, None)
 
 
 @pytest.fixture
@@ -38,6 +55,20 @@ class _FakeLlmDB:
         if model is ModelSettings:
             return self.model_settings.get(int(entity_id))
         return None
+
+    async def execute(self, _stmt: object) -> object:  # noqa: ANN401
+        """最小 execute 替身：仅服务于"按 user_id 取 ModelSettings"的隔离查询。
+
+        本替身不解析 SQL，直接返回唯一一行 ModelSettings（测试场景每库至多一行）。
+        """
+        rows = list(self.model_settings.values())
+        first = rows[0] if rows else None
+
+        class _Result:
+            def scalar_one_or_none(self_inner) -> object:  # noqa: ANN001
+                return first
+
+        return _Result()
 
     def add(self, obj: Provider | Model | ModelSettings) -> None:
         if isinstance(obj, Provider):
@@ -68,6 +99,7 @@ def _seed_provider(db: _FakeLlmDB, provider_id: str = "p-1") -> Provider:
     now = datetime.now(UTC)
     obj = Provider(
         id=provider_id,
+        user_id=_TEST_USER_ID,
         name="OpenAI",
         base_url="https://api.openai.com/v1",
         api_key="secret",

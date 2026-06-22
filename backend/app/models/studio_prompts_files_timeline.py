@@ -1,24 +1,35 @@
 from __future__ import annotations
 
-from sqlalchemy import Boolean, JSON, Index, Integer, String, Text
+from sqlalchemy import Boolean, ForeignKey, JSON, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
-from app.models.base import TimestampMixin
+from app.models.base import TimestampMixin, UserOwnedMixin
 from app.models.types import FileType, PromptCategory, TimelineClipType
 
 
-class PromptTemplate(Base,TimestampMixin):
+class PromptTemplate(Base, TimestampMixin):
     """提示词模板表。
 
     应用层保证：
     - 同一 category 下至多一条 is_default=True，写入/更新时由接口层维护。
     - is_system=True 的记录由初始化脚本写入，接口层拒绝删除和修改。
+
+    归属说明：
+    - 不使用 `UserOwnedMixin`，单独声明**可空** `user_id`：`is_system=True` 的系统预置
+      模板全用户共享，其 `user_id` 为 NULL；普通模板归属创建者。隔离查询放行系统模板。
     """
 
     __tablename__ = "prompt_templates"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="模板 ID（UUID）")
+    user_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="归属用户 ID；系统预置模板为 NULL，全用户共享",
+    )
     category: Mapped[PromptCategory] = mapped_column(String(32), nullable=False, index=True, comment="模板类别")
     name: Mapped[str] = mapped_column(String(255), nullable=False, comment="模板名称")
     preview: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="预览文案")
@@ -32,7 +43,7 @@ class PromptTemplate(Base,TimestampMixin):
     )
 
 
-class FileItem(Base, TimestampMixin):
+class FileItem(Base, UserOwnedMixin, TimestampMixin):
     """素材文件表。"""
 
     __tablename__ = "files"

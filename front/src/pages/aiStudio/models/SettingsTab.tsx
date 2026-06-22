@@ -14,7 +14,7 @@ export default function SettingsTab() {
     setLoading(true)
     try {
       const [settRes, modelsRes] = await Promise.all([
-        LlmService.getModelSettingsApiV1LlmModelSettingsGet(),
+        LlmService.getModelSettingsApiV1LlmModelSettingsGet({}),
         LlmService.listModelsApiV1LlmModelsGet({ page: 1, pageSize: 100 }),
       ])
       setSettings(settRes.data ?? null)

@@ -59,11 +59,12 @@ async def _persist_images_to_assets(
     session: AsyncSession,
     *,
     task_id: str,
+    user_id: str,
     relation_type: str,
     relation_entity_id: str,
     result: ImageGenerationResult,
 ) -> None:
-    """将图片生成结果落库到 FileItem 与业务图片表。"""
+    """将图片生成结果按任务所属用户落库到 FileItem 与业务图片表。"""
     images = result.images or []
     if not images:
         return
@@ -79,6 +80,7 @@ async def _persist_images_to_assets(
             continue
         file_obj = await create_file_from_url_or_b64(
             session,
+            user_id=user_id,
             url=item.url,
             name=f"{target_type}-{target_id}-{index + 1}",
             prefix=f"generated-images/{target_type}/{target_id}",
@@ -298,6 +300,7 @@ async def _resolve_related_shot_id(
 async def create_image_task_and_link(
     *,
     db: AsyncSession,
+    user_id: str,
     model_id: str | None,
     relation_type: str,
     relation_entity_id: str,
@@ -308,11 +311,11 @@ async def create_image_task_and_link(
     purpose: str = "generic",
     render_context: dict | None = None,
 ) -> str:
-    """创建图片生成任务，并建立任务关联。"""
+    """创建图片生成任务（归属 user_id），并建立任务关联；默认模型按用户解析。"""
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
 
-    model = await resolve_image_model(db, model_id)
+    model = await resolve_image_model(db, model_id, user_id=user_id)
     provider_cfg = await load_provider_config(db, model.provider_id)
 
     run_args: dict = {
@@ -337,6 +340,7 @@ async def create_image_task_and_link(
     task_record = await tm.create(
         task=_CreateOnlyTask(),
         mode=DeliveryMode.async_polling,
+        user_id=user_id,
         task_kind="image_generation",
         run_args=run_args,
     )
@@ -368,12 +372,17 @@ async def run_image_generation_task(
     task_id: str,
     run_args: dict,
 ) -> None:
+    """执行图片生成，并以任务记录的用户归属持久化所有生成文件。"""
     relation_type = str(run_args.get("relation_type") or "")
     relation_entity_id = str(run_args.get("relation_entity_id") or "")
 
     async with async_session_maker() as session:
         try:
             store = SqlAlchemyTaskStore(session)
+            task_record = await store.get(task_id)
+            user_id = (task_record.user_id or "").strip() if task_record is not None else ""
+            if not user_id:
+                raise RuntimeError(f"Image generation task has no owner: {task_id}")
             await store.set_status(task_id, TaskStatus.running)
             await store.set_progress(task_id, 10)
             await session.commit()
@@ -398,7 +407,12 @@ async def run_image_generation_task(
             await task.run()
             result = await task.get_result()
             if result is None:
-                raise RuntimeError("Image generation task returned no result")
+                status_dict = await task.status()
+                detailed_error = ""
+                if isinstance(status_dict, dict):
+                    detailed_error = str(status_dict.get("error") or "")
+                msg = detailed_error or "Image generation task returned no result"
+                raise RuntimeError(msg)
             if await cancel_if_requested_async(store=store, task_id=task_id, session=session):
                 log_task_event("image_generation", task_id, "cancelled", stage="after_execute")
                 return
@@ -411,6 +425,7 @@ async def run_image_generation_task(
             await _persist_images_to_assets(
                 session,
                 task_id=task_id,
+                user_id=user_id,
                 relation_type=relation_type,
                 relation_entity_id=relation_entity_id,
                 result=result,

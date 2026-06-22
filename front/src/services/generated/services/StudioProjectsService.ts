@@ -17,10 +17,20 @@ export class StudioProjectsService {
      * @returns ApiResponse_ProjectStyleOptionsRead_ Successful Response
      * @throws ApiError
      */
-    public static getProjectStyleOptionsApiV1StudioProjectsStyleOptionsGet(): CancelablePromise<ApiResponse_ProjectStyleOptionsRead_> {
+    public static getProjectStyleOptionsApiV1StudioProjectsStyleOptionsGet({
+        authorization,
+    }: {
+        authorization?: (string | null),
+    }): CancelablePromise<ApiResponse_ProjectStyleOptionsRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/projects/style-options',
+            headers: {
+                'authorization': authorization,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
         });
     }
     /**
@@ -34,6 +44,7 @@ export class StudioProjectsService {
         isDesc = false,
         page = 1,
         pageSize = 10,
+        authorization,
     }: {
         /**
          * 关键字，过滤 name/description
@@ -49,10 +60,14 @@ export class StudioProjectsService {
         isDesc?: boolean,
         page?: number,
         pageSize?: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_ProjectRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/projects',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'q': q,
                 'order': order,
@@ -72,12 +87,17 @@ export class StudioProjectsService {
      */
     public static createProjectApiV1StudioProjectsPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ProjectCreate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ProjectRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/projects',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -92,14 +112,19 @@ export class StudioProjectsService {
      */
     public static getProjectApiV1StudioProjectsProjectIdGet({
         projectId,
+        authorization,
     }: {
         projectId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ProjectRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/projects/{project_id}',
             path: {
                 'project_id': projectId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -114,15 +139,20 @@ export class StudioProjectsService {
     public static updateProjectApiV1StudioProjectsProjectIdPatch({
         projectId,
         requestBody,
+        authorization,
     }: {
         projectId: string,
         requestBody: ProjectUpdate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ProjectRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/studio/projects/{project_id}',
             path: {
                 'project_id': projectId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -138,14 +168,19 @@ export class StudioProjectsService {
      */
     public static deleteProjectApiV1StudioProjectsProjectIdDelete({
         projectId,
+        authorization,
     }: {
         projectId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/studio/projects/{project_id}',
             path: {
                 'project_id': projectId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,

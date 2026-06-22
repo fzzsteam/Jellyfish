@@ -9,11 +9,11 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
-from app.models.base import TimestampMixin
+from app.models.base import TimestampMixin, UserOwnedMixin
 
 
 class AgentTypeKey(str, Enum):
@@ -51,7 +51,7 @@ class LogLevel(str, Enum):
     error = "error"
 
 
-class Provider(Base, TimestampMixin):
+class Provider(Base, UserOwnedMixin, TimestampMixin):
     """模型供应商配置。
 
     安全提示：
@@ -98,7 +98,7 @@ class Provider(Base, TimestampMixin):
     )
 
 
-class Model(Base, TimestampMixin):
+class Model(Base, UserOwnedMixin, TimestampMixin):
     """具体模型实例（绑定供应商、类别与参数）。"""
 
     __tablename__ = "models"
@@ -125,16 +125,22 @@ class Model(Base, TimestampMixin):
 
 
 class ModelSettings(Base):
-    """模型管理全局设置（单例表）。
+    """模型管理设置（每用户一行）。
 
     说明：
-    - 通过“单表单行”实现全局默认值；应用层通常只读/更新 id=1。
-    - 外键使用 `SET NULL`，避免删除模型时导致设置表不可更新。
+    - 由“单表单行 id=1 全局设置”改为“每 user_id 一行”；读写均按 user_id 定位。
+    - 外键使用 SET NULL，避免删除模型时导致设置行不可更新。
     """
 
     __tablename__ = "model_settings"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="设置行 ID（通常为 1）")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="设置行 ID")
+    user_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        comment="归属用户 ID（每用户一行）",
+    )
     default_text_model_id: Mapped[str | None] = mapped_column(
         String(64),
         ForeignKey("models.id", ondelete="SET NULL"),
@@ -159,4 +165,8 @@ class ModelSettings(Base):
     default_text_model: Mapped["Model | None"] = relationship(foreign_keys=[default_text_model_id])
     default_image_model: Mapped["Model | None"] = relationship(foreign_keys=[default_image_model_id])
     default_video_model: Mapped["Model | None"] = relationship(foreign_keys=[default_video_model_id])
+
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_model_settings_user"),
+    )
 

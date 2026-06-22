@@ -8,7 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.db import Base
 from app.models.studio import ProjectStyle, ProjectVisualStyle, Scene
+from app.models.user import User
 from app.services.studio.entity_crud import create_entity, update_entity
+
+# 资产已按 user_id 隔离，测试统一归属同一个用户以验证"同用户内"的重名校验。
+TEST_USER_ID = "test-user"
 
 
 async def _build_session() -> tuple[AsyncSession, object]:
@@ -17,7 +21,11 @@ async def _build_session() -> tuple[AsyncSession, object]:
     session_local = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    return session_local(), engine
+    db = session_local()
+    # 资产 user_id 是 NOT NULL 外键，先插入对应用户行满足约束。
+    db.add(User(id=TEST_USER_ID, username="test-user", hashed_password="h"))
+    await db.flush()
+    return db, engine
 
 
 def _scene(scene_id: str, name: str) -> Scene:
@@ -31,6 +39,7 @@ def _scene(scene_id: str, name: str) -> Scene:
         view_count=1,
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
+        user_id=TEST_USER_ID,
     )
 
 
@@ -45,6 +54,7 @@ async def test_create_scene_duplicate_name_returns_conflict() -> None:
             await create_entity(
                 db,
                 entity_type="scene",
+                user_id=TEST_USER_ID,
                 body={
                     "id": "scene-new",
                     "name": "合江楼外景",
@@ -75,6 +85,7 @@ async def test_update_scene_duplicate_name_returns_conflict_before_flush() -> No
             await update_entity(
                 db,
                 entity_type="scene",
+                user_id=TEST_USER_ID,
                 entity_id="scene-draft",
                 body={
                     "name": "合江楼外景",

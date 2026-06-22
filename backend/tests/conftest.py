@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 
 import pytest
 from fastapi.testclient import TestClient
+
+# 为测试环境设置必需的环境变量
+os.environ.setdefault("INITIAL_ADMIN_PASSWORD", "test-admin-password")
 
 try:
     from app.main import app  # type: ignore
@@ -14,6 +18,62 @@ except Exception:  # noqa: BLE001
     # 测试环境里有些可选依赖（例如 langgraph）可能未安装。
     # 不要让整个测试套件在导入 conftest 时直接失败；仅在需要 client 的测试里跳过。
     app = None
+
+
+@pytest.fixture
+def _auth_user_bypass() -> None:
+    """为非认证测试提供 get_current_user 绕过。
+
+    这样旧测试不需要修改；认证测试使用 auth_client fixture（不应用此绕过）。
+    """
+    if app is None:
+        return
+
+    from app.core.security import hash_password
+    from app.dependencies import get_current_user
+    from app.models.user import User
+
+    async def _mock_get_current_user():
+        """返回测试用户，无需真实令牌。"""
+        return User(
+            id="test-user",
+            username="test-user",
+            hashed_password=hash_password("test-pass"),
+            is_admin=True,
+            is_active=True,
+            token_version=0,
+        )
+
+    app.dependency_overrides[get_current_user] = _mock_get_current_user
+    yield
+    # 测试完成后清理
+    app.dependency_overrides.pop(get_current_user, None)
+
+
+@pytest.fixture(autouse=True)
+def _auto_auth_bypass(request: pytest.FixtureRequest) -> None:
+    """除认证相关测试外自动应用 auth 绕过。"""
+    # 跳过 auth 相关测试文件
+    if "test_auth" not in request.node.nodeid and app is not None:
+        from app.core.security import hash_password
+        from app.dependencies import get_current_user
+        from app.models.user import User
+
+        async def _mock_get_current_user():
+            return User(
+                id="test-user",
+                username="test-user",
+                hashed_password=hash_password("test-pass"),
+                is_admin=True,
+                is_active=True,
+                token_version=0,
+            )
+
+        app.dependency_overrides[get_current_user] = _mock_get_current_user
+        yield
+        app.dependency_overrides.pop(get_current_user, None)
+    else:
+        yield
 
 
 @pytest.fixture

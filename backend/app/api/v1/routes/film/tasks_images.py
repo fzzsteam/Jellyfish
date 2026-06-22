@@ -3,8 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore, TaskManager
-from app.dependencies import get_db
+from app.dependencies import get_current_user, get_db
 from app.models.task_links import GenerationTaskLink
+from app.models.user import User
 from app.schemas.common import ApiResponse, created_response
 from app.services.film.shot_frame_prompt_tasks import (
     build_run_args as build_shot_frame_prompt_run_args,
@@ -31,6 +32,7 @@ router = APIRouter()
 async def create_shot_frame_prompt_task(
     body: ShotFramePromptRequest,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[TaskCreated]:
     frame_type = normalize_frame_type(body.frame_type)
     relation_type = relation_type_for_frame(frame_type)
@@ -46,6 +48,7 @@ async def create_shot_frame_prompt_task(
     task_record = await tm.create(
         task=_CreateOnlyTask(),
         mode=DeliveryMode.async_polling,
+        user_id=current_user.id,
         task_kind="shot_frame_prompt",
         run_args=run_args,
     )

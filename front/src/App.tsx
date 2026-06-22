@@ -1,7 +1,6 @@
 import type React from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import MainLayout from './layouts/MainLayout'
-import Settings from './pages/Settings'
 import NotFound from './pages/NotFound'
 import ProjectLobby from './pages/aiStudio/project/ProjectLobby'
 import ProjectWorkbench from './pages/aiStudio/project/ProjectWorkbench'
@@ -21,12 +20,21 @@ import AgentEdit from './pages/aiStudio/agents/AgentEdit.tsx'
 import ModelManagement from './pages/aiStudio/models/ModelManagement'
 import { ChapterShotsPage } from './pages/aiStudio/shots/ChapterShotsPage'
 import { ChapterShotEditPage } from './pages/aiStudio/shots/ChapterShotEditPage'
+import LoginPage from './pages/auth/LoginPage'
+import PrivateRoute from './components/PrivateRoute'
+import AdminRoute from './components/AdminRoute'
+import AdminUserListPage from './pages/admin/AdminUserListPage'
+import AdminUserDetailPage from './pages/admin/AdminUserDetailPage'
 import './App.css'
 
 const App: React.FC = () => {
   return (
     <BrowserRouter>
       <Routes>
+
+        <Route path="/login" element={<LoginPage />} />
+        <Route element={<PrivateRoute />}>
+
         <Route path="/" element={<MainLayout />}>
           <Route index element={<Navigate to="/projects" replace />} />
           <Route path="projects" element={<ProjectLobby />} />
@@ -49,8 +57,13 @@ const App: React.FC = () => {
           <Route path="agents/:id/edit" element={<AgentEdit />} />
           <Route path="agents" element={<AgentManagement />} />
           <Route path="models" element={<ModelManagement />} />
-          <Route path="settings" element={<Settings />} />
+          <Route element={<AdminRoute />}>
+            <Route path="admin/users" element={<AdminUserListPage />} />
+            <Route path="admin/users/:id" element={<AdminUserDetailPage />} />
+          </Route>
           <Route path="*" element={<NotFound />} />
+
+        </Route>
         </Route>
       </Routes>
     </BrowserRouter>

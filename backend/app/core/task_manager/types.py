@@ -62,6 +62,8 @@ class TaskRecord:
     status: TaskStatus
     progress: int  # 0-100
     payload: dict[str, Any]
+    # 归属用户 ID：用于任务的按用户隔离（执行器据此解析"该用户的"模型/供应商配置）。
+    user_id: Optional[str] = None
     result: Optional[dict[str, Any]] = None
     error: str = ""
     cancel_requested: bool = False

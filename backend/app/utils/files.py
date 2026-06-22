@@ -50,6 +50,7 @@ async def _infer_file_type_from_content_type(content_type: str | None) -> FileTy
 async def create_file_from_url_or_b64(
     session: AsyncSession,
     *,
+    user_id: str,
     url: str | None = None,
     b64_data: str | None = None,
     name: str | None = None,
@@ -60,6 +61,7 @@ async def create_file_from_url_or_b64(
 ) -> FileItem:
     """从远端 URL 或 base64 内容创建 FileItem。
 
+    - user_id：生成文件的归属用户，必须由可信任务或认证上下文提供；
     - 若提供 url：会先下载内容，推断 content_type 和后缀；
     - 若提供 b64_data：优先解析 data URL 前缀中的 MIME 类型，否则默认 image/png；
     - 始终通过 storage.upload_file 上传到对象存储，再创建 FileItem 记录并返回。
@@ -119,6 +121,7 @@ async def create_file_from_url_or_b64(
     file_id = str(uuid.uuid4())
     file_obj = FileItem(
         id=file_id,
+        user_id=user_id,
         type=file_type,
         name=display_name,
         thumbnail="",
@@ -143,4 +146,3 @@ async def create_file_from_url_or_b64(
         )
 
     return file_obj
-

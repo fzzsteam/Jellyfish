@@ -7,7 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.core.db import Base
 from app.models.studio import Chapter, Character, Project, ProjectStyle, ProjectVisualStyle, Shot, ShotCharacterLink
+from app.models.user import User
 from app.services.studio.entity_crud import create_entity
+
+TEST_USER_ID = "test-user"
 
 
 async def _build_session() -> tuple[AsyncSession, object]:
@@ -15,7 +18,11 @@ async def _build_session() -> tuple[AsyncSession, object]:
     session_local = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    return session_local(), engine
+    db = session_local()
+    # project.user_id 是 NOT NULL 外键，先插入用户行满足约束。
+    db.add(User(id=TEST_USER_ID, username="test-user", hashed_password="h"))
+    await db.flush()
+    return db, engine
 
 
 async def _seed_graph(db: AsyncSession) -> None:
@@ -27,6 +34,7 @@ async def _seed_graph(db: AsyncSession) -> None:
                 description="",
                 style=ProjectStyle.real_people_city,
                 visual_style=ProjectVisualStyle.live_action,
+                user_id=TEST_USER_ID,
             ),
             Chapter(id="c1", project_id="p1", index=1, title="第一章"),
             Chapter(id="c2", project_id="p1", index=2, title="第二章"),
@@ -45,6 +53,7 @@ async def test_create_character_with_shot_id_auto_links_shot() -> None:
         payload = await create_entity(
             db,
             entity_type="character",
+            user_id=TEST_USER_ID,
             body={
                 "id": "char1",
                 "project_id": "p1",
@@ -78,6 +87,7 @@ async def test_create_character_rejects_mismatched_chapter_and_shot() -> None:
             await create_entity(
                 db,
                 entity_type="character",
+                user_id=TEST_USER_ID,
                 body={
                     "id": "char2",
                     "project_id": "p1",

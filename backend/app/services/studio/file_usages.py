@@ -168,6 +168,7 @@ def _scope_filters(
 async def list_files_by_scope_paginated(
     session: AsyncSession,
     *,
+    user_id: str,
     project_id: str,
     chapter_title: str | None = None,
     shot_title: str | None = None,
@@ -179,12 +180,17 @@ async def list_files_by_scope_paginated(
     allow_order_fields: set[str] | None = None,
     default_order: str = "created_at",
 ) -> tuple[list[FileItem], int]:
-    """按项目及可选章节标题、镜头标题过滤文件（标题多命中时并集），去重后分页。"""
+    """按项目及可选章节标题、镜头标题过滤文件（标题多命中时并集），去重后分页。
+
+    数据隔离：FileUsage 自身不带 user_id，隔离通过联查的 FileItem.user_id 实现，
+    仅返回归属当前用户的文件。
+    """
     allow_fields = allow_order_fields or {"name", "created_at", "updated_at"}
     order_col = order if order and order in allow_fields else default_order
     ord_attr = getattr(FileItem, order_col)
 
     def _apply_scope_filters(stmt: Select) -> Select:
+        stmt = stmt.where(FileItem.user_id == user_id)
         stmt = stmt.where(FileUsage.project_id == project_id)
         for c in _scope_filters(
             project_id=project_id,

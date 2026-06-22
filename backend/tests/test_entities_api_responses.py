@@ -117,6 +117,8 @@ def test_delete_actor_entity_returns_empty_envelope(client: TestClient) -> None:
         view_count=1,
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
+        # 归属 auth bypass 注入的 test-user，否则隔离校验会判定为他人资产而拒绝删除。
+        user_id="test-user",
     )
     actor.created_at = datetime.now(UTC)
     actor.updated_at = actor.created_at

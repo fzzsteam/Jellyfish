@@ -160,7 +160,7 @@ const PromptTemplateManager: FC = () => {
 
   const loadCategories = async () => {
     try {
-      const res = await StudioPromptsService.listPromptCategoriesApiV1StudioPromptsCategoriesGet()
+      const res = await StudioPromptsService.listPromptCategoriesApiV1StudioPromptsCategoriesGet({})
       const options = res.data ?? []
       if (!options.length) return
 

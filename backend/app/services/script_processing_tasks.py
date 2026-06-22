@@ -16,7 +16,7 @@ from app.chains.agents.script_processing_agents import (
 from app.core.db import async_session_maker
 from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore, TaskManager
 from app.core.task_manager.types import TaskStatus
-from app.dependencies import get_llm
+from app.services.llm.resolver import build_default_text_llm
 from app.models.task import GenerationTask, GenerationTaskStatus
 from app.models.task_links import GenerationTaskLink
 from app.chains.agents import EntityMergerAgent, VariantAnalyzerAgent
@@ -132,6 +132,7 @@ async def _find_active_task(
 async def create_divide_task(
     db: AsyncSession,
     *,
+    user_id: str,
     chapter_id: str,
     script_text: str,
     write_to_db: bool,
@@ -157,6 +158,7 @@ async def create_divide_task(
     task_record = await tm.create(
         task=_CreateOnlyTask(),
         mode=DeliveryMode.async_polling,
+        user_id=user_id,
         task_kind=SCRIPT_DIVIDE_TASK_KIND,
         run_args=run_args,
     )
@@ -282,6 +284,7 @@ def pick_analysis_relation_entity_id(
 async def create_extract_task(
     db: AsyncSession,
     *,
+    user_id: str,
     project_id: str,
     chapter_id: str,
     script_division: dict,
@@ -311,6 +314,7 @@ async def create_extract_task(
     task_record = await tm.create(
         task=_CreateOnlyTask(),
         mode=DeliveryMode.async_polling,
+        user_id=user_id,
         task_kind=SCRIPT_EXTRACT_TASK_KIND,
         run_args=run_args,
     )
@@ -335,6 +339,7 @@ async def create_extract_task(
 async def create_merge_task(
     db: AsyncSession,
     *,
+    user_id: str,
     relation_entity_id: str,
     all_shot_extractions: list[dict],
     historical_library: dict | None,
@@ -365,6 +370,7 @@ async def create_merge_task(
     task_record = await tm.create(
         task=_CreateOnlyTask(),
         mode=DeliveryMode.async_polling,
+        user_id=user_id,
         task_kind=SCRIPT_MERGE_TASK_KIND,
         run_args=run_args,
     )
@@ -389,6 +395,7 @@ async def create_merge_task(
 async def create_consistency_task(
     db: AsyncSession,
     *,
+    user_id: str,
     relation_entity_id: str,
     script_text: str,
 ) -> AsyncTaskCreateResult:
@@ -408,6 +415,7 @@ async def create_consistency_task(
     task_record = await tm.create(
         task=_CreateOnlyTask(),
         mode=DeliveryMode.async_polling,
+        user_id=user_id,
         task_kind=SCRIPT_CONSISTENCY_TASK_KIND,
         run_args={"script_text": script_text},
     )
@@ -432,6 +440,7 @@ async def create_consistency_task(
 async def create_variant_task(
     db: AsyncSession,
     *,
+    user_id: str,
     relation_entity_id: str,
     merged_library: dict,
     all_shot_extractions: list[dict],
@@ -453,6 +462,7 @@ async def create_variant_task(
     task_record = await tm.create(
         task=_CreateOnlyTask(),
         mode=DeliveryMode.async_polling,
+        user_id=user_id,
         task_kind=SCRIPT_VARIANT_TASK_KIND,
         run_args={
             "merged_library": merged_library,
@@ -481,6 +491,7 @@ async def create_variant_task(
 async def _create_analysis_task(
     db: AsyncSession,
     *,
+    user_id: str,
     task_kind: str,
     relation_type: str,
     relation_entity_id: str,
@@ -502,6 +513,7 @@ async def _create_analysis_task(
     task_record = await tm.create(
         task=_CreateOnlyTask(),
         mode=DeliveryMode.async_polling,
+        user_id=user_id,
         task_kind=task_kind,
         run_args=run_args,
     )
@@ -526,12 +538,14 @@ async def _create_analysis_task(
 async def create_character_portrait_task(
     db: AsyncSession,
     *,
+    user_id: str,
     relation_entity_id: str,
     character_context: str | None,
     character_description: str,
 ) -> AsyncTaskCreateResult:
     return await _create_analysis_task(
         db,
+        user_id=user_id,
         task_kind=SCRIPT_CHARACTER_PORTRAIT_TASK_KIND,
         relation_type=CHARACTER_PORTRAIT_ANALYSIS_RELATION_TYPE,
         relation_entity_id=relation_entity_id,
@@ -545,12 +559,14 @@ async def create_character_portrait_task(
 async def create_prop_info_task(
     db: AsyncSession,
     *,
+    user_id: str,
     relation_entity_id: str,
     prop_context: str | None,
     prop_description: str,
 ) -> AsyncTaskCreateResult:
     return await _create_analysis_task(
         db,
+        user_id=user_id,
         task_kind=SCRIPT_PROP_INFO_TASK_KIND,
         relation_type=PROP_INFO_ANALYSIS_RELATION_TYPE,
         relation_entity_id=relation_entity_id,
@@ -564,12 +580,14 @@ async def create_prop_info_task(
 async def create_scene_info_task(
     db: AsyncSession,
     *,
+    user_id: str,
     relation_entity_id: str,
     scene_context: str | None,
     scene_description: str,
 ) -> AsyncTaskCreateResult:
     return await _create_analysis_task(
         db,
+        user_id=user_id,
         task_kind=SCRIPT_SCENE_INFO_TASK_KIND,
         relation_type=SCENE_INFO_ANALYSIS_RELATION_TYPE,
         relation_entity_id=relation_entity_id,
@@ -583,12 +601,14 @@ async def create_scene_info_task(
 async def create_costume_info_task(
     db: AsyncSession,
     *,
+    user_id: str,
     relation_entity_id: str,
     costume_context: str | None,
     costume_description: str,
 ) -> AsyncTaskCreateResult:
     return await _create_analysis_task(
         db,
+        user_id=user_id,
         task_kind=SCRIPT_COSTUME_INFO_TASK_KIND,
         relation_type=COSTUME_INFO_ANALYSIS_RELATION_TYPE,
         relation_entity_id=relation_entity_id,
@@ -602,12 +622,14 @@ async def create_costume_info_task(
 async def create_script_optimization_task(
     db: AsyncSession,
     *,
+    user_id: str,
     relation_entity_id: str,
     script_text: str,
     consistency: dict,
 ) -> AsyncTaskCreateResult:
     return await _create_analysis_task(
         db,
+        user_id=user_id,
         task_kind=SCRIPT_OPTIMIZE_TASK_KIND,
         relation_type=SCRIPT_OPTIMIZATION_RELATION_TYPE,
         relation_entity_id=relation_entity_id,
@@ -621,11 +643,13 @@ async def create_script_optimization_task(
 async def create_script_simplification_task(
     db: AsyncSession,
     *,
+    user_id: str,
     relation_entity_id: str,
     script_text: str,
 ) -> AsyncTaskCreateResult:
     return await _create_analysis_task(
         db,
+        user_id=user_id,
         task_kind=SCRIPT_SIMPLIFY_TASK_KIND,
         relation_type=SCRIPT_SIMPLIFICATION_RELATION_TYPE,
         relation_entity_id=relation_entity_id,
@@ -656,6 +680,7 @@ async def run_merge_task(task_id: str) -> None:
         await store.set_progress(task_id, 5)
         await db.commit()
         run_args = task.payload.get("run_args") or {}
+        task_user_id = task.user_id
 
     try:
         async with async_session_maker() as db:
@@ -663,7 +688,8 @@ async def run_merge_task(task_id: str) -> None:
             if await _cancel_if_requested(store, task_id, db):
                 return
 
-            llm = await get_llm(db)
+            # 按任务归属用户解析其默认文本模型（任务隔离：执行器使用该用户的模型配置）。
+            llm = await build_default_text_llm(db, user_id=task_user_id, thinking=True)
             agent = EntityMergerAgent(llm)
             result: EntityMergeResult = agent.extract(
                 all_extractions_json=json.dumps(run_args.get("all_shot_extractions") or [], ensure_ascii=False),
@@ -710,6 +736,7 @@ async def run_variant_task(task_id: str) -> None:
         await store.set_progress(task_id, 5)
         await db.commit()
         run_args = task.payload.get("run_args") or {}
+        task_user_id = task.user_id
 
     try:
         async with async_session_maker() as db:
@@ -717,7 +744,8 @@ async def run_variant_task(task_id: str) -> None:
             if await _cancel_if_requested(store, task_id, db):
                 return
 
-            llm = await get_llm(db)
+            # 按任务归属用户解析其默认文本模型（任务隔离）。
+            llm = await build_default_text_llm(db, user_id=task_user_id, thinking=True)
             agent = VariantAnalyzerAgent(llm)
             result: VariantAnalysisResult = agent.extract(
                 merged_library_json=json.dumps(run_args.get("merged_library") or {}, ensure_ascii=False),

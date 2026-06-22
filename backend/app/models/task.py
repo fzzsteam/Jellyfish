@@ -16,7 +16,7 @@ from sqlalchemy import JSON, Boolean, DateTime, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base
-from app.models.base import TimestampMixin
+from app.models.base import TimestampMixin, UserOwnedMixin
 
 
 class GenerationTaskStatus(str, Enum):
@@ -33,7 +33,7 @@ class GenerationDeliveryMode(str, Enum):
     async_polling = "async_polling"  # 任务 + 轮询查询状态
 
 
-class GenerationTask(Base, TimestampMixin):
+class GenerationTask(Base, UserOwnedMixin, TimestampMixin):
     __tablename__ = "generation_tasks"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="任务 ID")

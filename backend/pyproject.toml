@@ -24,6 +24,8 @@ dependencies = [
     "boto3>=1.43.0,<2.0.0",        # S3 兼容对象存储客户端（boto3 通过 S3-compatible 接口对接 RustFS 本地和阿里云 OSS）
     "python-multipart>=0.0.5",
     "jinja2",
+    "pyjwt>=2.9.0",
+    "bcrypt>=4.2.0",
 ]
 
 [project.optional-dependencies]

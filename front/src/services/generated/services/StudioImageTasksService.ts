@@ -21,15 +21,20 @@ export class StudioImageTasksService {
     public static createActorImageGenerationTaskApiV1StudioImageTasksActorsActorIdImageTasksPost({
         actorId,
         requestBody,
+        authorization,
     }: {
         actorId: string,
         requestBody: StudioImageTaskRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_TaskCreated_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/image-tasks/actors/{actor_id}/image-tasks',
             path: {
                 'actor_id': actorId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -46,15 +51,20 @@ export class StudioImageTasksService {
     public static renderActorImagePromptApiV1StudioImageTasksActorsActorIdRenderPromptPost({
         actorId,
         requestBody,
+        authorization,
     }: {
         actorId: string,
         requestBody: StudioImageTaskRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_RenderedPromptResponse_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/image-tasks/actors/{actor_id}/render-prompt',
             path: {
                 'actor_id': actorId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -77,10 +87,12 @@ export class StudioImageTasksService {
         assetType,
         assetId,
         requestBody,
+        authorization,
     }: {
         assetType: string,
         assetId: string,
         requestBody: StudioImageTaskRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_TaskCreated_> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -88,6 +100,9 @@ export class StudioImageTasksService {
             path: {
                 'asset_type': assetType,
                 'asset_id': assetId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -105,10 +120,12 @@ export class StudioImageTasksService {
         assetType,
         assetId,
         requestBody,
+        authorization,
     }: {
         assetType: string,
         assetId: string,
         requestBody: StudioImageTaskRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_RenderedPromptResponse_> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -116,6 +133,9 @@ export class StudioImageTasksService {
             path: {
                 'asset_type': assetType,
                 'asset_id': assetId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -136,15 +156,20 @@ export class StudioImageTasksService {
     public static createCharacterImageGenerationTaskApiV1StudioImageTasksCharactersCharacterIdImageTasksPost({
         characterId,
         requestBody,
+        authorization,
     }: {
         characterId: string,
         requestBody: StudioImageTaskRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_TaskCreated_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/image-tasks/characters/{character_id}/image-tasks',
             path: {
                 'character_id': characterId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -161,15 +186,20 @@ export class StudioImageTasksService {
     public static renderCharacterImagePromptApiV1StudioImageTasksCharactersCharacterIdRenderPromptPost({
         characterId,
         requestBody,
+        authorization,
     }: {
         characterId: string,
         requestBody: StudioImageTaskRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_RenderedPromptResponse_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/image-tasks/characters/{character_id}/render-prompt',
             path: {
                 'character_id': characterId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -187,15 +217,20 @@ export class StudioImageTasksService {
     public static createShotFrameImageGenerationTaskApiV1StudioImageTasksShotShotIdFrameImageTasksPost({
         shotId,
         requestBody,
+        authorization,
     }: {
         shotId: string,
         requestBody: ShotFrameImageTaskRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_TaskCreated_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/image-tasks/shot/{shot_id}/frame-image-tasks',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -212,15 +247,20 @@ export class StudioImageTasksService {
     public static renderShotFramePromptApiV1StudioImageTasksShotShotIdFrameRenderPromptPost({
         shotId,
         requestBody,
+        authorization,
     }: {
         shotId: string,
         requestBody: ShotFramePromptRenderRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_RenderedShotFramePromptRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/image-tasks/shot/{shot_id}/frame-render-prompt',
             path: {
                 'shot_id': shotId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
