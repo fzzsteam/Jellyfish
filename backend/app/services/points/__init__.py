@@ -42,7 +42,12 @@ def __getattr__(name: str):  # noqa: D401
     会形成 `__init__ → billing → __init__`（部分初始化）的循环导入。改为按需解析即可
     让 billing.py 完成模块初始化后再被引用。
     """
-    if name in {"settle_task_billing_async", "settle_task_billing_sync"}:
+    if name in {
+        "settle_task_billing_async",
+        "settle_task_billing_sync",
+        "freeze_for_call",
+        "run_billed_text_operation",
+    }:
         from app.services.points import billing as _billing
 
         return getattr(_billing, name)
@@ -67,4 +72,6 @@ __all__ = [
     "unfreeze_frozen",
     "settle_task_billing_async",
     "settle_task_billing_sync",
+    "freeze_for_call",
+    "run_billed_text_operation",
 ]

@@ -18,7 +18,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Awaitable, Callable, TypeVar
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -300,6 +300,111 @@ async def freeze_for_task(
         business_type=business_type,
         snapshot=snapshot,
     )
+
+
+async def freeze_for_call(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    quote_token: str,
+    business_type: str,
+) -> FrozenBilling:
+    """同步文本类调用的积分冻结入口（Task 6）。
+
+    为什么存在：
+        同步文本端点（divide / merge / variant / consistency / character / prop / scene /
+        costume / optimize / simplify / extract）在请求线程内直接调用 LLM agent，不走 Celery
+        任务编排，因此不能复用 `freeze_for_task` 的 task 行通道。本函数是「文本专用薄包装」：
+        固定 `category=ModelCategoryKey.text`、`model_id=None`、`duration_seconds=None`、
+        `resolution=None` 调用 `freeze_for_task`，其余校验（quote 解析、归属、价格一致性、余额）
+        全部复用 freeze_for_task 的既有逻辑，避免双份维护。
+
+    Args:
+        db: 异步会话。
+        user_id: 当前用户 ID。
+        quote_token: 试算凭证（必须绑定当前 user 与一个 text 类模型）。
+        business_type: 业务类型（如 `script_divide`），透传到账本流水。
+
+    Returns:
+        FrozenBilling 句柄（供 `run_billed_text_operation` 在成功时 consume / 失败时 unfreeze）。
+    """
+    return await freeze_for_task(
+        db,
+        user_id=user_id,
+        quote_token=quote_token,
+        business_type=business_type,
+        category=ModelCategoryKey.text,
+        model_id=None,
+        duration_seconds=None,
+        resolution=None,
+    )
+
+
+# 泛型类型变量：run_billed_text_operation 的 operation 返回值类型。
+T = TypeVar("T")
+
+
+async def run_billed_text_operation(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    quote_token: str,
+    business_type: str,
+    operation: Callable[[], Awaitable[T]],
+) -> T:
+    """同步文本操作的统一计费执行器（Task 6）。
+
+    统一编排「冻结 → 执行业务 → 成功消费 / 失败解冻」三个阶段，保证：
+    - 成功：冻结积分被 consume（余额与冻结额同步减少）。
+    - 业务异常（LLM 失败或后处理失败）：冻结积分被 unfreeze（余额不变、冻结额释放）。
+    - 冻结阶段失败（余额不足 / 报价变更 / 账户繁忙）：直接上抛 PointsDomainError，operation
+      不会被执行（调用方据此判定 LLM 未被调用）。
+
+    为什么 operation 是 async：
+        各端点的 agent 调用是同步阻塞（LangChain `.invoke`），调用方应在 operation 内部用
+        `asyncio.to_thread` 包装同步 agent 调用，并把所有后置异步业务逻辑（如 write_to_db、
+        缓存写入）一并放入同一 operation，确保任意阶段失败都走 unfreeze 分支。
+
+    Args:
+        db: 异步会话（与路由层 Depends(get_db) 同一会话，operation 内的写库操作复用它）。
+        user_id: 当前用户 ID。
+        quote_token: 试算凭证（同步端点强制要求）。
+        business_type: 稳定业务类型字符串（如 `script_divide`）。
+        operation: 无参 async 可调用，封装真实的 LLM 调用 + 后处理。
+
+    Returns:
+        operation 的返回值。
+
+    Raises:
+        PointsDomainError: 冻结阶段（INSUFFICIENT_POINTS / POINTS_QUOTE_CHANGED /
+            POINTS_OPERATION_BUSY 等）—— 调用方应让其上抛交由 main.py 处理器序列化。
+    """
+    frozen = await freeze_for_call(
+        db,
+        user_id=user_id,
+        quote_token=quote_token,
+        business_type=business_type,
+    )
+    # 局部导入 consume/unfreeze 避免与 ledger 形成循环依赖（与 settle_task_billing_async 同款）。
+    from app.services.points import consume_frozen, unfreeze_frozen
+
+    try:
+        result = await operation()
+    except BaseException:
+        # 任何异常（含 CancelledError）都尝试解冻，避免冻结悬挂。解冻本身被包裹在
+        # try/except 中：若解冻也失败（如 Redis 锁异常、事件循环关闭竞态），仅记录
+        # warning 不再抛出——否则会掩盖 operation 抛出的原始异常。账本幂等 + Task 7
+        # 的 Celery Beat 补偿任务会兜底清理悬挂冻结，因此吞掉解冻异常是可恢复的。
+        try:
+            await unfreeze_frozen(db, user_id=user_id, billing_id=frozen.billing_id)
+        except Exception:
+            logger.warning(
+                "unfreeze failed during billed operation cleanup; Celery Beat 补偿(Task 7)将兜底",
+                exc_info=True,
+            )
+        raise
+    await consume_frozen(db, user_id=user_id, billing_id=frozen.billing_id)
+    return result
 
 
 async def settle_task_billing_async(task_id: str) -> None:

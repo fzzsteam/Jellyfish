@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from typing import Any
@@ -41,6 +42,10 @@ from app.schemas.skills.costume_info_analysis import CostumeInfoAnalysisResult
 from app.schemas.skills.prop_info_analysis import PropInfoAnalysisResult
 from app.schemas.skills.scene_info_analysis import SceneInfoAnalysisResult
 from app.services.common import required_field
+from app.services.points.billing import (
+    PointsDomainError,
+    run_billed_text_operation,
+)
 from app.services.script_processing_tasks import (
     create_consistency_task,
     create_costume_info_task,
@@ -114,7 +119,7 @@ class ScriptDividerRequest(BaseModel):
     )
     quote_token: str | None = Field(
         None,
-        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+        description="积分试算凭证（异步与同步接口均必填，Task 5b/6 冻结积分；extract 命中缓存时可不传）",
     )
 
 
@@ -170,32 +175,44 @@ async def divide_script(
     request: ScriptDividerRequest,
     llm: BaseChatModel = Depends(get_nothinking_llm),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ScriptDivisionResult]:
     """
     将完整剧本文本自动分割为多个镜头。
-    
+
     请求体：
     - script_text: 完整剧本文本
-    
+
     返回：ScriptDivisionResult
     - shots: 分镜列表，包含每个镜头的 index、起止行号、shot_name、script_excerpt、time_of_day
     - total_shots: 总镜头数
     - notes: 拆分说明（可选）
     """
-    try:
-        agent = ScriptDividerAgent(llm)
-        result = agent.divide_script(script_text=request.script_text)
+    quote_token = _require_quote_token(request.quote_token)
 
+    async def _operation() -> ScriptDivisionResult:
+        # 同步 agent 调用放线程，避免阻塞事件循环；write_to_db 后处理同入 operation，
+        # 任意阶段失败都由 run_billed_text_operation 走 unfreeze 分支。
+        agent = ScriptDividerAgent(llm)
+        result = await asyncio.to_thread(agent.divide_script, script_text=request.script_text)
         if request.write_to_db:
             if not request.chapter_id:
                 raise HTTPException(status_code=400, detail=required_field("chapter_id", when="write_to_db=true"))
-            await write_division_result_to_chapter(
-                db,
-                chapter_id=request.chapter_id,
-                result=result,
-            )
+            await write_division_result_to_chapter(db, chapter_id=request.chapter_id, result=result)
+        return result
 
+    try:
+        result = await run_billed_text_operation(
+            db,
+            user_id=current_user.id,
+            quote_token=quote_token,
+            business_type="script_divide",
+            operation=_operation,
+        )
         return success_response(data=result)
+    except PointsDomainError:
+        # 积分领域错误（余额不足/报价变更/账户繁忙）：交由 main.py 处理器序列化为结构化响应。
+        raise
     except HTTPException:
         raise
     except Exception as e:
@@ -236,7 +253,7 @@ class EntityMergerRequest(BaseModel):
     )
     quote_token: str | None = Field(
         None,
-        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+        description="积分试算凭证（异步与同步接口均必填，Task 5b/6 冻结积分；extract 命中缓存时可不传）",
     )
 
 
@@ -296,33 +313,53 @@ async def merge_entities_async(
 async def merge_entities(
     request: EntityMergerRequest,
     llm: BaseChatModel = Depends(get_llm),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[EntityMergeResult]:
     """
     将多个镜头的提取结果合并，统一实体定义。
-    
+
     请求体：
     - all_shot_extractions: 所有镜头的提取结果
     - historical_library: 历史实体库（可选，用于增量更新）
     - script_division: 脚本分镜结果（可选，用于定位与统计）
     - previous_merge: 上一次合并结果（可选；用于冲突重试合并）
     - conflict_resolutions: 冲突解决建议列表（可选；用于冲突重试合并）
-    
+
     返回：EntityMergeResult
     - merged_library: 合并后的实体库（characters/locations/scenes/props，含 variants）
     - merge_stats: 合并统计信息
     - conflicts: 发现的冲突/待处理项
     - notes: 合并说明（可选）
     """
-    try:
+    quote_token = _require_quote_token(request.quote_token)
+
+    async def _operation() -> EntityMergeResult:
         agent = EntityMergerAgent(llm)
-        result = agent.extract(
+        # 同步 agent 调用放线程，避免阻塞事件循环。
+        result = await asyncio.to_thread(
+            agent.extract,
             all_extractions_json=json.dumps(request.all_shot_extractions, ensure_ascii=False),
             historical_library_json=json.dumps(request.historical_library or {}, ensure_ascii=False),
             script_division_json=json.dumps(request.script_division or {}, ensure_ascii=False),
             previous_merge_json=json.dumps(request.previous_merge or {}, ensure_ascii=False),
             conflict_resolutions_json=json.dumps(request.conflict_resolutions or [], ensure_ascii=False),
         )
+        return result
+
+    try:
+        result = await run_billed_text_operation(
+            db,
+            user_id=current_user.id,
+            quote_token=quote_token,
+            business_type="script_merge",
+            operation=_operation,
+        )
         return success_response(data=result)
+    except PointsDomainError:
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Entity merging failed: {e}")
         raise HTTPException(
@@ -353,7 +390,7 @@ class VariantAnalysisRequest(BaseModel):
     )
     quote_token: str | None = Field(
         None,
-        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+        description="积分试算凭证（异步与同步接口均必填，Task 5b/6 冻结积分；extract 命中缓存时可不传）",
     )
 
 
@@ -405,29 +442,48 @@ async def analyze_variants_async(
 async def analyze_variants(
     request: VariantAnalysisRequest,
     llm: BaseChatModel = Depends(get_llm),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[VariantAnalysisResult]:
     """
     分析实体的变体（特别是角色服装变化）。
-    
+
     请求体：
     - merged_library: 合并后的实体库
     - all_shot_extractions: 所有镜头提取结果
     - script_division: 脚本分镜结果（可选，用于章节/段落分组）
-    
+
     返回：VariantAnalysisResult
     - costume_timelines: 各角色的服装演变时间线
     - variant_suggestions: 变体建议列表
     - chapter_variants: 按章节整理的变体信息
     - notes: 分析说明（可选）
     """
-    try:
+    quote_token = _require_quote_token(request.quote_token)
+
+    async def _operation() -> VariantAnalysisResult:
         agent = VariantAnalyzerAgent(llm)
-        result = agent.extract(
+        result = await asyncio.to_thread(
+            agent.extract,
             merged_library_json=json.dumps(request.merged_library, ensure_ascii=False),
             all_extractions_json=json.dumps(request.all_shot_extractions, ensure_ascii=False),
             script_division_json=json.dumps(request.script_division or {}, ensure_ascii=False),
         )
+        return result
+
+    try:
+        result = await run_billed_text_operation(
+            db,
+            user_id=current_user.id,
+            quote_token=quote_token,
+            business_type="script_variant",
+            operation=_operation,
+        )
         return success_response(data=result)
+    except PointsDomainError:
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Variant analysis failed: {e}")
         raise HTTPException(
@@ -447,7 +503,7 @@ class ScriptConsistencyCheckRequest(BaseModel):
     script_text: str = Field(..., description="完整剧本文本", min_length=1)
     quote_token: str | None = Field(
         None,
-        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+        description="积分试算凭证（异步与同步接口均必填，Task 5b/6 冻结积分；extract 命中缓存时可不传）",
     )
 
 
@@ -497,22 +553,40 @@ async def check_consistency_async(
 async def check_consistency(
     request: ScriptConsistencyCheckRequest,
     llm: BaseChatModel = Depends(get_llm),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ScriptConsistencyCheckResult]:
     """
     检查实体定义与分镜内容的一致性。
-    
+
     请求体：
     - script_text: 完整剧本文本
-    
+
     返回：ScriptConsistencyCheckResult
     - issues: 角色混淆问题列表（含 description/suggestion/affected_lines）
     - has_issues: 是否发现问题
     - summary: 总结（可选）
     """
-    try:
+    quote_token = _require_quote_token(request.quote_token)
+
+    async def _operation() -> ScriptConsistencyCheckResult:
         agent = ConsistencyCheckerAgent(llm)
-        result = agent.extract(script_text=request.script_text)
+        result = await asyncio.to_thread(agent.extract, script_text=request.script_text)
+        return result
+
+    try:
+        result = await run_billed_text_operation(
+            db,
+            user_id=current_user.id,
+            quote_token=quote_token,
+            business_type="script_consistency",
+            operation=_operation,
+        )
         return success_response(data=result)
+    except PointsDomainError:
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Consistency checking failed: {e}")
         raise HTTPException(
@@ -537,7 +611,7 @@ class CharacterPortraitAnalysisRequest(BaseModel):
     character_description: str = Field(..., description="原文人物描述", min_length=1)
     quote_token: str | None = Field(
         None,
-        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+        description="积分试算凭证（异步与同步接口均必填，Task 5b/6 冻结积分；extract 命中缓存时可不传）",
     )
 
 
@@ -590,14 +664,33 @@ async def analyze_character_portrait_async(
 async def analyze_character_portrait(
     request: CharacterPortraitAnalysisRequest,
     llm: BaseChatModel = Depends(get_llm),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[CharacterPortraitAnalysisResult]:
-    try:
+    quote_token = _require_quote_token(request.quote_token)
+
+    async def _operation() -> CharacterPortraitAnalysisResult:
         agent = CharacterPortraitAnalysisAgent(llm)
-        result = agent.analyze_character_description(
+        result = await asyncio.to_thread(
+            agent.analyze_character_description,
             character_context=request.character_context,
             character_description=request.character_description,
         )
+        return result
+
+    try:
+        result = await run_billed_text_operation(
+            db,
+            user_id=current_user.id,
+            quote_token=quote_token,
+            business_type="script_character_portrait",
+            operation=_operation,
+        )
         return success_response(data=result)
+    except PointsDomainError:
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Character portrait analysis failed: {e}")
         raise HTTPException(
@@ -622,7 +715,7 @@ class PropInfoAnalysisRequest(BaseModel):
     prop_description: str = Field(..., description="原文道具描述", min_length=1)
     quote_token: str | None = Field(
         None,
-        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+        description="积分试算凭证（异步与同步接口均必填，Task 5b/6 冻结积分；extract 命中缓存时可不传）",
     )
 
 
@@ -675,14 +768,33 @@ async def analyze_prop_info_async(
 async def analyze_prop_info(
     request: PropInfoAnalysisRequest,
     llm: BaseChatModel = Depends(get_llm),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[PropInfoAnalysisResult]:
-    try:
+    quote_token = _require_quote_token(request.quote_token)
+
+    async def _operation() -> PropInfoAnalysisResult:
         agent = PropInfoAnalysisAgent(llm)
-        result = agent.analyze_prop_description(
+        result = await asyncio.to_thread(
+            agent.analyze_prop_description,
             prop_context=request.prop_context,
             prop_description=request.prop_description,
         )
+        return result
+
+    try:
+        result = await run_billed_text_operation(
+            db,
+            user_id=current_user.id,
+            quote_token=quote_token,
+            business_type="script_prop_info",
+            operation=_operation,
+        )
         return success_response(data=result)
+    except PointsDomainError:
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Prop info analysis failed: {e}")
         raise HTTPException(
@@ -707,7 +819,7 @@ class SceneInfoAnalysisRequest(BaseModel):
     scene_description: str = Field(..., description="原文场景描述", min_length=1)
     quote_token: str | None = Field(
         None,
-        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+        description="积分试算凭证（异步与同步接口均必填，Task 5b/6 冻结积分；extract 命中缓存时可不传）",
     )
 
 
@@ -760,14 +872,33 @@ async def analyze_scene_info_async(
 async def analyze_scene_info(
     request: SceneInfoAnalysisRequest,
     llm: BaseChatModel = Depends(get_llm),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[SceneInfoAnalysisResult]:
-    try:
+    quote_token = _require_quote_token(request.quote_token)
+
+    async def _operation() -> SceneInfoAnalysisResult:
         agent = SceneInfoAnalysisAgent(llm)
-        result = agent.analyze_scene_description(
+        result = await asyncio.to_thread(
+            agent.analyze_scene_description,
             scene_context=request.scene_context,
             scene_description=request.scene_description,
         )
+        return result
+
+    try:
+        result = await run_billed_text_operation(
+            db,
+            user_id=current_user.id,
+            quote_token=quote_token,
+            business_type="script_scene_info",
+            operation=_operation,
+        )
         return success_response(data=result)
+    except PointsDomainError:
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Scene info analysis failed: {e}")
         raise HTTPException(
@@ -792,7 +923,7 @@ class CostumeInfoAnalysisRequest(BaseModel):
     costume_description: str = Field(..., description="原文服装描述", min_length=1)
     quote_token: str | None = Field(
         None,
-        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+        description="积分试算凭证（异步与同步接口均必填，Task 5b/6 冻结积分；extract 命中缓存时可不传）",
     )
 
 
@@ -845,14 +976,33 @@ async def analyze_costume_info_async(
 async def analyze_costume_info(
     request: CostumeInfoAnalysisRequest,
     llm: BaseChatModel = Depends(get_llm),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[CostumeInfoAnalysisResult]:
-    try:
+    quote_token = _require_quote_token(request.quote_token)
+
+    async def _operation() -> CostumeInfoAnalysisResult:
         agent = CostumeInfoAnalysisAgent(llm)
-        result = agent.analyze_costume_description(
+        result = await asyncio.to_thread(
+            agent.analyze_costume_description,
             costume_context=request.costume_context,
             costume_description=request.costume_description,
         )
+        return result
+
+    try:
+        result = await run_billed_text_operation(
+            db,
+            user_id=current_user.id,
+            quote_token=quote_token,
+            business_type="script_costume_info",
+            operation=_operation,
+        )
         return success_response(data=result)
+    except PointsDomainError:
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Costume info analysis failed: {e}")
         raise HTTPException(
@@ -873,7 +1023,7 @@ class ScriptOptimizeRequest(BaseModel):
     consistency: dict[str, Any] = Field(..., description="一致性检查输出（ScriptConsistencyCheckResult 序列化）")
     quote_token: str | None = Field(
         None,
-        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+        description="积分试算凭证（异步与同步接口均必填，Task 5b/6 冻结积分；extract 命中缓存时可不传）",
     )
 
 
@@ -885,7 +1035,7 @@ class ScriptSimplifyRequest(BaseModel):
     script_text: str = Field(..., description="原文剧本文本", min_length=1)
     quote_token: str | None = Field(
         None,
-        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+        description="积分试算凭证（异步与同步接口均必填，Task 5b/6 冻结积分；extract 命中缓存时可不传）",
     )
 
 
@@ -937,17 +1087,36 @@ async def optimize_script_async(
 async def optimize_script(
     request: ScriptOptimizeRequest,
     llm: BaseChatModel = Depends(get_llm),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ScriptOptimizationResult]:
     """
     输入原文 + 一致性检查输出，生成优化后的剧本。
     """
-    try:
+    quote_token = _require_quote_token(request.quote_token)
+
+    async def _operation() -> ScriptOptimizationResult:
         agent = ScriptOptimizerAgent(llm)
-        result = agent.extract(
+        result = await asyncio.to_thread(
+            agent.extract,
             script_text=request.script_text,
             consistency_json=json.dumps(request.consistency, ensure_ascii=False),
         )
+        return result
+
+    try:
+        result = await run_billed_text_operation(
+            db,
+            user_id=current_user.id,
+            quote_token=quote_token,
+            business_type="script_optimize",
+            operation=_operation,
+        )
         return success_response(data=result)
+    except PointsDomainError:
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Script optimization failed: {e}")
         raise HTTPException(
@@ -965,12 +1134,30 @@ async def optimize_script(
 async def simplify_script(
     request: ScriptSimplifyRequest,
     llm: BaseChatModel = Depends(get_llm),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ScriptSimplificationResult]:
     """输入原文剧本，输出精简后的文本与精简策略摘要。"""
-    try:
+    quote_token = _require_quote_token(request.quote_token)
+
+    async def _operation() -> ScriptSimplificationResult:
         agent = ScriptSimplifierAgent(llm)
-        result = agent.extract(script_text=request.script_text)
+        result = await asyncio.to_thread(agent.extract, script_text=request.script_text)
+        return result
+
+    try:
+        result = await run_billed_text_operation(
+            db,
+            user_id=current_user.id,
+            quote_token=quote_token,
+            business_type="script_simplify",
+            operation=_operation,
+        )
         return success_response(data=result)
+    except PointsDomainError:
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Script simplification failed: {e}")
         raise HTTPException(
@@ -1030,7 +1217,7 @@ class ScriptExtractRequest(BaseModel):
     refresh_cache: bool = Field(False, description="是否跳过后端缓存并强制重新提取")
     quote_token: str | None = Field(
         None,
-        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+        description="积分试算凭证（异步与同步接口均必填，Task 5b/6 冻结积分；extract 命中缓存时可不传）",
     )
 
 
@@ -1080,6 +1267,7 @@ async def extract_script(
     request: ScriptExtractRequest,
     llm: BaseChatModel = Depends(get_nothinking_llm),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[StudioScriptExtractionDraft]:
     try:
         cache_key = build_script_extract_cache_key(
@@ -1088,6 +1276,7 @@ async def extract_script(
             script_division=request.script_division,
             consistency=request.consistency,
         )
+        # 命中缓存 → 不调用 LLM，不计费（与预览端点同语义）。
         if not request.refresh_cache:
             cached = get_cached_script_extract(cache_key)
             if cached is not None:
@@ -1109,31 +1298,46 @@ async def extract_script(
                 await db.commit()
                 return success_response(data=cached, meta={"from_cache": True})
 
-        agent = ElementExtractorAgent(llm)
-        result = agent.extract(
-            project_id=request.project_id,
-            chapter_id=request.chapter_id,
-            script_division_json=json.dumps(request.script_division, ensure_ascii=False),
-            consistency_json=json.dumps(request.consistency or {}, ensure_ascii=False),
-        )
-        set_cached_script_extract(cache_key, result)
-        await sync_shot_extracted_candidates_from_draft(
+        # 未命中缓存 → 必须调用 LLM，走统一计费（quote_token 必填）。
+        if not request.quote_token:
+            raise HTTPException(status_code=400, detail="quote_token is required")
+
+        async def _operation() -> StudioScriptExtractionDraft:
+            # 同步 agent 调用放线程；后续缓存写入与候选同步同入 operation，
+            # 任意阶段失败由 run_billed_text_operation 走 unfreeze 分支。
+            agent = ElementExtractorAgent(llm)
+            result = await asyncio.to_thread(
+                agent.extract,
+                project_id=request.project_id,
+                chapter_id=request.chapter_id,
+                script_division_json=json.dumps(request.script_division, ensure_ascii=False),
+                consistency_json=json.dumps(request.consistency or {}, ensure_ascii=False),
+            )
+            set_cached_script_extract(cache_key, result)
+            await sync_shot_extracted_candidates_from_draft(
+                db, chapter_id=request.chapter_id, draft=result,
+            )
+            await sync_shot_extracted_dialogue_candidates_from_draft(
+                db, chapter_id=request.chapter_id, draft=result,
+            )
+            await apply_shot_semantic_defaults_from_draft(
+                db, chapter_id=request.chapter_id, draft=result,
+            )
+            await db.commit()
+            return result
+
+        result = await run_billed_text_operation(
             db,
-            chapter_id=request.chapter_id,
-            draft=result,
+            user_id=current_user.id,
+            quote_token=request.quote_token,
+            business_type="script_extract",
+            operation=_operation,
         )
-        await sync_shot_extracted_dialogue_candidates_from_draft(
-            db,
-            chapter_id=request.chapter_id,
-            draft=result,
-        )
-        await apply_shot_semantic_defaults_from_draft(
-            db,
-            chapter_id=request.chapter_id,
-            draft=result,
-        )
-        await db.commit()
         return success_response(data=result, meta={"from_cache": False})
+    except PointsDomainError:
+        raise
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Script extraction failed: {e}")
         raise HTTPException(
