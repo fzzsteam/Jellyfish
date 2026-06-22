@@ -353,7 +353,10 @@ export function MentionEditor({
               暂无{selectedKindLabel}资产图片
             </div>
           ) : (
-            <div className="flex flex-wrap gap-2 p-2">
+            <div
+              className="flex flex-wrap gap-2 p-2"
+              style={{ maxWidth: 1192 }}
+            >
               {imageOptions.map((option, idx) => (
                 <div
                   key={option.id}

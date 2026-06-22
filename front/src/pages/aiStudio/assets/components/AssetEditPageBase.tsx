@@ -805,7 +805,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
           id: `${kind}:${entity.id}:${image.id ?? index}`,
           file_id: image.file_id,
           label: entityName,
-          subtitle: image.view_angle || image.name || entityName,
+          subtitle: image.name || entityName,
         })
       })
     }
@@ -894,7 +894,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                       setMentionedFileIds(fileIds)
                     }}
                     disabled={smartDetectBusy || savingBase}
-                    placeholder="支持输入 @ 选择候选池图片作为参考"
+                    placeholder="支持输入 @ 选择资产图片作为参考"
                     loadImagesByKind={loadMentionImagesByKind}
                   />
                 </div>
