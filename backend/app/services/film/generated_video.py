@@ -20,6 +20,7 @@ from app.models.studio import FileItem, Shot, ShotDetail, ShotFrameType
 from app.models.types import FileUsageKind
 from app.services.common import entity_not_found
 from app.core.integrations.video_capabilities import resolve_video_capability
+from app.services.llm import get_model_by_category
 from app.services.llm.provider_resolver import resolve_provider_config_by_model
 from app.services.studio.file_usages import sync_usage_from_shot_context
 from app.services.studio.generation.video import (
@@ -29,6 +30,7 @@ from app.services.studio.generation.video import (
     build_video_submission_payload,
     validate_images_count,
 )
+from app.services.studio.shot_assets import list_shot_linked_assets
 from app.services.studio.shot_status import recompute_shot_status
 from app.services.worker.async_task_support import cancel_if_requested_async
 from app.services.worker.task_logging import log_task_event, log_task_failure
@@ -102,6 +104,7 @@ async def preview_prompt_and_images(
 
 
 async def resolve_default_video_model(db: AsyncSession, *, user_id: str) -> Model:
+    """解析当前用户配置的默认视频模型。"""
     settings_row = (
         await db.execute(select(ModelSettings).where(ModelSettings.user_id == user_id))
     ).scalar_one_or_none()
@@ -122,7 +125,25 @@ async def resolve_default_video_model(db: AsyncSession, *, user_id: str) -> Mode
     return model
 
 
+async def resolve_video_model(db: AsyncSession, model_id: str | None, *, user_id: str) -> Model:
+    """按显式视频模型 ID 或当前用户默认视频模型解析 Model。
+
+    显式 `model_id` 用于工作室单次生成覆盖默认模型；未传时保持原有默认模型行为。
+    """
+    normalized_model_id = (model_id or "").strip() or None
+    if normalized_model_id:
+        return await get_model_by_category(
+            db,
+            ModelCategoryKey.video,
+            user_id=user_id,
+            model_or_id=normalized_model_id,
+            allow_default_fallback=False,
+        )
+    return await resolve_default_video_model(db, user_id=user_id)
+
+
 async def load_provider_config_by_model(db: AsyncSession, model: Model) -> ProviderConfig:
+    """根据视频模型反查供应商配置，用于确保 provider 与 model 同源。"""
     resolved = await resolve_provider_config_by_model(db, model=model)
     return ProviderConfig(
         provider=resolved.provider_key,  # type: ignore[arg-type]
@@ -135,6 +156,28 @@ def _normalize_optional_text(value: str | None) -> str | None:
     """归一化可选文本参数：空字符串视为未设置。"""
     normalized = (value or "").strip()
     return normalized or None
+
+
+def is_reference_to_video_model(model_name: str | None) -> bool:
+    """Return whether a video model should receive linked asset images as r2v references."""
+    name = (model_name or "").strip().lower()
+    return name.startswith("happyhorse-1.0-r2v") or name.startswith("r2v")
+
+
+async def resolve_r2v_asset_reference_file_ids(db: AsyncSession, *, shot_id: str) -> list[str]:
+    """Resolve linked character, scene, and prop images for HappyHorse r2v, excluding costume images."""
+    items = await list_shot_linked_assets(db, shot_id=shot_id)
+    type_order = {"character": 0, "scene": 1, "prop": 2}
+    ordered = sorted(
+        (item for item in items if item.type in type_order),
+        key=lambda item: (type_order[item.type], item.name, item.id),
+    )
+    out: list[str] = []
+    for item in ordered:
+        file_id = (item.file_id or "").strip()
+        if file_id and file_id not in out:
+            out.append(file_id)
+    return out
 
 
 async def resolve_effective_video_options(
@@ -152,12 +195,13 @@ async def build_run_args(
     *,
     user_id: str,
     shot_id: str,
+    model_id: str | None = None,
     reference_mode: str,
     prompt: str | None,
     images: list[str],
     ratio: str | None,
 ) -> dict:
-    model = await resolve_default_video_model(db, user_id=user_id)
+    model = await resolve_video_model(db, model_id, user_id=user_id)
     provider_cfg = await load_provider_config_by_model(db, model)
     shot_detail = await validate_shot_and_duration(db, shot_id)
     resolved_ratio = await resolve_effective_video_options(requested_ratio=ratio)
@@ -178,6 +222,13 @@ async def build_run_args(
     required_frames = tuple(ShotFrameType(item) for item in REQUIRED_FRAMES_BY_MODE[reference_mode])
     frame_data_urls = [await file_id_to_data_url(db, file_id=file_id) for file_id in submission.images]
     frame_map = {ft: frame_data_urls[i] for i, ft in enumerate(required_frames)}
+    asset_reference_data_urls: list[str] = []
+    if is_reference_to_video_model(model.name):
+        asset_reference_file_ids = await resolve_r2v_asset_reference_file_ids(db, shot_id=shot_id)
+        asset_reference_data_urls = [
+            await file_id_to_data_url(db, file_id=file_id)
+            for file_id in asset_reference_file_ids
+        ]
 
     # 按供应商能力决定是否传 watermark=False，避免生成带水印的视频
     cap = resolve_video_capability(provider=provider_cfg.provider, model=model.name)
@@ -190,6 +241,8 @@ async def build_run_args(
         "ratio": resolved_ratio,
         "seconds": shot_detail.duration,
     }
+    if asset_reference_data_urls:
+        input_dict["reference_image_base64s"] = asset_reference_data_urls
     if cap.supports_watermark:
         input_dict["watermark"] = False
 

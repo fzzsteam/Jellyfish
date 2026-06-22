@@ -3,7 +3,9 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * 视频生成任务请求。
+ * 视频生成任务请求体。
+ *
+ * 显式 `model_id` 用于覆盖默认视频模型，保证工作室里的模型选择能进入实际任务。
  */
 export type VideoGenerationTaskRequest = {
     /**
@@ -11,11 +13,15 @@ export type VideoGenerationTaskRequest = {
      */
     shot_id: string;
     /**
+     * 可选视频模型 ID（models.id）；不传则使用当前用户的默认视频模型
+     */
+    model_id?: (string | null);
+    /**
      * 参考模式：first | last | key | first_last | first_last_key | text_only
      */
     reference_mode: 'first' | 'last' | 'key' | 'first_last' | 'first_last_key' | 'text_only';
     /**
-     * 视频提示词（text_only 必填）
+     * 视频提示词（text_only 必填；非文本模式可作为补充描述）
      */
     prompt?: (string | null);
     /**

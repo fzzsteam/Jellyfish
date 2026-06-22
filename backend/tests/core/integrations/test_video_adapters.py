@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from app.core.integrations.openai.video import OpenAIVideoApiAdapter
 from app.core.integrations.volcengine.video import VolcengineVideoApiAdapter
 from app.core.integrations.vidu.video import ViduVideoApiAdapter
+from app.core.integrations.bailian.video import BailianVideoApiAdapter
 from app.core.contracts.provider import ProviderConfig
 from app.core.contracts.video_generation import VideoGenerationInput
 
@@ -23,6 +24,35 @@ def _patch_httpx_client(monkeypatch: pytest.MonkeyPatch, transport: httpx.MockTr
         return real_client(transport=transport, timeout=timeout)  # type: ignore[arg-type]
 
     monkeypatch.setattr(httpx, "AsyncClient", factory)
+
+
+def test_bailian_r2v_payload_uses_asset_reference_images() -> None:
+    adapter = BailianVideoApiAdapter(
+        provider_config=ProviderConfig(provider="aliyun_bailian", api_key="bailian-key"),
+    )
+    inp = VideoGenerationInput.model_validate(
+        {
+            "model": "happyhorse-1.0-r2v",
+            "prompt": "角色在园林中奔跑，手里拿着纸鸢",
+            "ratio": "9:16",
+            "seconds": 5,
+            "reference_image_base64s": [
+                "data:image/png;base64,character",
+                "data:image/png;base64,scene",
+                "data:image/png;base64,prop",
+            ],
+        }
+    )
+
+    payload = adapter._build_payload(inp)
+
+    assert payload["model"] == "happyhorse-1.0-r2v"
+    assert payload["parameters"]["ratio"] == "9:16"
+    assert payload["input"]["media"] == [
+        {"type": "reference_image", "url": "data:image/png;base64,character"},
+        {"type": "reference_image", "url": "data:image/png;base64,scene"},
+        {"type": "reference_image", "url": "data:image/png;base64,prop"},
+    ]
 
 
 @pytest.mark.asyncio

@@ -80,6 +80,8 @@ shot_extracted_dialogue_candidates
 
 如果某个镜头提取后没有任何对白候选，这不会阻塞 `ready`。
 
+当前分镜准备页只把角色、场景、道具作为需要用户确认的资产候选。`costume` 候选仍可保留在提取明细中，但不再计入 `asset_candidate_total` / `pending_asset_count`，也不会阻塞 `shot.status = ready`。
+
 ## `shot_extracted_candidates` 表结构职责
 
 这张表记录的是**镜头级资产提取确认明细**，而不是最终资产本身。
@@ -176,9 +178,9 @@ script_divide
 - 自动准备会把已有可用图片且高置信唯一匹配的资产候选回写为 `linked`
 - 自动准备会把对白候选写入 `ShotDialogLine` 并回写为 `accepted`
 - 角色关联成功后，匹配角色候选回写为 `linked`
-- 场景 / 道具 / 服装关联成功后，匹配候选回写为 `linked`
+- 场景 / 道具关联成功后，匹配候选回写为 `linked`
 - `ShotDetail.scene_id` 设置成功后，场景候选回写为 `linked`
-- 删除场景 / 道具 / 服装关联后，对应候选回退为 `pending`
+- 删除场景 / 道具关联后，对应候选回退为 `pending`
 - 同 index 角色被替换时，被顶掉的旧角色候选回退为 `pending`
 - `scene_id` 从 A 切到 B，或清空时，旧场景候选回退为 `pending`
 - 接受对白候选后，写入 `ShotDialogLine` 并将对白候选回写为 `accepted`

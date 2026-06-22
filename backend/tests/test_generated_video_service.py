@@ -10,19 +10,34 @@ from app.core.db import Base
 from app.core.contracts.video_generation import VideoGenerationResult
 from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider, ProviderStatus
 from app.models.studio import (
+    AssetViewAngle,
     CameraAngle,
     CameraMovement,
     CameraShotType,
     Chapter,
+    Character,
+    CharacterImage,
+    Costume,
+    CostumeImage,
+    FileItem,
     Project,
+    ProjectCostumeLink,
+    ProjectPropLink,
+    ProjectSceneLink,
     ProjectStyle,
     ProjectVisualStyle,
+    Prop,
+    PropImage,
+    Scene,
+    SceneImage,
     Shot,
+    ShotCharacterLink,
     ShotDetail,
     ShotFrameImage,
     ShotFrameType,
     VFXType,
 )
+from app.models.types import FileType
 from app.services.film.generated_video import (
     build_run_args,
     persist_generated_video_to_shot,
@@ -226,6 +241,142 @@ async def test_build_run_args_maps_reference_images(monkeypatch: pytest.MonkeyPa
         assert run_args["input"]["key_frame_base64"] is None
         assert run_args["input"]["ratio"] == "9:16"
         assert run_args["input"]["seconds"] == 6
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_build_run_args_uses_explicit_video_model_over_default() -> None:
+    """分镜工作室显式选择视频模型时，任务应使用该模型而不是默认视频模型。"""
+    db, engine = await _build_session()
+    async with db:
+        await _seed_shot_graph(db)
+        provider = Provider(id="p1", name="Vidu", base_url="https://api.vidu.example", api_key="k", user_id="test-user")
+        default_model = Model(
+            id="happyhorse-t2v",
+            name="happyhorse-1.0-t2v",
+            category=ModelCategoryKey.video,
+            provider_id="p1",
+            user_id="test-user",
+        )
+        selected_model = Model(
+            id="happyhorse-r2v",
+            name="happyhorse-1.0-r2v",
+            category=ModelCategoryKey.video,
+            provider_id="p1",
+            user_id="test-user",
+        )
+        settings = ModelSettings(id=1, default_video_model_id=default_model.id, user_id="test-user")
+        db.add_all([provider, default_model, selected_model, settings])
+        await db.commit()
+
+        run_args = await build_run_args(
+            db,
+            user_id="test-user",
+            shot_id="s1",
+            model_id=selected_model.id,
+            reference_mode="text_only",
+            prompt="最终视频提示词",
+            images=[],
+            ratio="9:16",
+        )
+
+        assert run_args["input"]["model"] == "happyhorse-1.0-r2v"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_build_run_args_adds_r2v_asset_reference_images(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HappyHorse r2v should receive linked character, scene, and prop images, excluding costumes."""
+    db, engine = await _build_session()
+    async with db:
+        await _seed_shot_graph(db)
+        bootstrap_all_registries()
+        provider = Provider(id="p1", name="bailian", base_url="https://dashscope.aliyuncs.com", api_key="k", user_id="test-user")
+        model = Model(
+            id="happyhorse-r2v",
+            name="happyhorse-1.0-r2v",
+            category=ModelCategoryKey.video,
+            provider_id="p1",
+            user_id="test-user",
+        )
+        db.add_all(
+            [
+                provider,
+                model,
+                ModelSettings(id=1, default_video_model_id=model.id, user_id="test-user"),
+                Character(
+                    id="char-1",
+                    project_id="p1",
+                    name="苏过",
+                    description="",
+                    style=ProjectStyle.real_people_city,
+                    visual_style=ProjectVisualStyle.live_action,
+                ),
+                Scene(
+                    id="scene-1",
+                    name="合江楼",
+                    description="",
+                    style=ProjectStyle.real_people_city,
+                    visual_style=ProjectVisualStyle.live_action,
+                    user_id="test-user",
+                ),
+                Prop(
+                    id="prop-1",
+                    name="纸鸢",
+                    description="",
+                    style=ProjectStyle.real_people_city,
+                    visual_style=ProjectVisualStyle.live_action,
+                    user_id="test-user",
+                ),
+                Costume(
+                    id="costume-1",
+                    name="青衫",
+                    description="",
+                    style=ProjectStyle.real_people_city,
+                    visual_style=ProjectVisualStyle.live_action,
+                    user_id="test-user",
+                ),
+                FileItem(id="file-char", type=FileType.image, name="char.png", storage_key="char.png", user_id="test-user"),
+                FileItem(id="file-scene", type=FileType.image, name="scene.png", storage_key="scene.png", user_id="test-user"),
+                FileItem(id="file-prop", type=FileType.image, name="prop.png", storage_key="prop.png", user_id="test-user"),
+                FileItem(id="file-costume", type=FileType.image, name="costume.png", storage_key="costume.png", user_id="test-user"),
+                ShotCharacterLink(shot_id="s1", character_id="char-1", index=1),
+                ProjectSceneLink(project_id="p1", chapter_id="c1", shot_id="s1", scene_id="scene-1"),
+                ProjectPropLink(project_id="p1", chapter_id="c1", shot_id="s1", prop_id="prop-1"),
+                ProjectCostumeLink(project_id="p1", chapter_id="c1", shot_id="s1", costume_id="costume-1"),
+                CharacterImage(character_id="char-1", file_id="file-char", view_angle=AssetViewAngle.front),
+                SceneImage(scene_id="scene-1", file_id="file-scene", view_angle=AssetViewAngle.front),
+                PropImage(prop_id="prop-1", file_id="file-prop", view_angle=AssetViewAngle.front),
+                CostumeImage(costume_id="costume-1", file_id="file-costume", view_angle=AssetViewAngle.front),
+            ]
+        )
+        await db.commit()
+
+        async def _fake_file_id_to_data_url(_db: AsyncSession, *, file_id: str) -> str:
+            return f"data:image/png;base64,{file_id}"
+
+        monkeypatch.setattr(
+            "app.services.film.generated_video.file_id_to_data_url",
+            _fake_file_id_to_data_url,
+        )
+
+        run_args = await build_run_args(
+            db,
+            user_id="test-user",
+            shot_id="s1",
+            model_id=model.id,
+            reference_mode="text_only",
+            prompt="最终视频提示词",
+            images=[],
+            ratio="9:16",
+        )
+
+        assert run_args["input"]["model"] == "happyhorse-1.0-r2v"
+        assert run_args["input"]["reference_image_base64s"] == [
+            "data:image/png;base64,file-char",
+            "data:image/png;base64,file-scene",
+            "data:image/png;base64,file-prop",
+        ]
     await engine.dispose()
 
 

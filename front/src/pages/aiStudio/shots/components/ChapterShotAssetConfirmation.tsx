@@ -9,6 +9,7 @@ import type {
 } from '../../../../services/generated'
 
 type AssetKind = 'scene' | 'actor' | 'prop' | 'costume'
+const PREPARATION_ASSET_KINDS: AssetKind[] = ['scene', 'actor', 'prop']
 type AssetVM = {
   name: string
   thumbnail?: string | null
@@ -72,7 +73,7 @@ export function ChapterShotAssetConfirmation({
   onAddAsset,
 }: ChapterShotAssetConfirmationProps) {
   const pendingCount = Object.values(unionAssets).reduce(
-    (sum, items) => sum + items.filter((item) => item.status === 'new').length,
+    (sum, items) => sum + items.filter((item) => PREPARATION_ASSET_KINDS.includes(item.kind) && item.status === 'new').length,
     0,
   )
   const assetStatus = (() => {
@@ -308,7 +309,6 @@ export function ChapterShotAssetConfirmation({
         {renderAssetGrid('scene', '场景', unionAssets.scene)}
         {renderAssetGrid('actor', '角色', unionAssets.actor)}
         {renderAssetGrid('prop', '道具', unionAssets.prop)}
-        {renderAssetGrid('costume', '服装', unionAssets.costume)}
       </div>
     </div>
   )

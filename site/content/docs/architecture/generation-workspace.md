@@ -260,6 +260,7 @@ front/src/pages/aiStudio/hooks/useGenerationDraft.ts
 当前视频生成执行层通过 `app/core/tasks/video_generation_tasks.py` 按 provider key 分派到具体供应商 adapter。
 
 - `openai`、`volcengine`、`aliyun_bailian`、`vidu` 均已注册 `video_generation` 任务适配器。
+- 阿里百炼 `happyhorse-1.0-r2v` 在单镜头视频生成时会自动收集当前分镜已关联的角色、场景、道具图片，作为多张 `reference_image` 传入；服装图片不再作为 r2v 视频参考图传入。
 - `vidu` 视频生成走 `app/core/integrations/vidu/video.py`，使用 Vidu 官方 `POST /ent/v2/reference2video` 创建任务，并轮询 `GET /ent/v2/tasks/{task_id}/creations` 获取结果。
 - Vidu 视频请求使用 `Authorization: Token {api_key}`，默认模型为 `viduq3`，参考帧会映射为默认主题 `subject_1` 的 `subjects[0].images`。
 - Vidu 非主体模型 `viduq3-mix` 使用同一接口，但请求体改为顶层 `images` 列表，不传 `subjects` 与 `audio`，默认分辨率映射为 `720p`。
