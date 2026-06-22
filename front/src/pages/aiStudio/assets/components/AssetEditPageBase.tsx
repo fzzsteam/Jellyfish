@@ -16,11 +16,12 @@ import {
   message,
 } from 'antd'
 import { ArrowLeftOutlined, CheckOutlined, CloseCircleOutlined, EditOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
-import { FilmService, LlmService, ScriptProcessingService, StudioFilesService } from '../../../../services/generated'
+import { FilmService, LlmService, ScriptProcessingService, StudioEntitiesService, StudioFilesService } from '../../../../services/generated'
 import type { AssetImageCandidateRead, ModelRead, ProviderRead, TaskStatus } from '../../../../services/generated'
 import { buildFileDownloadUrl } from '../utils'
 import { AssetImageCandidateGallery } from './AssetImageCandidateGallery'
 import { MentionEditor } from './MentionEditor'
+import type { MentionAssetKind, MentionImageOption } from './MentionEditor'
 import { DisplayImageCard } from './DisplayImageCard'
 import { defaultTaskActionErrorMessage, executeAsyncTaskCreate, executeTaskCancel, notifyExistingTask } from '../../components/taskActionHelpers'
 import { handleTaskResultSafely } from '../../components/taskResultHelpers'
@@ -39,6 +40,7 @@ import {
 } from '../../project/ProjectWorkbench/chapterDivisionTasks'
 
 const MAX_VIEW_COUNT = 4
+const ASSET_MENTION_PAGE_SIZE = 100
 // 与后端 `AssetViewAngle`（backend/app/models/studio.py）一致的枚举值
 export type AssetViewAngle =
   | 'FRONT'
@@ -87,6 +89,19 @@ type ImageGenerationPayload = {
 
 type ImageModelOption = ModelRead & {
   provider_name: string
+}
+
+type MentionEntityRecord = {
+  id?: string
+  name?: string | null
+  title?: string | null
+}
+
+type MentionImageRecord = {
+  id?: number | string
+  file_id?: string | null
+  view_angle?: string | null
+  name?: string | null
 }
 
 export type AssetEditPageBaseProps<TAsset extends BaseAsset, TImage extends BaseAssetImage> = {
@@ -158,6 +173,45 @@ function getAssetNavigateRelationType(relationType: string): string | null {
   if (relationType === 'prop_image') return 'prop'
   if (relationType === 'costume_image') return 'costume'
   return null
+}
+
+// Loads every entity page for an @ mention category so the picker can expose all asset images.
+async function listMentionEntities(entityType: MentionAssetKind): Promise<MentionEntityRecord[]> {
+  const result: MentionEntityRecord[] = []
+  let page = 1
+  let maxPage = 1
+  do {
+    const res = await StudioEntitiesService.listEntitiesApiV1StudioEntitiesEntityTypeGet({
+      entityType,
+      page,
+      pageSize: ASSET_MENTION_PAGE_SIZE,
+    })
+    const data = res.data
+    result.push(...((data?.items ?? []) as MentionEntityRecord[]))
+    maxPage = data?.pagination?.max_page ?? page
+    page += 1
+  } while (page <= maxPage)
+  return result
+}
+
+// Loads every image page for one asset entity, keeping only records that have file_id.
+async function listMentionEntityImages(entityType: MentionAssetKind, entityId: string): Promise<MentionImageRecord[]> {
+  const result: MentionImageRecord[] = []
+  let page = 1
+  let maxPage = 1
+  do {
+    const res = await StudioEntitiesService.listEntityImagesApiV1StudioEntitiesEntityTypeEntityIdImagesGet({
+      entityType,
+      entityId,
+      page,
+      pageSize: ASSET_MENTION_PAGE_SIZE,
+    })
+    const data = res.data
+    result.push(...((data?.items ?? []) as MentionImageRecord[]).filter((item) => Boolean(item.file_id)))
+    maxPage = data?.pagination?.max_page ?? page
+    page += 1
+  } while (page <= maxPage)
+  return result
 }
 
 export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseAssetImage>({
@@ -735,23 +789,28 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     }
   }
 
-  // Loads all image candidates from every slot and deduplicates by file_id, for MentionEditor.
-  const loadMentionCandidates = useCallback(async (): Promise<AssetImageCandidateRead[]> => {
-    if (!assetId) return []
-    const all: AssetImageCandidateRead[] = []
-    for (const item of slotItems) {
-      if (item.image) {
-        const cands = await listImageCandidates(assetId, item.image.id)
-        all.push(...cands)
-      }
-    }
+  // Loads all reusable asset images for the selected @ mention category and deduplicates by file_id.
+  const loadMentionImagesByKind = useCallback(async (kind: MentionAssetKind): Promise<MentionImageOption[]> => {
+    const entities = await listMentionEntities(kind)
     const seen = new Set<string>()
-    return all.filter((c) => {
-      if (!c.file_id || seen.has(c.file_id)) return false
-      seen.add(c.file_id)
-      return true
-    })
-  }, [assetId, slotItems, listImageCandidates])
+    const options: MentionImageOption[] = []
+    for (const entity of entities) {
+      if (!entity.id) continue
+      const entityName = entity.name || entity.title || entity.id
+      const entityImages = await listMentionEntityImages(kind, entity.id)
+      entityImages.forEach((image, index) => {
+        if (!image.file_id || seen.has(image.file_id)) return
+        seen.add(image.file_id)
+        options.push({
+          id: `${kind}:${entity.id}:${image.id ?? index}`,
+          file_id: image.file_id,
+          label: entityName,
+          subtitle: image.view_angle || image.name || entityName,
+        })
+      })
+    }
+    return options
+  }, [])
 
   if (!assetId) {
     return (
@@ -836,7 +895,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                     }}
                     disabled={smartDetectBusy || savingBase}
                     placeholder="支持输入 @ 选择候选池图片作为参考"
-                    loadCandidates={loadMentionCandidates}
+                    loadImagesByKind={loadMentionImagesByKind}
                   />
                 </div>
                 <div>

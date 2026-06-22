@@ -1,17 +1,32 @@
 import type React from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Spin } from 'antd'
-import type { AssetImageCandidateRead } from '../../../../services/generated'
 import { buildFileDownloadUrl } from '../utils'
+
+export type MentionAssetKind = 'prop' | 'costume' | 'scene' | 'character'
+
+export type MentionImageOption = {
+  id: string
+  file_id: string
+  label: string
+  subtitle?: string | null
+}
 
 interface MentionEditorProps {
   value: string
   onChange: (text: string, fileIds: string[]) => void
   disabled?: boolean
   placeholder?: string
-  loadCandidates: () => Promise<AssetImageCandidateRead[]>
+  loadImagesByKind: (kind: MentionAssetKind) => Promise<MentionImageOption[]>
   minRows?: number
 }
+
+const MENTION_CATEGORIES: Array<{ kind: MentionAssetKind; label: string; description: string }> = [
+  { kind: 'prop', label: '道具', description: '引用道具资产图片' },
+  { kind: 'costume', label: '服装', description: '引用服装资产图片' },
+  { kind: 'scene', label: '场景', description: '引用场景资产图片' },
+  { kind: 'character', label: '角色', description: '引用角色资产图片' },
+]
 
 // Recursively extracts plain text from the editor, skipping image chip spans.
 function getEditorText(el: HTMLElement): string {
@@ -21,7 +36,7 @@ function getEditorText(el: HTMLElement): string {
       text += node.textContent ?? ''
     } else if (node instanceof HTMLElement) {
       if (node.dataset.fileId) {
-        // chip — omit from text; file_id is tracked separately
+        // Image chips are reference metadata, so they are omitted from plain text.
       } else if (node.tagName === 'BR') {
         text += '\n'
       } else if (node.tagName === 'DIV' || node.tagName === 'P') {
@@ -46,16 +61,15 @@ function getEditorFileIds(el: HTMLElement): string[] {
 }
 
 /**
- * Rich-text description editor that supports "@" to insert inline candidate image chips.
- * Selected images appear as thumbnails inline, and their file_ids are reported via onChange
- * alongside the plain text, for use as generation reference images.
+ * Rich-text description editor that supports "@" to insert inline asset image chips.
+ * The picker first selects an asset category, then one image from that category.
  */
 export function MentionEditor({
   value,
   onChange,
   disabled,
   placeholder,
-  loadCandidates,
+  loadImagesByKind,
   minRows = 4,
 }: MentionEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null)
@@ -66,13 +80,14 @@ export function MentionEditor({
   const atRangeRef = useRef<Range | null>(null)
 
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [candidates, setCandidates] = useState<AssetImageCandidateRead[]>([])
+  const [pickerMode, setPickerMode] = useState<'category' | 'images'>('category')
+  const [selectedKind, setSelectedKind] = useState<MentionAssetKind | null>(null)
+  const [imageOptions, setImageOptions] = useState<MentionImageOption[]>([])
   const [pickerLoading, setPickerLoading] = useState(false)
   const [highlighted, setHighlighted] = useState(0)
   const [hasContent, setHasContent] = useState(false)
 
-  // Sync external value changes (loadData, smart-detect apply) into the editor.
-  // Internal typing is guarded by isInternalRef so this only fires on true external resets.
+  // Sync external value changes into the editor without overwriting active typing.
   useEffect(() => {
     if (isInternalRef.current) {
       isInternalRef.current = false
@@ -99,36 +114,28 @@ export function MentionEditor({
     onChange(text, fileIds)
   }, [onChange])
 
-  const buildChip = useCallback(
-    (candidate: AssetImageCandidateRead, onDelete: () => void): HTMLElement => {
-      const chip = document.createElement('span')
-      chip.contentEditable = 'false'
-      chip.dataset.fileId = candidate.file_id ?? ''
-      chip.style.cssText =
-        'display:inline-flex;align-items:center;vertical-align:middle;margin:0 2px;' +
-        'border-radius:4px;overflow:hidden;border:1.5px solid #bfdbfe;background:#eff6ff;user-select:none;cursor:default;'
+  const buildChip = useCallback((option: MentionImageOption): HTMLElement => {
+    const chip = document.createElement('span')
+    chip.contentEditable = 'false'
+    chip.dataset.fileId = option.file_id
+    chip.style.cssText =
+      'display:inline-flex;align-items:center;vertical-align:middle;margin:0 2px;' +
+      'border-radius:4px;overflow:hidden;border:1.5px solid #bfdbfe;background:#eff6ff;user-select:none;cursor:default;'
 
-      void onDelete // referenced so the callback isn't dead code
+    const img = document.createElement('img')
+    img.src = buildFileDownloadUrl(option.file_id) ?? ''
+    img.alt = option.label || '参考图'
+    img.style.cssText = 'width:24px;height:24px;object-fit:cover;display:block;'
+    chip.appendChild(img)
 
-      const img = document.createElement('img')
-      img.src = buildFileDownloadUrl(candidate.file_id) ?? ''
-      img.alt = '参考图'
-      img.style.cssText = 'width:24px;height:24px;object-fit:cover;display:block;'
-      chip.appendChild(img)
-
-      return chip
-    },
-    [],
-  )
+    return chip
+  }, [])
 
   const insertChip = useCallback(
-    (candidate: AssetImageCandidateRead) => {
-      if (!candidate.file_id || !editorRef.current) return
+    (option: MentionImageOption) => {
+      if (!option.file_id || !editorRef.current) return
 
-      const chip = buildChip(candidate, () => {
-        chip.remove()
-        notifyChange()
-      })
+      const chip = buildChip(option)
 
       if (atRangeRef.current) {
         atRangeRef.current.deleteContents()
@@ -144,25 +151,51 @@ export function MentionEditor({
 
       atRangeRef.current = null
       setPickerOpen(false)
+      setPickerMode('category')
+      setSelectedKind(null)
+      setImageOptions([])
       notifyChange()
     },
     [buildChip, notifyChange],
   )
 
-  const openPicker = useCallback(async () => {
+  const openPicker = useCallback(() => {
     setPickerOpen(true)
     setHighlighted(0)
-    setPickerLoading(true)
-    setCandidates([])
-    try {
-      const list = await loadCandidates()
-      setCandidates(list)
-    } catch {
-      // Show empty state in picker
-    } finally {
-      setPickerLoading(false)
-    }
-  }, [loadCandidates])
+    setPickerMode('category')
+    setSelectedKind(null)
+    setImageOptions([])
+    setPickerLoading(false)
+  }, [])
+
+  const closePicker = useCallback(() => {
+    setPickerOpen(false)
+    setPickerMode('category')
+    setSelectedKind(null)
+    setImageOptions([])
+    setPickerLoading(false)
+    atRangeRef.current = null
+  }, [])
+
+  // Loads all images for one asset category after the user confirms the first-level menu.
+  const selectCategory = useCallback(
+    async (kind: MentionAssetKind) => {
+      setPickerMode('images')
+      setSelectedKind(kind)
+      setHighlighted(0)
+      setPickerLoading(true)
+      setImageOptions([])
+      try {
+        const list = await loadImagesByKind(kind)
+        setImageOptions(list)
+      } catch {
+        setImageOptions([])
+      } finally {
+        setPickerLoading(false)
+      }
+    },
+    [loadImagesByKind],
+  )
 
   const handleInput = () => {
     notifyChange()
@@ -178,37 +211,74 @@ export function MentionEditor({
         atRange.setStart(startContainer, startOffset - 1)
         atRange.setEnd(startContainer, startOffset)
         atRangeRef.current = atRange
-        void openPicker()
+        openPicker()
       }
     }
   }
 
-  // Use a ref to always read the latest picker state inside the keydown handler
-  // without stale-closure issues caused by React batching or useCallback deps.
-  const pickerStateRef = useRef({ pickerOpen, candidates, highlighted, insertChip })
-  pickerStateRef.current = { pickerOpen, candidates, highlighted, insertChip }
+  const pickerStateRef = useRef({
+    pickerOpen,
+    pickerMode,
+    pickerLoading,
+    imageOptions,
+    highlighted,
+    insertChip,
+    selectCategory,
+  })
+  pickerStateRef.current = {
+    pickerOpen,
+    pickerMode,
+    pickerLoading,
+    imageOptions,
+    highlighted,
+    insertChip,
+    selectCategory,
+  }
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    const { pickerOpen: open, candidates: cands, highlighted: hi, insertChip: ins } = pickerStateRef.current
+    const {
+      pickerOpen: open,
+      pickerMode: mode,
+      pickerLoading: loading,
+      imageOptions: options,
+      highlighted: hi,
+      insertChip: ins,
+      selectCategory: chooseCategory,
+    } = pickerStateRef.current
     if (!open) return
+
+    const optionCount = mode === 'category' ? MENTION_CATEGORIES.length : options.length
     if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setHighlighted((i) => Math.min(i + 1, cands.length - 1))
+      setHighlighted((i) => Math.min(i + 1, Math.max(optionCount - 1, 0)))
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       setHighlighted((i) => Math.max(i - 1, 0))
     } else if (e.key === 'Enter') {
       e.preventDefault()
-      const c = cands[hi]
-      if (c) ins(c)
+      if (loading) return
+      if (mode === 'category') {
+        const category = MENTION_CATEGORIES[hi]
+        if (category) void chooseCategory(category.kind)
+      } else {
+        const option = options[hi]
+        if (option) ins(option)
+      }
+    } else if (e.key === 'Backspace' && mode === 'images') {
+      e.preventDefault()
+      setPickerMode('category')
+      setSelectedKind(null)
+      setImageOptions([])
+      setHighlighted(0)
     } else if (e.key === 'Escape') {
       e.preventDefault()
-      setPickerOpen(false)
-      atRangeRef.current = null
+      closePicker()
     }
-  }, [])
+  }, [closePicker])
 
   const minH = `${minRows * 1.625}rem`
+  const selectedKindLabel =
+    MENTION_CATEGORIES.find((item) => item.kind === selectedKind)?.label ?? ''
 
   return (
     <div
@@ -247,25 +317,46 @@ export function MentionEditor({
             marginBottom: 4,
             width: 'max-content',
             maxWidth: '100%',
-            maxHeight: 220,
+            maxHeight: 260,
             border: '1px solid #374151',
             boxShadow: '0 -4px 12px rgba(0,0,0,0.15)',
           }}
           onMouseDown={(e) => e.preventDefault()}
         >
-          {pickerLoading ? (
-            <div className="flex justify-center py-4">
+          {pickerMode === 'category' ? (
+            <div className="min-w-48 p-1">
+              {MENTION_CATEGORIES.map((category, idx) => (
+                <div
+                  key={category.kind}
+                  className="cursor-pointer rounded px-3 py-2"
+                  style={{
+                    background: idx === highlighted ? '#eff6ff' : '#fff',
+                    color: idx === highlighted ? '#1677ff' : undefined,
+                  }}
+                  onMouseEnter={() => setHighlighted(idx)}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    void selectCategory(category.kind)
+                  }}
+                >
+                  <div className="text-sm font-medium">{category.label}</div>
+                  <div className="text-xs text-gray-400">{category.description}</div>
+                </div>
+              ))}
+            </div>
+          ) : pickerLoading ? (
+            <div className="flex justify-center py-4 px-8">
               <Spin size="small" />
             </div>
-          ) : candidates.length === 0 ? (
-            <div className="text-sm text-gray-500 text-center py-4">
-              暂无候选图片，请先在候选池中添加图片
+          ) : imageOptions.length === 0 ? (
+            <div className="text-sm text-gray-500 text-center py-4 px-6">
+              暂无{selectedKindLabel}资产图片
             </div>
           ) : (
             <div className="flex flex-wrap gap-2 p-2">
-              {candidates.map((c, idx) => (
+              {imageOptions.map((option, idx) => (
                 <div
-                  key={c.id}
+                  key={option.id}
                   className="rounded overflow-hidden cursor-pointer"
                   style={{
                     width: 72,
@@ -276,17 +367,17 @@ export function MentionEditor({
                   onMouseEnter={() => setHighlighted(idx)}
                   onMouseDown={(e) => {
                     e.preventDefault()
-                    insertChip(c)
+                    insertChip(option)
                   }}
                 >
                   <img
-                    src={buildFileDownloadUrl(c.file_id) ?? ''}
-                    alt={`候选图${idx + 1}`}
+                    src={buildFileDownloadUrl(option.file_id) ?? ''}
+                    alt={option.label}
                     className="w-full object-cover"
                     style={{ height: 54 }}
                   />
                   <div className="text-xs text-gray-500 text-center truncate px-1 py-0.5">
-                    候选图{idx + 1}
+                    {option.subtitle || option.label}
                   </div>
                 </div>
               ))}
