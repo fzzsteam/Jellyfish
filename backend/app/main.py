@@ -10,9 +10,9 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles as _StaticFiles
 
 from app.api.v1 import router as api_v1_router
-from app.bootstrap import bootstrap_all_registries
+from app.bootstrap import bootstrap_all_registries, seed_initial_admin
 from app.config import settings
-from app.core.db import close_db, init_db
+from app.core.db import async_session_maker, close_db, init_db
 from app.schemas.common import ApiResponse
 
 
@@ -59,6 +59,8 @@ async def validation_exception_handler(request: Request, exc: Exception) -> JSON
 async def lifespan(app: FastAPI):
     """应用生命周期：启动时初始化，关闭时清理。"""
     await init_db()
+    async with async_session_maker() as db:
+        await seed_initial_admin(db)
     bootstrap_all_registries()
     yield
     await close_db()

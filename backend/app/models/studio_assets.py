@@ -4,11 +4,11 @@ from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Text, UniqueCon
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
-from app.models.base import TimestampMixin
+from app.models.base import TimestampMixin, UserOwnedMixin
 from app.models.types import ProjectStyle, ProjectVisualStyle
 
 
-class Scene(Base, TimestampMixin):
+class Scene(Base, UserOwnedMixin, TimestampMixin):
     """场景表。"""
 
     __tablename__ = "scenes"
@@ -48,11 +48,11 @@ class Scene(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_scenes_name", "name"),
-        UniqueConstraint("name", name="uq_scenes_name"),
+        UniqueConstraint("user_id", "name", name="uq_scenes_user_name"),
     )
 
 
-class Prop(Base, TimestampMixin):
+class Prop(Base, UserOwnedMixin, TimestampMixin):
     """道具表。角色道具绑定见 CharacterPropLink。"""
 
     __tablename__ = "props"
@@ -97,11 +97,11 @@ class Prop(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_props_name", "name"),
-        UniqueConstraint("name", name="uq_props_name"),
+        UniqueConstraint("user_id", "name", name="uq_props_user_name"),
     )
 
 
-class Costume(Base, TimestampMixin):
+class Costume(Base, UserOwnedMixin, TimestampMixin):
     """服装表。角色服装见 Character.costume_id。"""
 
     __tablename__ = "costumes"
@@ -142,11 +142,11 @@ class Costume(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_costumes_name", "name"),
-        UniqueConstraint("name", name="uq_costumes_name"),
+        UniqueConstraint("user_id", "name", name="uq_costumes_user_name"),
     )
 
 
-class Actor(Base, TimestampMixin):
+class Actor(Base, UserOwnedMixin, TimestampMixin):
     """演员表（与角色区分）。
 
     说明：
@@ -192,7 +192,7 @@ class Actor(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_actors_name", "name"),
-        UniqueConstraint("name", name="uq_actors_name"),
+        UniqueConstraint("user_id", "name", name="uq_actors_user_name"),
     )
 
 

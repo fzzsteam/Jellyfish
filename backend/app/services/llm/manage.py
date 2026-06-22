@@ -255,32 +255,43 @@ async def delete_model(
     await delete_if_exists(db, Model, model_id)
 
 
-async def get_or_create_settings(
-    db: AsyncSession,
-) -> ModelSettings:
-    """获取或创建单例设置。"""
-    settings = await db.get(ModelSettings, 1)
+async def get_or_create_settings(db: AsyncSession, *, user_id: str) -> ModelSettings:
+    """按 user_id 获取设置行；不存在则惰性创建（每用户一行，幂等）。"""
+    result = await db.execute(select(ModelSettings).where(ModelSettings.user_id == user_id))
+    settings = result.scalar_one_or_none()
     if settings is None:
-        settings = await create_and_refresh(db, ModelSettings(id=1))
+        settings = ModelSettings(user_id=user_id)
+        db.add(settings)
+        await db.flush()
     return settings
 
 
-async def get_model_settings(
-    db: AsyncSession,
-) -> ModelSettings:
-    """获取模型全局设置。"""
-    return await get_or_create_settings(db)
+async def get_model_settings(db: AsyncSession, *, user_id: str) -> ModelSettings:
+    """读取某用户的模型设置（不存在则惰性创建默认值）。"""
+    return await get_or_create_settings(db, user_id=user_id)
 
 
 async def update_model_settings(
     db: AsyncSession,
     *,
-    body: ModelSettingsUpdate,
+    user_id: str,
+    body: ModelSettingsUpdate | None = None,
+    **fields: object,
 ) -> ModelSettings:
-    """更新模型全局设置。"""
-    settings = await get_or_create_settings(db)
-    patch_model(settings, body.model_dump())
-    return await flush_and_refresh(db, settings)
+    """按 user_id upsert 模型设置；只更新传入的字段。
+
+    兼容两种入参：路由层传入 `body`（`ModelSettingsUpdate` schema），
+    服务/测试层可直接以关键字参数传入要更新的字段。仅写入非 None 的字段，
+    保持“按 user_id 定位单行”的 upsert 语义。
+    """
+    settings = await get_or_create_settings(db, user_id=user_id)
+    if body is not None:
+        patch_model(settings, body.model_dump())
+    for key, value in fields.items():
+        if value is not None:
+            setattr(settings, key, value)
+    await db.flush()
+    return settings
 
 
 async def get_video_generation_options(

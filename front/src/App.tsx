@@ -21,12 +21,18 @@ import AgentEdit from './pages/aiStudio/agents/AgentEdit.tsx'
 import ModelManagement from './pages/aiStudio/models/ModelManagement'
 import { ChapterShotsPage } from './pages/aiStudio/shots/ChapterShotsPage'
 import { ChapterShotEditPage } from './pages/aiStudio/shots/ChapterShotEditPage'
+import LoginPage from './pages/auth/LoginPage'
+import PrivateRoute from './components/PrivateRoute'
 import './App.css'
 
 const App: React.FC = () => {
   return (
     <BrowserRouter>
       <Routes>
+
+        <Route path="/login" element={<LoginPage />} />
+        <Route element={<PrivateRoute />}>
+
         <Route path="/" element={<MainLayout />}>
           <Route index element={<Navigate to="/projects" replace />} />
           <Route path="projects" element={<ProjectLobby />} />
@@ -51,6 +57,8 @@ const App: React.FC = () => {
           <Route path="models" element={<ModelManagement />} />
           <Route path="settings" element={<Settings />} />
           <Route path="*" element={<NotFound />} />
+
+        </Route>
         </Route>
       </Routes>
     </BrowserRouter>

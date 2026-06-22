@@ -37,12 +37,17 @@ export class ScriptProcessingService {
      */
     public static divideScriptAsyncApiV1ScriptProcessingDivideAsyncPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ScriptDividerRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_AsyncTaskCreateRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/divide-async',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -58,12 +63,17 @@ export class ScriptProcessingService {
      */
     public static divideScriptApiV1ScriptProcessingDividePost({
         requestBody,
+        authorization,
     }: {
         requestBody: ScriptDividerRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ScriptDivisionResult_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/divide',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -79,12 +89,17 @@ export class ScriptProcessingService {
      */
     public static mergeEntitiesAsyncApiV1ScriptProcessingMergeEntitiesAsyncPost({
         requestBody,
+        authorization,
     }: {
         requestBody: EntityMergerRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_AsyncTaskCreateRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/merge-entities-async',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -100,12 +115,17 @@ export class ScriptProcessingService {
      */
     public static mergeEntitiesApiV1ScriptProcessingMergeEntitiesPost({
         requestBody,
+        authorization,
     }: {
         requestBody: EntityMergerRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_EntityMergeResult_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/merge-entities',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -121,12 +141,17 @@ export class ScriptProcessingService {
      */
     public static analyzeVariantsAsyncApiV1ScriptProcessingAnalyzeVariantsAsyncPost({
         requestBody,
+        authorization,
     }: {
         requestBody: VariantAnalysisRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_AsyncTaskCreateRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/analyze-variants-async',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -142,12 +167,17 @@ export class ScriptProcessingService {
      */
     public static analyzeVariantsApiV1ScriptProcessingAnalyzeVariantsPost({
         requestBody,
+        authorization,
     }: {
         requestBody: VariantAnalysisRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_VariantAnalysisResult_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/analyze-variants',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -163,12 +193,17 @@ export class ScriptProcessingService {
      */
     public static checkConsistencyAsyncApiV1ScriptProcessingCheckConsistencyAsyncPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ScriptConsistencyCheckRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_AsyncTaskCreateRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/check-consistency-async',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -184,12 +219,17 @@ export class ScriptProcessingService {
      */
     public static checkConsistencyApiV1ScriptProcessingCheckConsistencyPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ScriptConsistencyCheckRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ScriptConsistencyCheckResult_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/check-consistency',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -205,12 +245,17 @@ export class ScriptProcessingService {
      */
     public static analyzeCharacterPortraitAsyncApiV1ScriptProcessingAnalyzeCharacterPortraitAsyncPost({
         requestBody,
+        authorization,
     }: {
         requestBody: CharacterPortraitAnalysisRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_AsyncTaskCreateRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/analyze-character-portrait-async',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -226,12 +271,17 @@ export class ScriptProcessingService {
      */
     public static analyzeCharacterPortraitApiV1ScriptProcessingAnalyzeCharacterPortraitPost({
         requestBody,
+        authorization,
     }: {
         requestBody: CharacterPortraitAnalysisRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_CharacterPortraitAnalysisResult_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/analyze-character-portrait',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -247,12 +297,17 @@ export class ScriptProcessingService {
      */
     public static analyzePropInfoAsyncApiV1ScriptProcessingAnalyzePropInfoAsyncPost({
         requestBody,
+        authorization,
     }: {
         requestBody: PropInfoAnalysisRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_AsyncTaskCreateRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/analyze-prop-info-async',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -268,12 +323,17 @@ export class ScriptProcessingService {
      */
     public static analyzePropInfoApiV1ScriptProcessingAnalyzePropInfoPost({
         requestBody,
+        authorization,
     }: {
         requestBody: PropInfoAnalysisRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PropInfoAnalysisResult_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/analyze-prop-info',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -289,12 +349,17 @@ export class ScriptProcessingService {
      */
     public static analyzeSceneInfoAsyncApiV1ScriptProcessingAnalyzeSceneInfoAsyncPost({
         requestBody,
+        authorization,
     }: {
         requestBody: SceneInfoAnalysisRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_AsyncTaskCreateRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/analyze-scene-info-async',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -310,12 +375,17 @@ export class ScriptProcessingService {
      */
     public static analyzeSceneInfoApiV1ScriptProcessingAnalyzeSceneInfoPost({
         requestBody,
+        authorization,
     }: {
         requestBody: SceneInfoAnalysisRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_SceneInfoAnalysisResult_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/analyze-scene-info',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -331,12 +401,17 @@ export class ScriptProcessingService {
      */
     public static analyzeCostumeInfoAsyncApiV1ScriptProcessingAnalyzeCostumeInfoAsyncPost({
         requestBody,
+        authorization,
     }: {
         requestBody: CostumeInfoAnalysisRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_AsyncTaskCreateRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/analyze-costume-info-async',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -352,12 +427,17 @@ export class ScriptProcessingService {
      */
     public static analyzeCostumeInfoApiV1ScriptProcessingAnalyzeCostumeInfoPost({
         requestBody,
+        authorization,
     }: {
         requestBody: CostumeInfoAnalysisRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_CostumeInfoAnalysisResult_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/analyze-costume-info',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -373,12 +453,17 @@ export class ScriptProcessingService {
      */
     public static optimizeScriptAsyncApiV1ScriptProcessingOptimizeScriptAsyncPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ScriptOptimizeRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_AsyncTaskCreateRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/optimize-script-async',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -394,12 +479,17 @@ export class ScriptProcessingService {
      */
     public static optimizeScriptApiV1ScriptProcessingOptimizeScriptPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ScriptOptimizeRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ScriptOptimizationResult_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/optimize-script',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -415,12 +505,17 @@ export class ScriptProcessingService {
      */
     public static simplifyScriptApiV1ScriptProcessingSimplifyScriptPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ScriptSimplifyRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ScriptSimplificationResult_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/simplify-script',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -436,12 +531,17 @@ export class ScriptProcessingService {
      */
     public static simplifyScriptAsyncApiV1ScriptProcessingSimplifyScriptAsyncPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ScriptSimplifyRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_AsyncTaskCreateRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/simplify-script-async',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -457,12 +557,17 @@ export class ScriptProcessingService {
      */
     public static extractScriptAsyncApiV1ScriptProcessingExtractAsyncPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ScriptExtractRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_AsyncTaskCreateRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/extract-async',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -478,12 +583,17 @@ export class ScriptProcessingService {
      */
     public static extractScriptApiV1ScriptProcessingExtractPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ScriptExtractRequest,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_StudioScriptExtractionDraft_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/script-processing/extract',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {

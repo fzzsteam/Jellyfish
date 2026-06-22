@@ -23,6 +23,7 @@ export class StudioChaptersService {
         isDesc = false,
         page = 1,
         pageSize = 10,
+        authorization,
     }: {
         /**
          * 按项目过滤
@@ -42,10 +43,14 @@ export class StudioChaptersService {
         isDesc?: boolean,
         page?: number,
         pageSize?: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_ChapterRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/chapters',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'project_id': projectId,
                 'q': q,
@@ -66,12 +71,17 @@ export class StudioChaptersService {
      */
     public static createChapterApiV1StudioChaptersPost({
         requestBody,
+        authorization,
     }: {
         requestBody: ChapterCreate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ChapterRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/chapters',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -86,14 +96,19 @@ export class StudioChaptersService {
      */
     public static getChapterApiV1StudioChaptersChapterIdGet({
         chapterId,
+        authorization,
     }: {
         chapterId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ChapterRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/chapters/{chapter_id}',
             path: {
                 'chapter_id': chapterId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -108,15 +123,20 @@ export class StudioChaptersService {
     public static updateChapterApiV1StudioChaptersChapterIdPatch({
         chapterId,
         requestBody,
+        authorization,
     }: {
         chapterId: string,
         requestBody: ChapterUpdate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_ChapterRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/studio/chapters/{chapter_id}',
             path: {
                 'chapter_id': chapterId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -132,14 +152,19 @@ export class StudioChaptersService {
      */
     public static deleteChapterApiV1StudioChaptersChapterIdDelete({
         chapterId,
+        authorization,
     }: {
         chapterId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/studio/chapters/{chapter_id}',
             path: {
                 'chapter_id': chapterId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,

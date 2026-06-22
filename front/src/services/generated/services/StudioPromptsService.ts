@@ -27,6 +27,7 @@ export class StudioPromptsService {
         isDesc = false,
         page = 1,
         pageSize = 10,
+        authorization,
     }: {
         /**
          * 按类别过滤
@@ -48,10 +49,14 @@ export class StudioPromptsService {
         isDesc?: boolean,
         page?: number,
         pageSize?: number,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PaginatedData_PromptTemplateRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/prompts',
+            headers: {
+                'authorization': authorization,
+            },
             query: {
                 'category': category,
                 'q': q,
@@ -74,12 +79,17 @@ export class StudioPromptsService {
      */
     public static createPromptTemplateApiV1StudioPromptsPost({
         requestBody,
+        authorization,
     }: {
         requestBody: PromptTemplateCreate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PromptTemplateRead_> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/v1/studio/prompts',
+            headers: {
+                'authorization': authorization,
+            },
             body: requestBody,
             mediaType: 'application/json',
             errors: {
@@ -92,10 +102,20 @@ export class StudioPromptsService {
      * @returns ApiResponse_list_PromptCategoryOptionRead__ Successful Response
      * @throws ApiError
      */
-    public static listPromptCategoriesApiV1StudioPromptsCategoriesGet(): CancelablePromise<ApiResponse_list_PromptCategoryOptionRead__> {
+    public static listPromptCategoriesApiV1StudioPromptsCategoriesGet({
+        authorization,
+    }: {
+        authorization?: (string | null),
+    }): CancelablePromise<ApiResponse_list_PromptCategoryOptionRead__> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/prompts/categories',
+            headers: {
+                'authorization': authorization,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
         });
     }
     /**
@@ -105,14 +125,19 @@ export class StudioPromptsService {
      */
     public static getPromptTemplateApiV1StudioPromptsTemplateIdGet({
         templateId,
+        authorization,
     }: {
         templateId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PromptTemplateRead_> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/studio/prompts/{template_id}',
             path: {
                 'template_id': templateId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
@@ -127,15 +152,20 @@ export class StudioPromptsService {
     public static updatePromptTemplateApiV1StudioPromptsTemplateIdPatch({
         templateId,
         requestBody,
+        authorization,
     }: {
         templateId: string,
         requestBody: PromptTemplateUpdate,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_PromptTemplateRead_> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/studio/prompts/{template_id}',
             path: {
                 'template_id': templateId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -151,14 +181,19 @@ export class StudioPromptsService {
      */
     public static deletePromptTemplateApiV1StudioPromptsTemplateIdDelete({
         templateId,
+        authorization,
     }: {
         templateId: string,
+        authorization?: (string | null),
     }): CancelablePromise<ApiResponse_NoneType_> {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/studio/prompts/{template_id}',
             path: {
                 'template_id': templateId,
+            },
+            headers: {
+                'authorization': authorization,
             },
             errors: {
                 422: `Validation Error`,
