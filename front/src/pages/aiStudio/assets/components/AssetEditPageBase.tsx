@@ -88,6 +88,8 @@ type ImageGenerationPayload = {
   prompt: string
   images: string[]
   model_id: string | null
+  // 积分试算返回的 quote_token，透传到后端做幂等冻结与价格复核。
+  quote_token: string | null
 }
 
 type ImageModelOption = ModelRead & {
@@ -307,6 +309,14 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     category: 'text',
     modelId: null,
     enabled: !!smartDetectBusinessType && !!smartDetectDesc,
+  })
+  // 资产图片生成的积分试算。计费类别 image，模型跟随用户在模型选择区点选的具体模型；
+  // 未选中模型时不试算（canSubmit=false 阻断生成）。
+  const imageQuote = usePointsQuote({
+    businessType: 'image_generation',
+    category: 'image',
+    modelId: selectedImageModelId,
+    enabled: !!selectedImageModelId,
   })
 
   // Loads selectable image models so asset image generation can target a concrete model.
@@ -702,6 +712,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
         prompt,
         images: mentionedFileIds,
         model_id: selectedImageModelId,
+        quote_token: imageQuote.quoteToken,
       })
       if (!taskId) {
         message.error('生成任务创建失败：缺少任务 ID')
@@ -1003,24 +1014,27 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                       hoverable={false}
                       imageHeightClassName="h-44"
                       footer={
-                        <div className="flex items-center gap-2">
-                          <Button
-                            type="primary"
-                            size="small"
-                            disabled={!slot.image}
-                            loading={Boolean(slot.image && generatingByImageId[slot.image.id])}
-                            onClick={() => slot.image && void handleGenerateImage(slot.image)}
-                          >
-                            生成
-                          </Button>
-                          <Button
-                            size="small"
-                            icon={<EditOutlined />}
-                            disabled={!slot.image}
-                            onClick={() => slot.image && void openHistoryModal(slot.image)}
-                          >
-                            候选池
-                          </Button>
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="primary"
+                              size="small"
+                              disabled={!slot.image || !imageQuote.canSubmit}
+                              loading={Boolean(slot.image && generatingByImageId[slot.image.id])}
+                              onClick={() => slot.image && void handleGenerateImage(slot.image)}
+                            >
+                              生成
+                            </Button>
+                            <Button
+                              size="small"
+                              icon={<EditOutlined />}
+                              disabled={!slot.image}
+                              onClick={() => slot.image && void openHistoryModal(slot.image)}
+                            >
+                              候选池
+                            </Button>
+                          </div>
+                          <PointsCostHint quote={imageQuote.quote} loading={imageQuote.loading} error={imageQuote.error} />
                         </div>
                       }
                     />

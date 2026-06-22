@@ -101,6 +101,9 @@ import { ChapterStudioBatchToolbar } from './components/ChapterStudioBatchToolba
 import { ChapterStudioReadinessDiagnosisPanel } from './components/ChapterStudioReadinessDiagnosisPanel'
 import { ChapterStudioVideoReadinessPanel } from './components/ChapterStudioVideoReadinessPanel'
 import { useGenerationDraft, type GenerationDraftState } from '../hooks/useGenerationDraft'
+import { usePointsQuote } from '../../../hooks/usePointsQuote'
+import { PointsCostHint } from '../../../components/points/PointsCostHint'
+import { makePointsAwareGetErrorMessage } from '../../../components/points/pointsTaskError'
 import { useTaskPageContext } from '../components/taskPageContext'
 import type { RelationTaskState } from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { toRelationTaskStateFromStatusRead } from '../project/ProjectWorkbench/chapterDivisionTasks'
@@ -621,6 +624,14 @@ const ChapterStudio: React.FC = () => {
   const [loadingShots, setLoadingShots] = useState(true)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [prefs, setPrefs] = useLocalStoragePrefs()
+  // 分镜帧图片生成的积分试算。图片模型由后端按用户默认解析，故 modelId 恒为 null；
+  // 三处调用点（关键帧预览/批量/Ctrl+Enter）共享同一报价：单价稳定，复用同一 quote_token。
+  const imageQuote = usePointsQuote({
+    businessType: 'image_generation',
+    category: 'image',
+    modelId: null,
+    enabled: true,
+  })
   const [generating, setGenerating] = useState(false)
   const [batchSkipExtractionUpdating, setBatchSkipExtractionUpdating] = useState(false)
   const [batchVideoReadinessOpen, setBatchVideoReadinessOpen] = useState(false)
@@ -1376,11 +1387,12 @@ const ChapterStudio: React.FC = () => {
             images: imagesPayload,
             target_ratio: targetRatio,
             resolution_profile: keyframeResolutionProfile,
+            quote_token: imageQuote.quoteToken,
           } as any,
         })
       }
     },
-    [keyframeResolutionProfile, resolveShotVideoRatio],
+    [keyframeResolutionProfile, resolveShotVideoRatio, imageQuote.quoteToken],
   )
 
   const updatePromptProps = async (propIds: string[]) => {
@@ -1552,11 +1564,16 @@ const ChapterStudio: React.FC = () => {
           images: imagesPayload,
           target_ratio: targetRatio,
           resolution_profile: keyframeResolutionProfile,
+          quote_token: imageQuote.quoteToken,
         } as any,
       })
       message.success('已创建生成任务')
-    } catch {
-      message.error('创建生成任务失败')
+    } catch (error) {
+      // 优先识别积分业务错误（积分不足/报价已变更），命中后刷新报价并返回语义文案。
+      const pointsAware = makePointsAwareGetErrorMessage(imageQuote.refresh)
+      const fallback = '创建生成任务失败'
+      const msg = pointsAware(error, fallback)
+      message.error(msg)
     } finally {
       setGenerating(false)
     }
@@ -2774,6 +2791,15 @@ function Inspector(props: {
   const [videoModelPickerOpen, setVideoModelPickerOpen] = useState(false)
   const [videoModelsLoading, setVideoModelsLoading] = useState(false)
   const [videoModels, setVideoModels] = useState<VideoModelOption[]>([])
+  // 分镜帧图片生成的积分试算（Inspector 独立组件，内部独立持有报价）。
+  // 关键帧提示词预览弹窗与 useGenerationDraft 的 submit 共用：图片单价稳定，
+  // 同一报价可在弹窗存活期内复用；后端按 quote_token 逐次幂等校验。
+  const imageQuote = usePointsQuote({
+    businessType: 'image_generation',
+    category: 'image',
+    modelId: null,
+    enabled: true,
+  })
   const [selectedVideoModelId, setSelectedVideoModelId] = useState<string | null>(null)
   const selectedVideoModel = useMemo(
     () => videoModels.find((item) => item.id === selectedVideoModelId) ?? null,
@@ -3533,6 +3559,7 @@ function Inspector(props: {
           images: resolvedItems as any,
           target_ratio: ratio,
           resolution_profile: keyframeResolutionProfile,
+          quote_token: imageQuote.quoteToken,
         } as any,
       })
       return {
@@ -5168,7 +5195,7 @@ function Inspector(props: {
           }}
           footer={(
             <div className="flex items-center justify-between">
-              <div />
+              <PointsCostHint quote={imageQuote.quote} loading={imageQuote.loading} error={imageQuote.error} />
               <Space>
                 <Button
                   loading={keyframePromptActionLoading}
@@ -5179,7 +5206,7 @@ function Inspector(props: {
                 >
                   取消
                 </Button>
-                <Button type="primary" loading={keyframePromptActionLoading} onClick={() => void confirmGenerateKeyframeWithPrompt()}>
+                <Button type="primary" loading={keyframePromptActionLoading} disabled={!imageQuote.canSubmit} onClick={() => void confirmGenerateKeyframeWithPrompt()}>
                   生成
                 </Button>
               </Space>
