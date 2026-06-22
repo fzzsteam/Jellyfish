@@ -38,6 +38,7 @@ class TaskManager:
         user_id: str,
         task_kind: str | None = None,
         run_args: dict[str, Any] | None = None,
+        billing_id: str | None = None,
     ) -> TaskRecord:
         """创建任务记录。
 
@@ -46,6 +47,9 @@ class TaskManager:
         - mode: 结果交付方式（流式 / 任务+轮询）
         - user_id: 发起任务的用户 ID（按用户隔离归属，执行器据此解析该用户的模型配置）
         - run_args: 传给 task.run 的参数（会序列化到 payload，便于后续 worker 使用）
+        - billing_id: 积分计费单据 ID（Task 5b/5c 在冻结积分后回填）；None 表示未计费，
+          维持存量任务零行为变更。该字段作为 freeze 与 task 行之间的稳定关联键，
+          供 Celery worker 终态时调用 settle_task_billing_sync 消费/解冻。
         """
         payload: dict[str, Any] = {
             "task_class": task.__class__.__name__,
@@ -57,6 +61,7 @@ class TaskManager:
             mode=mode,
             task_kind=str(payload["task_kind"]),
             user_id=user_id,
+            billing_id=billing_id,
         )
 
     async def start(self, *, task_id: str) -> Optional[AsyncIterator[Any]]:

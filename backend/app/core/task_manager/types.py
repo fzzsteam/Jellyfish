@@ -78,6 +78,8 @@ class TaskRecord:
     updated_at_ts: Optional[float] = None
     executor_type: Optional[str] = None
     executor_task_id: Optional[str] = None
+    # 积分计费单据 ID：冻结时签发，落库到 GenerationTask.billing_id；None 表示该任务未走积分计费。
+    billing_id: Optional[str] = None
 
 
 @dataclass(slots=True)

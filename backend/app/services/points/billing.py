@@ -8,15 +8,23 @@
 职责边界：
     - 不直接读写积分账户状态（冻结/扣减/解冻/充值由 `ledger.py` 负责）。
     - 只做读侧的试算与查询；写侧的扣费/确认在后续任务复用 ledger。
+    - Task 5a 起新增 `freeze_for_task` / `settle_task_billing_sync`：把异步任务与积分账本
+      桥接起来——下单时按 quote_token 冻结，任务终态时由 Celery worker 统一结算。
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import uuid
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.db import async_session_maker
+from app.core.db_sync import sync_session_maker
 from app.models.llm import Model, ModelCategoryKey
 from app.models.points import PointTransaction, PointTransactionType
 from app.schemas.points import PointsQuoteResponse, PointsSummaryRead
@@ -25,10 +33,15 @@ from app.services.points import (
     UnsupportedResolutionError,
     calculate_points,
     create_quote_token,
+    decode_quote_token,
+    freeze_points,
     get_points,
     hash_quote_params,
 )
-from app.services.points.quote_tokens import QuoteClaims
+from app.services.points.locks import PointsOperationBusyError
+from app.services.points.quote_tokens import QuoteClaims, QuoteTokenError
+
+logger = logging.getLogger(__name__)
 
 
 class PointsDomainError(Exception):
@@ -102,6 +115,259 @@ def build_model_not_owned_error(*, model_id: str, user_id: str) -> PointsDomainE
         status_code=403,
         data={"model_id": model_id, "user_id": user_id},
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 5a：异步任务积分冻结与结算基础设施
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenBilling:
+    """`freeze_for_task` 返回的冻结句柄。
+
+    - `billing_id`：本次冻结的单据 ID，作为 freeze ↔ task 行之间的稳定关联键
+      （5b/5c 会把它写到 `GenerationTask.billing_id`，worker 终态结算据此回溯）。
+    - `required_points`：本次冻结的积分数量（= 重算后的 required_points）。
+    - `model_id`：实际参与计价的模型 ID（来自 quote_token，权威）。
+    - `business_type`：业务类型（如 `video_generation`），透传到账本流水。
+    - `snapshot`：计价快照，落库到 freeze 流水的 `pricing_snapshot`，便于对账。
+    """
+
+    billing_id: str
+    required_points: int
+    model_id: str
+    business_type: str
+    snapshot: dict[str, Any]
+
+
+async def freeze_for_task(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    quote_token: str,
+    business_type: str,
+    category: ModelCategoryKey,
+    model_id: str | None,
+    duration_seconds: int | None = None,
+    resolution: str | None = None,
+) -> FrozenBilling:
+    """按 quote_token 冻结积分（异步任务下单入口）。
+
+    流程（与 `quote_points` 对称，区别在于这里是「写侧」冻结）：
+    1. 解析并校验 quote_token（绑定 user_id）——失败抛 `POINTS_QUOTE_INVALID`(400)。
+    2. 以 token 中的 `model_id` 为权威，重新取 Model 行并做归属 + 类别校验
+       （`resolver` 不校验归属，这里显式补；不归属抛 `MODEL_NOT_OWNED`(403)）。
+       `model_id` 入参与 `claims.model_id` 必须一致（若显式传入），否则视为请求与报价单据不
+       一致 → `POINTS_QUOTE_CHANGED`(409)（客户端试图对报价单据之外的模型计费）。
+    3. 用当前模型单价 + 入参重新计价，得到 `required_points`。
+    4. 一致性校验：
+       - 若重算 `required_points != claims.required_points` → `POINTS_QUOTE_CHANGED`(409)
+         （单价自试算后调整，必须重新确认）。
+       - 重算 `params_hash`（duration/resolution）若与 token 中不符 → `POINTS_QUOTE_CHANGED`
+         （入参被篡改）。
+    5. 生成 `billing_id`，构造 `snapshot`，调用 `freeze_points` 落账本：
+       - 余额不足 → `INSUFFICIENT_POINTS`(402)。
+       - 账户操作繁忙 → `POINTS_OPERATION_BUSY`(503)。
+    6. 返回 `FrozenBilling` 句柄，供 5b/5c 写入任务行。
+
+    注意：`business_id=None`，因为冻结发生在任务行创建之前；`billing_id` 才是稳定关联键。
+
+    IMPORTANT: 冻结的回滚契约。`freeze_points` 内部会自行 COMMIT（见 ledger.py），因此
+    本函数返回时积分冻结已落库且不可回滚事务。调用方在 freeze 成功后若任务创建/入库失败,
+    必须调用 `unfreeze_frozen(db, user_id=..., billing_id=frozen.billing_id)` 回滚,否则冻结
+    将悬挂直至 Celery Beat 补偿(Task 7)。本函数自身不做任务行写入,无法代为回滚。
+    """
+    # 1. 解析 quote_token
+    try:
+        claims = decode_quote_token(quote_token, expected_user_id=user_id)
+    except QuoteTokenError:
+        raise PointsDomainError(
+            code="POINTS_QUOTE_INVALID",
+            message="quote token is invalid, expired, or bound to another user",
+            status_code=400,
+            data={},
+        ) from None
+
+    # 2. 以 token 中 model_id 为权威取模型 + 归属 + 类别校验。
+    # 若调用方显式传入 model_id 且与 token 绑定的 model_id 不一致,视为请求与报价单据不一致
+    # (客户端试图对报价之外的模型计费) → POINTS_QUOTE_CHANGED(409)。
+    if model_id is not None and model_id != claims.model_id:
+        raise PointsDomainError(
+            code="POINTS_QUOTE_CHANGED",
+            message=(
+                f"request model_id={model_id} != quoted model_id={claims.model_id}; "
+                "client attempted to bill a different model than the one quoted"
+            ),
+            status_code=409,
+            data={"requested_model_id": model_id, "quoted_model_id": claims.model_id},
+        )
+    model = await db.get(Model, claims.model_id)
+    if model is None:
+        raise PointsDomainError(
+            code="POINTS_QUOTE_INVALID",
+            message=f"model {claims.model_id} bound in quote token not found",
+            status_code=400,
+            data={"model_id": claims.model_id},
+        )
+    if model.user_id != user_id:
+        raise build_model_not_owned_error(model_id=model.id, user_id=user_id)
+    if model.category != category:
+        raise PointsDomainError(
+            code="MODEL_CATEGORY_MISMATCH",
+            message=f"model {model.id} category={model.category} != requested={category}",
+            status_code=400,
+            data={"model_id": model.id, "model_category": str(model.category), "requested_category": str(category)},
+        )
+
+    # 3. 重新计价
+    required_points = calculate_points(
+        category=category,
+        unit_points=model.unit_points,
+        duration_seconds=duration_seconds,
+        resolution=resolution,
+        generation_count=1,
+    )
+
+    # 4. 一致性校验：价格变更 / 参数篡改
+    if required_points != claims.required_points:
+        raise build_quote_changed_error(
+            new_quote={
+                "category": str(category),
+                "model_id": model.id,
+                "unit_points": model.unit_points,
+                "duration_seconds": duration_seconds,
+                "resolution": resolution,
+                "required_points": required_points,
+                "claimed_required_points": claims.required_points,
+            }
+        )
+
+    recomputed_params_hash = hash_quote_params(
+        {
+            "category": str(category),
+            "duration_seconds": duration_seconds,
+            "resolution": resolution,
+            "generation_count": 1,
+        }
+    )
+    if recomputed_params_hash != claims.params_hash:
+        raise build_quote_changed_error(
+            new_quote={
+                "category": str(category),
+                "model_id": model.id,
+                "unit_points": model.unit_points,
+                "duration_seconds": duration_seconds,
+                "resolution": resolution,
+                "required_points": required_points,
+                "reason": "params_hash mismatch",
+            }
+        )
+
+    # 5. 冻结
+    billing_id = uuid.uuid4().hex
+    snapshot = {
+        "category": str(category),
+        "unit_points": model.unit_points,
+        "duration_seconds": duration_seconds,
+        "resolution": resolution,
+        "required_points": required_points,
+    }
+    from app.services.points.ledger import InsufficientPointsError
+
+    try:
+        await freeze_points(
+            db,
+            user_id=user_id,
+            billing_id=billing_id,
+            amount=required_points,
+            model_id=model.id,
+            business_type=business_type,
+            business_id=None,
+            snapshot=snapshot,
+        )
+    except InsufficientPointsError as e:
+        raise build_insufficient_error(
+            available=e.available, required=e.required, shortfall=e.shortfall
+        ) from e
+    except PointsOperationBusyError as e:
+        _ = e  # 仅用于类型收敛
+        raise build_busy_error(user_id=user_id) from e
+
+    return FrozenBilling(
+        billing_id=billing_id,
+        required_points=required_points,
+        model_id=model.id,
+        business_type=business_type,
+        snapshot=snapshot,
+    )
+
+
+def settle_task_billing_sync(task_id: str) -> None:
+    """Celery worker 统一结算钩子：按任务终态消费或解冻冻结积分。
+
+    设计要点：
+    - **幂等**：账本 `consume_frozen` / `unfreeze_frozen` 自身幂等（同 billing_id 重复只入账一次），
+      本函数重复调用安全；终态互斥（已扣减不可再解冻）由账本保证。
+    - **零行为变更**：`billing_id is None`（存量任务或未计费任务）直接返回，不触达账本。
+    - **非终态跳过**：仅 `succeeded`/`failed`/`cancelled` 触发结算；`pending`/`running`/`streaming` 跳过。
+    - **同步桥**：Celery worker 在同步上下文运行，本函数用 `asyncio.run` 启动事件循环调用
+      异步账本（与 `AbstractAsyncDelegatingExecutor.run` 同款桥接模式）。
+    - **失败不阻断**：结算异常仅记录日志后吞掉，不阻断任务流程；Task 7 的 Celery Beat 补偿会兜底。
+
+    由 `app/tasks/execute_task.py::run_task_celery` 的 `finally` 调用，确保任务无论成功/失败/
+    取消都会触发结算。
+    """
+    from app.models.task import GenerationTask, GenerationTaskStatus
+
+    with sync_session_maker() as db:
+        row = db.get(GenerationTask, task_id)
+        if row is None or not row.billing_id:
+            return  # 任务不存在或未计费：零行为变更
+        status = row.status
+        billing_id = row.billing_id
+        user_id = row.user_id
+
+    # 仅终态结算（status 列存的是枚举值字符串，GenerationTaskStatus 是 str Enum）
+    terminal_ok = status in (
+        GenerationTaskStatus.succeeded.value,
+        GenerationTaskStatus.failed.value,
+        GenerationTaskStatus.cancelled.value,
+    )
+    if not terminal_ok:
+        return  # 非终态（pending/running/streaming）不结算
+
+    try:
+        asyncio.run(_settle_async(user_id=user_id, billing_id=billing_id, status=status))
+    except Exception:  # noqa: BLE001 - 结算失败不阻断任务流程，补偿任务(Task 7)兜底
+        logger.exception(
+            "settle_task_billing_sync failed for task_id=%s billing_id=%s", task_id, billing_id
+        )
+
+
+async def _settle_async(*, user_id: str, billing_id: str, status: str) -> None:
+    """异步侧结算：成功→consume，失败/取消→unfreeze。
+
+    `consume_frozen` / `unfreeze_frozen` 自身幂等且互斥（同 billing_id 重复或状态冲突抛
+    `BillingStateError`）；此处吞掉该异常并记日志后继续，保证重复结算不会污染流程。
+    """
+    from app.models.task import GenerationTaskStatus
+    from app.services.points import BillingStateError, consume_frozen, unfreeze_frozen
+
+    # consume_frozen / unfreeze_frozen 内部自行 COMMIT,此处无需显式 commit。
+    async with async_session_maker() as db:
+        try:
+            if status == GenerationTaskStatus.succeeded.value:
+                await consume_frozen(db, user_id=user_id, billing_id=billing_id)
+            else:
+                await unfreeze_frozen(
+                    db, user_id=user_id, billing_id=billing_id, remark=f"task {status}"
+                )
+        except BillingStateError:
+            # 幂等/互斥冲突（已结算过）：记录即可，不阻断
+            logger.warning(
+                "settle idempotent skip for billing_id=%s status=%s", billing_id, status
+            )
 
 
 async def quote_points(

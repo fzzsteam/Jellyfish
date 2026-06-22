@@ -61,10 +61,23 @@ def revoke_task_execution(task_id: str, *, terminate: bool = True, signal: str =
 
 @celery_app.task(name="task.execute")
 def run_task_celery(task_id: str) -> None:
+    """统一 Celery 执行入口：解析 task_kind → 执行器运行 → 统一积分结算。
+
+    finally 中调用 `settle_task_billing_sync`：任务无论成功/失败/取消，都按终态消费或解冻
+    冻结积分。存量任务 `billing_id=None` 时为 no-op，零行为变更。
+    """
+    from app.services.points.billing import settle_task_billing_sync
+
     with sync_session_maker() as db:
         row = db.get(GenerationTask, task_id)
         if row is None:
             return
         task_kind = (row.task_kind or "").strip() or str((row.payload or {}).get("task_kind") or "").strip()
     executor = task_executor_registry.resolve(task_kind)
-    executor.run(task_id)
+    try:
+        executor.run(task_id)
+    finally:
+        try:
+            settle_task_billing_sync(task_id)
+        except Exception:  # noqa: BLE001 - 结算钩子自身崩溃不阻断任务流程
+            logger.exception("settle hook crashed for task %s", task_id)

@@ -176,6 +176,7 @@ def _task_record_from_row(row: GenerationTask) -> TaskRecord:
         updated_at_ts=_datetime_ts(row.updated_at),
         executor_type=row.executor_type,
         executor_task_id=row.executor_task_id,
+        billing_id=row.billing_id,
     )
 
 
@@ -183,7 +184,13 @@ class TaskStore(Protocol):
     """任务存储抽象：可替换为内存、MySQL/SQLite(通过 SQLAlchemy) 等。"""
 
     async def create(
-        self, payload: dict[str, Any], mode: DeliveryMode, task_kind: str, *, user_id: str
+        self,
+        payload: dict[str, Any],
+        mode: DeliveryMode,
+        task_kind: str,
+        *,
+        user_id: str,
+        billing_id: str | None = None,
     ) -> TaskRecord: ...
     async def get(self, task_id: str, *, user_id: str | None = None) -> Optional[TaskRecord]: ...
     async def get_status_view(
@@ -217,7 +224,13 @@ class InMemoryTaskStore(TaskStore):
         self._data: dict[str, TaskRecord] = {}
 
     async def create(
-        self, payload: dict[str, Any], mode: DeliveryMode, task_kind: str, *, user_id: str
+        self,
+        payload: dict[str, Any],
+        mode: DeliveryMode,
+        task_kind: str,
+        *,
+        user_id: str,
+        billing_id: str | None = None,
     ) -> TaskRecord:
         async with self._lock:
             task_id = _new_id()
@@ -235,6 +248,7 @@ class InMemoryTaskStore(TaskStore):
                 cancel_requested=False,
                 created_at_ts=ts,
                 updated_at_ts=ts,
+                billing_id=billing_id,
             )
             self._data[task_id] = rec
             return rec
@@ -400,7 +414,13 @@ class SqlAlchemyTaskStore(TaskStore):
         self.db = db
 
     async def create(
-        self, payload: dict[str, Any], mode: DeliveryMode, task_kind: str, *, user_id: str
+        self,
+        payload: dict[str, Any],
+        mode: DeliveryMode,
+        task_kind: str,
+        *,
+        user_id: str,
+        billing_id: str | None = None,
     ) -> TaskRecord:
         task_id = _new_id()
         row = GenerationTask(
@@ -413,6 +433,7 @@ class SqlAlchemyTaskStore(TaskStore):
             payload=payload,
             result=None,
             error="",
+            billing_id=billing_id,
         )
         self.db.add(row)
         await self.db.flush()
