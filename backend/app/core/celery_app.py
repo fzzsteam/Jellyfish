@@ -16,7 +16,7 @@ from app.core.db import reset_db_runtime
 celery_app = Celery(
     "jellyfish",
     broker=settings.celery_broker_url,
-    include=["app.tasks.execute_task"],
+    include=["app.tasks.execute_task", "app.tasks.points"],
 )
 
 celery_app.conf.update(
@@ -27,6 +27,16 @@ celery_app.conf.update(
     timezone="Asia/Shanghai",
     enable_utc=False,
 )
+
+# Celery Beat 定时调度表。
+# 注意：生产环境必须只启动一个 Beat 进程（见 deploy/docker/supervisord.conf 与
+# deploy/compose/docker-compose.yml 中 celery-beat 服务的注释），否则同一任务会被重复触发。
+celery_app.conf.beat_schedule = {
+    "reconcile-stale-point-freezes": {
+        "task": "points.reconcile_stale_freezes",
+        "schedule": 300.0,
+    },
+}
 
 
 @worker_process_init.connect

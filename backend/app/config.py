@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     points_lock_wait_ms: int = 3_000
     points_lock_retry_max_backoff_ms: int = 250
 
+    # 积分冻结补偿（Task 7）：兜底处理逃逸的未结算冻结流水。
+    # - points_reconcile_min_age_seconds：冻结被视为"过期"的最小年龄（默认 30 分钟），
+    #   足以让正常结算（settle_task_billing_*）先跑完，避免与正常流程抢跑。
+    # - points_reconcile_batch_size：单批扫描上限，控制单次 Beat tick 的 DB 负载。
+    points_reconcile_min_age_seconds: int = 1800
+    points_reconcile_batch_size: int = 100
+
     # 初始管理员账号（仅在 users 表为空时用于播种）
     initial_admin_username: str = "admin"
     initial_admin_password: str | None = None
