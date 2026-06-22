@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore, TaskManager
 from app.dependencies import get_current_user, get_db
+from app.models.llm import ModelCategoryKey
 from app.models.task_links import GenerationTaskLink
 from app.models.user import User
 from app.schemas.common import ApiResponse, created_response
@@ -12,6 +13,8 @@ from app.services.film.shot_frame_prompt_tasks import (
     normalize_frame_type,
     relation_type_for_frame,
 )
+from app.services.points import unfreeze_frozen
+from app.services.points.billing import freeze_for_task
 from app.services.studio.shot_status import mark_shot_generating
 from app.tasks.execute_task import enqueue_task_execution
 
@@ -45,23 +48,40 @@ async def create_shot_frame_prompt_task(
         frame_type=frame_type,
     )
 
-    task_record = await tm.create(
-        task=_CreateOnlyTask(),
-        mode=DeliveryMode.async_polling,
+    # 分镜帧提示词生成走真实文本 LLM（最多 2 次调用），下单前按 quote_token 冻结积分。
+    # freeze_for_task 内部会 COMMIT；后续 tm.create / 落库失败必须显式 unfreeze 兜底，
+    # 否则冻结会悬挂直至 Celery Beat 补偿。model_id=None 表示沿用 token 内绑定的文本模型。
+    frozen = await freeze_for_task(
+        db,
         user_id=current_user.id,
-        task_kind="shot_frame_prompt",
-        run_args=run_args,
+        quote_token=body.quote_token,
+        business_type="shot_frame_prompt",
+        category=ModelCategoryKey.text,
+        model_id=None,
     )
-    db.add(
-        GenerationTaskLink(
-            task_id=task_record.id,
-            resource_type="prompt",
-            relation_type=relation_type,
-            relation_entity_id=body.shot_id,
+    try:
+        task_record = await tm.create(
+            task=_CreateOnlyTask(),
+            mode=DeliveryMode.async_polling,
+            user_id=current_user.id,
+            task_kind="shot_frame_prompt",
+            run_args=run_args,
+            billing_id=frozen.billing_id,
         )
-    )
-    await mark_shot_generating(db, shot_id=body.shot_id)
-    await db.commit()
+        db.add(
+            GenerationTaskLink(
+                task_id=task_record.id,
+                resource_type="prompt",
+                relation_type=relation_type,
+                relation_entity_id=body.shot_id,
+            )
+        )
+        await mark_shot_generating(db, shot_id=body.shot_id)
+        await db.commit()
+    except Exception:
+        # 任务创建/入库失败：按 5a 契约回滚冻结，避免冻结悬挂。
+        await unfreeze_frozen(db, user_id=current_user.id, billing_id=frozen.billing_id)
+        raise
 
     enqueue_task_execution(task_record.id)
     return created_response(TaskCreated(task_id=task_record.id))

@@ -2395,3 +2395,258 @@ def test_video_task_terminal_settlement_failed_unfreezes() -> None:
 
     asyncio.run(_check())
     asyncio.run(async_engine.dispose())
+
+
+# ---------------------------------------------------------------------------
+# shot_frame_prompt 路由计费：冻结 + billing_id + 余额不足/报价变更拦截
+# （镜像 Task 5c 视频路由测试，类别换成 text、business_type=shot_frame_prompt）
+# ---------------------------------------------------------------------------
+
+
+def _make_shot_frame_prompt_quote_token(*, required_points: int = 7, model_id: str = "m_text") -> str:
+    """构造合法的 shot_frame_prompt（文本类）quote_token，generation_count=1。"""
+    params_hash = hash_quote_params(
+        {
+            "category": str(ModelCategoryKey.text),
+            "duration_seconds": None,
+            "resolution": None,
+            "generation_count": 1,
+        }
+    )
+    return create_quote_token(
+        QuoteClaims(
+            user_id=USER_ID,
+            business_type="shot_frame_prompt",
+            model_id=model_id,
+            params_hash=params_hash,
+            required_points=required_points,
+        )
+    )
+
+
+def _seed_shot_frame_prompt_db(async_engine, async_session_local) -> None:
+    """建表并预置 user/provider/文本模型 + 一个 Shot（供 mark_shot_generating 写状态用）。"""
+    import asyncio
+
+    from app.models.studio import Chapter, Project, ProjectStyle, ProjectVisualStyle, Shot
+
+    async def _seed():
+        import app.models.task  # noqa: F401
+        import app.models.points  # noqa: F401
+        import app.models.task_links  # noqa: F401
+
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with async_session_local() as db:
+            db.add(User(id=USER_ID, username="u1", hashed_password="x", is_active=True, token_version=0))
+            db.add(Provider(id="p1", user_id=USER_ID, name="openai", base_url="http://x", api_key="k"))
+            db.add(
+                Model(
+                    id="m_text",
+                    user_id=USER_ID,
+                    name="text-model",
+                    category=ModelCategoryKey.text,
+                    provider_id="p1",
+                    unit_points=7,
+                )
+            )
+            # mark_shot_generating → recompute_shot_status 需要 Shot 行
+            db.add(
+                Project(
+                    id="proj-1",
+                    name="p",
+                    style=ProjectStyle.real_people_city,
+                    visual_style=ProjectVisualStyle.live_action,
+                    user_id=USER_ID,
+                )
+            )
+            db.add(Chapter(id="ch-1", project_id="proj-1", index=1, title="ch"))
+            db.add(Shot(id="sh-1", chapter_id="ch-1", index=1, title="sh", script_excerpt="x"))
+            await db.commit()
+            from app.services.points.ledger import recharge
+
+            await recharge(db, user_id=USER_ID, amount=200, created_by="t", remark="seed")
+
+    asyncio.run(_seed())
+
+
+def _build_test_app(monkeypatch, async_session_local):
+    """构造挂载 shot-frame-prompt 路由的 FastAPI app，并注入依赖覆盖 + PointsDomainError 处理器。"""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.v1.routes.film import tasks_images as sfp_route
+    from app.dependencies import get_current_user, get_db
+    from app.services.points.billing import PointsDomainError
+
+    # build_shot_frame_prompt_run_args 内部做了大量 Shot 预加载与文件解析，测试里用桩绕开
+    async def _fake_build_run_args(_db, **kwargs):
+        return {
+            "shot_id": kwargs["shot_id"],
+            "frame_type": kwargs["frame_type"],
+        }
+
+    monkeypatch.setattr(sfp_route, "build_shot_frame_prompt_run_args", _fake_build_run_args)
+    monkeypatch.setattr(sfp_route, "enqueue_task_execution", lambda _tid: None)
+
+    async def _override_db():
+        async with async_session_local() as db:
+            yield db
+
+    class _FakeUser:
+        id = USER_ID
+
+    async def _override_user():
+        return _FakeUser()
+
+    app_obj = FastAPI()
+    app_obj.include_router(sfp_route.router, prefix="/api/v1/film")
+    app_obj.dependency_overrides[get_db] = _override_db
+    app_obj.dependency_overrides[get_current_user] = _override_user
+
+    def _handler(_request, exc: PointsDomainError):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=exc.status_code, content={"data": exc.data, "error_code": exc.code})
+
+    app_obj.add_exception_handler(PointsDomainError, _handler)
+    return app_obj
+
+
+def test_shot_frame_prompt_route_freezes_before_task_create(monkeypatch) -> None:
+    """路由层：POST /tasks/shot-frame-prompts 在创建任务前冻结积分，billing_id 落到任务行。"""
+    import asyncio
+
+    from fastapi.testclient import TestClient
+
+    from app.services.points.ledger import get_points
+
+    async_engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async_session_local = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+    _seed_shot_frame_prompt_db(async_engine, async_session_local)
+
+    app_obj = _build_test_app(monkeypatch, async_session_local)
+    token = _make_shot_frame_prompt_quote_token(required_points=7)
+    client = TestClient(app_obj)
+    resp = client.post(
+        "/api/v1/film/tasks/shot-frame-prompts",
+        json={"shot_id": "sh-1", "frame_type": "key", "quote_token": token},
+    )
+    assert resp.status_code == 201, resp.text
+    task_id = resp.json()["data"]["task_id"]
+
+    async def _check():
+        from app.models.task import GenerationTask
+
+        async with async_session_local() as db:
+            pts = await get_points(db, user_id=USER_ID)
+            # 文本单价 7、generation_count=1 → 冻结 7，余额 200-... 仅校验 frozen
+            assert pts.frozen == 7
+            row = await db.get(GenerationTask, task_id)
+            assert row is not None
+            assert row.billing_id  # 非空：run_task_celery finally 可据此结算
+
+    asyncio.run(_check())
+    asyncio.run(async_engine.dispose())
+
+
+def test_shot_frame_prompt_route_insufficient_points_no_task(monkeypatch) -> None:
+    """路由层：余额不足 → PointsDomainError(INSUFFICIENT_POINTS) 上抛为 402，任务不被创建。"""
+    import asyncio
+
+    from fastapi.testclient import TestClient
+
+    async_engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async_session_local = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+
+    # 种子但不充值 → 可用 0
+    import app.models.task  # noqa: F401
+    import app.models.points  # noqa: F401
+    import app.models.task_links  # noqa: F401
+    from app.models.studio import Chapter, Project, ProjectStyle, ProjectVisualStyle, Shot
+
+    async def _seed():
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with async_session_local() as db:
+            db.add(User(id=USER_ID, username="u1", hashed_password="x", is_active=True, token_version=0))
+            db.add(Provider(id="p1", user_id=USER_ID, name="openai", base_url="http://x", api_key="k"))
+            db.add(
+                Model(
+                    id="m_text",
+                    user_id=USER_ID,
+                    name="text-model",
+                    category=ModelCategoryKey.text,
+                    provider_id="p1",
+                    unit_points=7,
+                )
+            )
+            db.add(
+                Project(
+                    id="proj-1",
+                    name="p",
+                    style=ProjectStyle.real_people_city,
+                    visual_style=ProjectVisualStyle.live_action,
+                    user_id=USER_ID,
+                )
+            )
+            db.add(Chapter(id="ch-1", project_id="proj-1", index=1, title="ch"))
+            db.add(Shot(id="sh-1", chapter_id="ch-1", index=1, title="sh", script_excerpt="x"))
+            await db.commit()
+            # 故意不 recharge
+
+    asyncio.run(_seed())
+
+    app_obj = _build_test_app(monkeypatch, async_session_local)
+    token = _make_shot_frame_prompt_quote_token(required_points=7)
+    client = TestClient(app_obj)
+    resp = client.post(
+        "/api/v1/film/tasks/shot-frame-prompts",
+        json={"shot_id": "sh-1", "frame_type": "key", "quote_token": token},
+    )
+    assert resp.status_code == 402, resp.text
+    assert resp.json()["error_code"] == "INSUFFICIENT_POINTS"
+
+    async def _check():
+        from app.models.task import GenerationTask
+        from sqlalchemy import select
+
+        async with async_session_local() as db:
+            rows = (await db.execute(select(GenerationTask))).scalars().all()
+            assert rows == []  # 任务未被创建
+
+    asyncio.run(_check())
+    asyncio.run(async_engine.dispose())
+
+
+def test_shot_frame_prompt_route_quote_changed_no_task(monkeypatch) -> None:
+    """路由层：报价与当前单价不一致 → PointsDomainError(POINTS_QUOTE_CHANGED) 上抛为 409。"""
+    import asyncio
+
+    from fastapi.testclient import TestClient
+
+    async_engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async_session_local = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+    _seed_shot_frame_prompt_db(async_engine, async_session_local)
+
+    app_obj = _build_test_app(monkeypatch, async_session_local)
+    # token 内 required_points=1 与重算（unit_points=7）不符 → POINTS_QUOTE_CHANGED
+    token = _make_shot_frame_prompt_quote_token(required_points=1)
+    client = TestClient(app_obj)
+    resp = client.post(
+        "/api/v1/film/tasks/shot-frame-prompts",
+        json={"shot_id": "sh-1", "frame_type": "key", "quote_token": token},
+    )
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["error_code"] == "POINTS_QUOTE_CHANGED"
+
+    async def _check():
+        from app.models.task import GenerationTask
+        from sqlalchemy import select
+
+        async with async_session_local() as db:
+            rows = (await db.execute(select(GenerationTask))).scalars().all()
+            assert rows == []  # 任务未被创建
+
+    asyncio.run(_check())
+    asyncio.run(async_engine.dispose())

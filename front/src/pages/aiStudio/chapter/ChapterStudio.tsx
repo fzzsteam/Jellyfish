@@ -2998,6 +2998,14 @@ function Inspector(props: {
     resolution: videoResolution,
     enabled: !!selectedVideoModelId && !!shotDetail?.duration,
   })
+  // 分镜帧提示词生成（shot_frame_prompt）走真实文本 LLM，属文本类计费业务。
+  // 报价与具体镜头无关，文本单价稳定，Inspector 存活期内复用同一报价。
+  const shotFramePromptQuote = usePointsQuote({
+    businessType: 'shot_frame_prompt',
+    category: 'text',
+    modelId: null,
+    enabled: true,
+  })
   useEffect(() => {
     let active = true
     setVideoModelsLoading(true)
@@ -4377,6 +4385,11 @@ function Inspector(props: {
       message.warning('请先选择一个分镜')
       return
     }
+    // 分镜帧提示词生成为文本类计费业务，未试算或凭证缺失时阻断提交。
+    if (!shotFramePromptQuote.quoteToken) {
+      message.warning('积分试算未就绪，请稍后再试')
+      return
+    }
     const frameType = keyframePromptPreviewFrameType
     setKeyframePromptActionLoading(true)
     try {
@@ -4384,6 +4397,7 @@ function Inspector(props: {
         requestBody: {
           shot_id: selectedShot.id,
           frame_type: frameType,
+          quote_token: shotFramePromptQuote.quoteToken,
         },
       })
       const taskId = created.data?.task_id
@@ -4472,8 +4486,11 @@ function Inspector(props: {
         refFileIds: keyframePromptPreviewRefFileIds.length > 0 ? keyframePromptPreviewRefFileIds : autoKeyframeRefFileIds,
       })
       message.success('提示词已生成')
-    } catch {
-      message.error('生成提示词失败')
+    } catch (error) {
+      // 优先识别积分业务错误（积分不足/报价已变更），命中后刷新报价并返回语义文案。
+      const pointsAware = makePointsAwareGetErrorMessage(shotFramePromptQuote.refresh)
+      const msg = pointsAware(error, '生成提示词失败')
+      message.error(msg)
     } finally {
       setKeyframePromptActionLoading(false)
     }
@@ -5578,11 +5595,19 @@ function Inspector(props: {
                       size="small"
                       type={hasBasePrompt ? 'default' : 'primary'}
                       loading={keyframePromptActionLoading}
+                      disabled={!shotFramePromptQuote.canSubmit}
                       onClick={() => void regenerateKeyframePrompt()}
                     >
                       AI生成
                     </Button>
                   </Space>
+                </div>
+                <div className="mb-2">
+                  <PointsCostHint
+                    quote={shotFramePromptQuote.quote}
+                    loading={shotFramePromptQuote.loading}
+                    error={shotFramePromptQuote.error}
+                  />
                 </div>
                 {!hasBasePrompt ? (
                   <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">

@@ -14,5 +14,9 @@ export type ShotFramePromptRequest = {
      * first | last | key
      */
     frame_type: string;
+    /**
+     * 积分试算凭证（必填）
+     */
+    quote_token: string;
 };
 

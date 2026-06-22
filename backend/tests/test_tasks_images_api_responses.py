@@ -42,6 +42,19 @@ async def _async_noop(*_args, **_kwargs) -> None:
     return None
 
 
+async def _fake_freeze_for_task(*_args, **_kwargs):
+    """桩：返回带 billing_id 的冻结句柄，绕开真实积分落账。"""
+    from app.services.points.billing import FrozenBilling
+
+    return FrozenBilling(
+        billing_id="bill-test-1",
+        required_points=7,
+        model_id="m_text",
+        business_type="shot_frame_prompt",
+        snapshot={},
+    )
+
+
 def _override_db(db: _FakeDB):
     async def _get_db() -> AsyncGenerator[_FakeDB, None]:
         yield db
@@ -59,11 +72,14 @@ def test_create_shot_frame_prompt_task_returns_created_envelope(client: TestClie
     monkeypatch.setattr(route, "TaskManager", _FakeTaskManager)
     monkeypatch.setattr(route, "enqueue_task_execution", lambda task_id: SimpleNamespace(id=f"celery-{task_id}"))
     monkeypatch.setattr(route, "mark_shot_generating", _async_noop)
+    # 绕开真实积分冻结/解冻：路由内 freeze_for_task 已计费，此处用桩返回 billing_id。
+    monkeypatch.setattr(route, "freeze_for_task", _fake_freeze_for_task)
+    monkeypatch.setattr(route, "unfreeze_frozen", _async_noop)
     app.dependency_overrides[get_db] = _override_db(db)
     try:
         response = client.post(
             "/api/v1/film/tasks/shot-frame-prompts",
-            json={"shot_id": "shot-1", "frame_type": "first"},
+            json={"shot_id": "shot-1", "frame_type": "first", "quote_token": "tok-1"},
         )
     finally:
         app.dependency_overrides.clear()
@@ -91,7 +107,7 @@ def test_create_shot_frame_prompt_task_invalid_frame_type_returns_api_response(
     try:
         response = client.post(
             "/api/v1/film/tasks/shot-frame-prompts",
-            json={"shot_id": "shot-1", "frame_type": "middle"},
+            json={"shot_id": "shot-1", "frame_type": "middle", "quote_token": "tok-1"},
         )
     finally:
         app.dependency_overrides.clear()
@@ -118,7 +134,7 @@ def test_create_shot_frame_prompt_task_missing_shot_detail_returns_api_response(
     try:
         response = client.post(
             "/api/v1/film/tasks/shot-frame-prompts",
-            json={"shot_id": "shot-1", "frame_type": "first"},
+            json={"shot_id": "shot-1", "frame_type": "first", "quote_token": "tok-1"},
         )
     finally:
         app.dependency_overrides.clear()

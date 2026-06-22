@@ -59,6 +59,8 @@ class ShotFramePromptRequest(BaseModel):
 
     shot_id: str = Field(..., description="镜头 ID")
     frame_type: str = Field(..., description="first | last | key")
+    # 分镜帧提示词生成会调用真实文本 LLM（最多 2 次），必须按报价冻结积分。
+    quote_token: str = Field(..., description="积分试算凭证（必填）")
 
 
 class TaskCreated(BaseModel):
