@@ -24,9 +24,28 @@ PREPARE stmt_create_model_settings_table FROM @create_model_settings_table;
 EXECUTE stmt_create_model_settings_table;
 DEALLOCATE PREPARE stmt_create_model_settings_table;
 
-INSERT INTO model_settings (id, api_timeout, log_level)
-SELECT 1, 30, 'info'
-WHERE NOT EXISTS (SELECT 1 FROM model_settings WHERE id = 1);
+SET @admin_id = (SELECT id FROM users WHERE is_admin = 1 ORDER BY created_at LIMIT 1);
+
+SET @has_model_settings_user_id = (
+  SELECT COUNT(*)
+  FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'model_settings'
+    AND COLUMN_NAME = 'user_id'
+);
+
+SET @insert_model_settings_default = IF(
+  @has_model_settings_user_id > 0,
+  "INSERT INTO model_settings (id, user_id, api_timeout, log_level)
+   SELECT 1, @admin_id, 30, 'info'
+   WHERE NOT EXISTS (SELECT 1 FROM model_settings WHERE id = 1)",
+  "INSERT INTO model_settings (id, api_timeout, log_level)
+   SELECT 1, 30, 'info'
+   WHERE NOT EXISTS (SELECT 1 FROM model_settings WHERE id = 1)"
+);
+PREPARE stmt_insert_model_settings_default FROM @insert_model_settings_default;
+EXECUTE stmt_insert_model_settings_default;
+DEALLOCATE PREPARE stmt_insert_model_settings_default;
 
 SET @has_models_is_default = (
   SELECT COUNT(*)

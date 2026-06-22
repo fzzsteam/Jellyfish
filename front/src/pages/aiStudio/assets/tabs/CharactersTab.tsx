@@ -9,6 +9,7 @@ export function CharactersTab() {
     <AssetTypeTab
       label="角色"
       tabKey="character"
+      createBlockedMessage="角色属于项目，请前往项目工作台新建角色"
       listAssets={async ({ q, page, pageSize }) => {
         const res = await StudioEntitiesApi.list('character', { q: q ?? null, page, pageSize })
         return { items: (res.data?.items ?? []) as any[], total: res.data?.pagination.total ?? 0 }

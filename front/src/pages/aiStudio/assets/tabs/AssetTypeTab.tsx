@@ -39,6 +39,7 @@ export function AssetTypeTab({
   updateAsset,
   deleteAsset,
   onEditAsset,
+  createBlockedMessage,
 }: {
   label: string
   tabKey: 'scene' | 'prop' | 'costume' | 'character'
@@ -47,6 +48,7 @@ export function AssetTypeTab({
   updateAsset: (id: string, payload: AssetMutationPayload) => Promise<StudioAssetLike>
   deleteAsset: (id: string) => Promise<void>
   onEditAsset?: (asset: StudioAssetLike) => void
+  createBlockedMessage?: string
 }) {
   const { defaultVisualStyle, getDefaultStyle } = useProjectStyleOptions()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -108,6 +110,10 @@ export function AssetTypeTab({
 
   /** 创建一个最小资产草稿并打开详情编辑页，让基础信息只在最终编辑页维护。 */
   const openCreate = async () => {
+    if (createBlockedMessage) {
+      message.info(createBlockedMessage)
+      return
+    }
     setCreating(true)
     try {
       const created = normalizeAsset(
