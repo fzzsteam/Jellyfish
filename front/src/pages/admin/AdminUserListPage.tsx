@@ -3,7 +3,7 @@ import type React from 'react'
 import { Button, Card, Form, Input, Modal, Space, Switch, Table, Tag, message } from 'antd'
 import { Link } from 'react-router-dom'
 import { AdminService } from '../../services/generated'
-import type { UserAdminRead } from '../../services/generated'
+import type { PointsSummaryRead, UserAdminRead } from '../../services/generated'
 import { useAuthStore } from '../../store/useAuthStore'
 
 /** 管理员用户列表页：展示全部用户，支持创建、启用/禁用、重置密码。 */
@@ -12,6 +12,8 @@ const AdminUserListPage: React.FC = () => {
   const [loading, setLoading] = useState(false)
   const [creating, setCreating] = useState(false)
   const [form] = Form.useForm()
+  // 各用户积分摘要：key=userId，value=PointsSummaryRead。加载用户后并行拉取。
+  const [pointsMap, setPointsMap] = useState<Record<string, PointsSummaryRead>>({})
 
   // 当前登录管理员：用于在列表里禁用"重置自己"
   const authUser = useAuthStore((state) => state.user)
@@ -24,7 +26,22 @@ const AdminUserListPage: React.FC = () => {
     setLoading(true)
     try {
       const res = await AdminService.listUsersApiV1AdminUsersGet({ page: 1, pageSize: 100 })
-      setUsers(res.data?.items ?? [])
+      const items = res.data?.items ?? []
+      setUsers(items)
+      // 并行拉取每个用户的积分摘要，失败不阻塞列表渲染。
+      const results = await Promise.all(
+        items.map((u) =>
+          AdminService.getUserPointsApiV1AdminUsersUserIdPointsGet({ userId: u.id })
+            .then((r) => r.data ?? null)
+            .catch(() => null),
+        ),
+      )
+      const next: Record<string, PointsSummaryRead> = {}
+      items.forEach((u, i) => {
+        const p = results[i]
+        if (p) next[u.id] = p
+      })
+      setPointsMap(next)
     } finally {
       setLoading(false)
     }
@@ -109,6 +126,15 @@ const AdminUserListPage: React.FC = () => {
       title: '状态',
       dataIndex: 'is_active',
       render: (v: boolean) => (v ? <Tag color="green">启用</Tag> : <Tag color="red">禁用</Tag>),
+    },
+    {
+      // 积分摘要列：可用/冻结；尚未加载到时显示 '—'。
+      title: '积分(可用/冻结)',
+      key: 'points',
+      render: (_: unknown, u: UserAdminRead) => {
+        const p = pointsMap[u.id]
+        return p ? `${p.available} / ${p.frozen}` : '—'
+      },
     },
     {
       title: '操作',

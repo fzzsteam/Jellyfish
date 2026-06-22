@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -105,6 +106,7 @@ class PointTransactionRead(BaseModel):
     pricing_snapshot: dict[str, Any] | None = Field(None, description="计价快照")
     remark: str | None = Field(None, description="备注")
     created_by: str | None = Field(None, description="操作人")
+    created_at: datetime = Field(..., description="流水发生时间")
 
 
 class PointsRechargeRequest(BaseModel):

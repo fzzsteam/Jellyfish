@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Layout, Menu, theme, Dropdown, Space, Avatar } from 'antd'
+import { Layout, Menu, theme, Dropdown, Space, Avatar, Tooltip } from 'antd'
 import {
   UserOutlined,
   FolderOutlined,
@@ -7,6 +7,7 @@ import {
   FileTextOutlined,
   ApiOutlined,
   TeamOutlined,
+  WalletOutlined,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
@@ -15,6 +16,8 @@ import { useTranslation } from 'react-i18next'
 import { TaskCenter } from '../pages/aiStudio/components/TaskCenter'
 import { TaskRuntimeProvider } from '../pages/aiStudio/components/TaskRuntimeProvider'
 import ChangePasswordModal from '../components/ChangePasswordModal'
+import { PointsService } from '../services/generated'
+import type { PointsSummaryRead } from '../services/generated'
 
 const { Header, Sider, Content } = Layout
 
@@ -28,6 +31,8 @@ const MainLayout: React.FC = () => {
   const authUser = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
   const [passwordOpen, setPasswordOpen] = useState(false)
+  // 当前用户积分摘要，用于顶部"可用 X"徽标。仅在登录后拉取一次。
+  const [points, setPoints] = useState<PointsSummaryRead | null>(null)
 
   const selectedKeys = useMemo(() => {
     if (location.pathname === '/projects' || location.pathname.startsWith('/projects/')) return ['projects']
@@ -36,9 +41,21 @@ const MainLayout: React.FC = () => {
     if (location.pathname.startsWith('/files')) return ['files']
     if (location.pathname.startsWith('/agents')) return ['agents']
     if (location.pathname.startsWith('/models')) return ['models']
+    if (location.pathname.startsWith('/points')) return ['points']
     if (location.pathname.startsWith('/admin')) return ['admin-users']
     return []
   }, [location.pathname])
+
+  // 登录后拉取一次当前用户积分摘要，用于顶部徽标展示。
+  useEffect(() => {
+    if (!authUser) {
+      setPoints(null)
+      return
+    }
+    PointsService.getMyPointsApiV1PointsMeGet({})
+      .then((r) => setPoints(r.data ?? null))
+      .catch(() => setPoints(null))
+  }, [authUser])
 
   // 从 URL 提取项目 / 章节上下文，用于顶部导航按钮
   const pathSegments = useMemo(
@@ -163,6 +180,11 @@ const MainLayout: React.FC = () => {
       key: 'models',
       icon: <ApiOutlined />,
       label: <Link to="/models">模型管理</Link>,
+    },
+    {
+      key: 'points',
+      icon: <WalletOutlined />,
+      label: <Link to="/points">积分明细</Link>,
     },
   ]
 
@@ -304,6 +326,14 @@ const MainLayout: React.FC = () => {
 
           {/* 用户信息 */}
           <Space size="middle" className="px-4 shrink-0">
+            {points && (
+              <Tooltip title={`可用 ${points.available} / 冻结 ${points.frozen} / 余额 ${points.balance}`}>
+                <Link to="/points" className="flex items-center gap-1 text-sm text-gray-700 hover:text-primary">
+                  <WalletOutlined />
+                  <span>可用 {points.available}</span>
+                </Link>
+              </Tooltip>
+            )}
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
               <div className="flex items-center gap-2 cursor-pointer">
                 <Avatar size={32} icon={<UserOutlined />} />

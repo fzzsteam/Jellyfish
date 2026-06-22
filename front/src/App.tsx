@@ -18,6 +18,7 @@ import VideoEditor from './pages/aiStudio/editor/VideoEditor'
 import AgentManagement from './pages/aiStudio/agents/AgentManagement'
 import AgentEdit from './pages/aiStudio/agents/AgentEdit.tsx'
 import ModelManagement from './pages/aiStudio/models/ModelManagement'
+import PointsPage from './pages/points/PointsPage'
 import { ChapterShotsPage } from './pages/aiStudio/shots/ChapterShotsPage'
 import { ChapterShotEditPage } from './pages/aiStudio/shots/ChapterShotEditPage'
 import LoginPage from './pages/auth/LoginPage'
@@ -57,6 +58,7 @@ const App: React.FC = () => {
           <Route path="agents/:id/edit" element={<AgentEdit />} />
           <Route path="agents" element={<AgentManagement />} />
           <Route path="models" element={<ModelManagement />} />
+          <Route path="points" element={<PointsPage />} />
           <Route element={<AdminRoute />}>
             <Route path="admin/users" element={<AdminUserListPage />} />
             <Route path="admin/users/:id" element={<AdminUserDetailPage />} />

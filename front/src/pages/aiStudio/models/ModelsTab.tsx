@@ -3,6 +3,7 @@ import {
   Alert,
   Layout,
   Input,
+  InputNumber,
   Button,
   Table,
   Tag,
@@ -199,6 +200,7 @@ export default function ModelsTab() {
             provider_id: values.provider_id,
             description: values.description ?? null,
             params,
+            unit_points: values.unit_points ?? null,
           },
         })
         message.success('模型已更新')
@@ -216,6 +218,7 @@ export default function ModelsTab() {
             provider_id: values.provider_id,
             description: values.description,
             params,
+            unit_points: values.unit_points,
           },
         })
         message.success('模型已添加')
@@ -254,10 +257,11 @@ export default function ModelsTab() {
         provider_id: m.provider_id,
         description: m.description,
         params: JSON.stringify(m.params ?? {}, null, 2),
+        unit_points: m.unit_points,
       })
     } else {
       form.resetFields()
-      form.setFieldsValue({ category: 'text' })
+      form.setFieldsValue({ category: 'text', unit_points: 0 })
     }
     setModelModalOpen(true)
   }
@@ -272,6 +276,7 @@ export default function ModelsTab() {
       provider_id: source.provider_id,
       description: source.description ?? '',
       params: JSON.stringify(source.params ?? {}, null, 2),
+      unit_points: source.unit_points,
     })
     setModelModalOpen(true)
   }
@@ -299,6 +304,18 @@ export default function ModelsTab() {
       key: 'provider_id',
       width: 120,
       render: (id: string) => getProviderName(id),
+    },
+    {
+      // 积分单价列：按模型类别展示单位后缀（次/张/秒），未配置时显示 '—'。
+      title: '积分单价',
+      dataIndex: 'unit_points',
+      key: 'unit_points',
+      width: 110,
+      render: (v: number | null | undefined, record: ModelRead) => {
+        if (v === null || v === undefined) return '—'
+        const suffix = record.category === 'text' ? '积分/次' : record.category === 'image' ? '积分/张' : record.category === 'video' ? '积分/秒' : ''
+        return suffix ? `${v} ${suffix}` : String(v)
+      },
     },
     {
       title: '参数',
@@ -628,6 +645,22 @@ export default function ModelsTab() {
                 <div>{getProviderName(selectedModel.provider_id)}</div>
               </div>
               <div>
+                <div className="text-sm text-gray-500 mb-1">积分单价</div>
+                <div>
+                  {selectedModel.unit_points !== null && selectedModel.unit_points !== undefined
+                    ? `${selectedModel.unit_points} ${
+                        selectedModel.category === 'text'
+                          ? '积分/次'
+                          : selectedModel.category === 'image'
+                            ? '积分/张'
+                            : selectedModel.category === 'video'
+                              ? '积分/秒'
+                              : '积分'
+                      }`
+                    : '—'}
+                </div>
+              </div>
+              <div>
                 <div className="text-sm text-gray-500 mb-1">描述</div>
                 <div className="text-gray-700 text-sm">{selectedModel.description || '—'}</div>
               </div>
@@ -663,6 +696,26 @@ export default function ModelsTab() {
                 <Tag color={categoryColorMap[selectedModel.category]}>
                   {categoryLabelMap[selectedModel.category]}
                 </Tag>
+              </div>
+              <div>
+                <div className="text-sm text-gray-500 mb-1">关联供应商</div>
+                <div>{getProviderName(selectedModel.provider_id)}</div>
+              </div>
+              <div>
+                <div className="text-sm text-gray-500 mb-1">积分单价</div>
+                <div>
+                  {selectedModel.unit_points !== null && selectedModel.unit_points !== undefined
+                    ? `${selectedModel.unit_points} ${
+                        selectedModel.category === 'text'
+                          ? '积分/次'
+                          : selectedModel.category === 'image'
+                            ? '积分/张'
+                            : selectedModel.category === 'video'
+                              ? '积分/秒'
+                              : '积分'
+                      }`
+                    : '—'}
+                </div>
               </div>
               <Space>
                 <Button
@@ -728,6 +781,28 @@ export default function ModelsTab() {
               message={unsupportedProviderWarning}
             />
           )}
+          {/* 积分单价：单位随类别变化（text=次/image=张/video=秒），整数、最小 0。 */}
+          <Form.Item
+            name="unit_points"
+            label="积分单价"
+            tooltip="该模型每次调用的积分计费单价"
+          >
+            <InputNumber
+              min={0}
+              step={1}
+              precision={0}
+              style={{ width: '100%' }}
+              addonAfter={
+                selectedFormCategory === 'text'
+                  ? '积分/次'
+                  : selectedFormCategory === 'image'
+                    ? '积分/张'
+                    : selectedFormCategory === 'video'
+                      ? '积分/秒'
+                      : '积分'
+              }
+            />
+          </Form.Item>
           <Form.Item name="params" label="参数（JSON）">
             <Input.TextArea rows={3} placeholder='{"max_tokens": 4096, "temperature": 0.7}' />
           </Form.Item>
