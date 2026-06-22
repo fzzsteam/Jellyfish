@@ -211,6 +211,21 @@ async def cancel_task(
         if rec is None:
             raise HTTPException(status_code=404, detail=entity_not_found("Task"))
         effective_immediately = True
+    # 取消立即生效时，worker 不会触达终态结算路径 → 在此显式解冻冻结积分。
+    # billing_id 为空（未计费任务）则无操作；BillingStateError 表示 worker 可能已消费/解冻
+    # （幂等互斥），吞掉即可。unfreeze_frozen 内部自行 COMMIT。
+    if effective_immediately and getattr(owned, "billing_id", None):
+        from app.services.points import BillingStateError, unfreeze_frozen
+
+        try:
+            await unfreeze_frozen(
+                db,
+                user_id=current_user.id,
+                billing_id=owned.billing_id,
+                remark=f"cancelled: {body.reason or ''}".strip(),
+            )
+        except BillingStateError:
+            pass
     return success_response(
         TaskCancelRead(
             task_id=rec.id,

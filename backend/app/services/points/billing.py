@@ -24,7 +24,6 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import async_session_maker
-from app.core.db_sync import sync_session_maker
 from app.models.llm import Model, ModelCategoryKey
 from app.models.points import PointTransaction, PointTransactionType
 from app.schemas.points import PointsQuoteResponse, PointsSummaryRead
@@ -303,71 +302,101 @@ async def freeze_for_task(
     )
 
 
-def settle_task_billing_sync(task_id: str) -> None:
-    """Celery worker 统一结算钩子：按任务终态消费或解冻冻结积分。
+async def settle_task_billing_async(task_id: str) -> None:
+    """异步上下文内直接结算：读取任务终态并消费/解冻冻结积分。
+
+    为什么存在：
+        merge/variant（`run_merge_task` / `run_variant_task`）通过 `asyncio.create_task`
+        在**已运行的事件循环**内执行，不能调用 `asyncio.run(...)`（会抛
+        `RuntimeError: asyncio.run() cannot be called from a running event loop`）。
+        本函数是「异步侧结算核心」，供这些进程内任务在每个终态分支直接 `await`。
 
     设计要点：
-    - **幂等**：账本 `consume_frozen` / `unfreeze_frozen` 自身幂等（同 billing_id 重复只入账一次），
-      本函数重复调用安全；终态互斥（已扣减不可再解冻）由账本保证。
-    - **零行为变更**：`billing_id is None`（存量任务或未计费任务）直接返回，不触达账本。
-    - **非终态跳过**：仅 `succeeded`/`failed`/`cancelled` 触发结算；`pending`/`running`/`streaming` 跳过。
-    - **同步桥**：Celery worker 在同步上下文运行，本函数用 `asyncio.run` 启动事件循环调用
-      异步账本（与 `AbstractAsyncDelegatingExecutor.run` 同款桥接模式）。
-    - **失败不阻断**：结算异常仅记录日志后吞掉，不阻断任务流程；Task 7 的 Celery Beat 补偿会兜底。
+    - **单一 async 会话**：开一个 `async_session_maker()` 会话，读任务行后立即在同一会话内
+      调 `consume_frozen` / `unfreeze_frozen`（账本内部自行 COMMIT）。早退（任务不存在 /
+        `billing_id is None` / 非终态）发生在调用账本之前，避免无谓开事务。
+    - **幂等**：账本 `consume_frozen` / `unfreeze_frozen` 自身幂等（同 billing_id 重复只入账
+      一次）；终态互斥（已扣减不可再解冻）由账本保证。
+    - **零行为变更**：`billing_id is None`（存量任务或未计费任务）直接返回。
+    - **非终态跳过**：仅 `succeeded`/`failed`/`cancelled` 触发结算。
+    - **失败不阻断**：`BillingStateError`（幂等/互斥冲突）视为良性竞争记 warning 后吞掉；
+      其它异常记 exception 后吞掉（不阻断任务流程），Task 7 的 Celery Beat 补偿兜底。
 
-    由 `app/tasks/execute_task.py::run_task_celery` 的 `finally` 调用，确保任务无论成功/失败/
-    取消都会触发结算。
+    Args:
+        task_id: 任务行 ID。
+
+    由 `run_merge_task` / `run_variant_task` 终态点（成功/失败/取消共 5 个分支）直接 `await`。
     """
     from app.models.task import GenerationTask, GenerationTaskStatus
+    from app.services.points import BillingStateError, consume_frozen, unfreeze_frozen
 
-    with sync_session_maker() as db:
-        row = db.get(GenerationTask, task_id)
+    async with async_session_maker() as db:
+        row = await db.get(GenerationTask, task_id)
         if row is None or not row.billing_id:
             return  # 任务不存在或未计费：零行为变更
         status = row.status
         billing_id = row.billing_id
         user_id = row.user_id
 
-    # 仅终态结算（status 列存的是枚举值字符串，GenerationTaskStatus 是 str Enum）
-    terminal_ok = status in (
-        GenerationTaskStatus.succeeded.value,
-        GenerationTaskStatus.failed.value,
-        GenerationTaskStatus.cancelled.value,
-    )
-    if not terminal_ok:
-        return  # 非终态（pending/running/streaming）不结算
+        # 仅终态结算（status 列存的是枚举值字符串，GenerationTaskStatus 是 str Enum）
+        if status not in (
+            GenerationTaskStatus.succeeded.value,
+            GenerationTaskStatus.failed.value,
+            GenerationTaskStatus.cancelled.value,
+        ):
+            return  # 非终态（pending/running/streaming）不结算
 
-    try:
-        asyncio.run(_settle_async(user_id=user_id, billing_id=billing_id, status=status))
-    except Exception:  # noqa: BLE001 - 结算失败不阻断任务流程，补偿任务(Task 7)兜底
-        logger.exception(
-            "settle_task_billing_sync failed for task_id=%s billing_id=%s", task_id, billing_id
-        )
-
-
-async def _settle_async(*, user_id: str, billing_id: str, status: str) -> None:
-    """异步侧结算：成功→consume，失败/取消→unfreeze。
-
-    `consume_frozen` / `unfreeze_frozen` 自身幂等且互斥（同 billing_id 重复或状态冲突抛
-    `BillingStateError`）；此处吞掉该异常并记日志后继续，保证重复结算不会污染流程。
-    """
-    from app.models.task import GenerationTaskStatus
-    from app.services.points import BillingStateError, consume_frozen, unfreeze_frozen
-
-    # consume_frozen / unfreeze_frozen 内部自行 COMMIT,此处无需显式 commit。
-    async with async_session_maker() as db:
         try:
             if status == GenerationTaskStatus.succeeded.value:
+                # consume_frozen / unfreeze_frozen 内部自行 COMMIT。
                 await consume_frozen(db, user_id=user_id, billing_id=billing_id)
             else:
                 await unfreeze_frozen(
                     db, user_id=user_id, billing_id=billing_id, remark=f"task {status}"
                 )
         except BillingStateError:
-            # 幂等/互斥冲突（已结算过）：记录即可，不阻断
+            # 幂等/互斥冲突（已结算过）：良性 mutex race，记 warning 后吞掉，不阻断任务流程。
             logger.warning(
-                "settle idempotent skip for billing_id=%s status=%s", billing_id, status
+                "settle idempotent skip for task_id=%s billing_id=%s status=%s",
+                task_id,
+                billing_id,
+                status,
             )
+        except Exception:  # noqa: BLE001 - 其它异常：记日志后吞掉，Task 7 补偿兜底
+            logger.exception(
+                "settle_task_billing_async failed for task_id=%s billing_id=%s",
+                task_id,
+                billing_id,
+            )
+
+
+def settle_task_billing_sync(task_id: str) -> None:
+    """Celery worker 统一结算钩子（同步入口）：委托异步核心 `settle_task_billing_async`。
+
+    为什么存在：
+        Celery worker 在同步上下文运行（`run_task_celery` 的 finally），需要一个同步入口
+        桥接到异步账本。本函数是「同步侧薄包装」：用 `asyncio.run` 启动事件循环驱动
+        异步核心（与 `AbstractAsyncDelegatingExecutor.run` 同款桥接模式）。
+
+    设计要点：
+    - **薄包装**：所有读任务行 / 终态判定 / 账本调用逻辑都收敛到
+      `settle_task_billing_async`，本函数不再重复 status-reading 逻辑，避免双份维护。
+    - **失败不阻断**：`asyncio.run` 抛出的任何异常（含异步核心内部已吞掉的之外）仅记录
+      日志后吞掉，不阻断 Celery 任务流程；Task 7 的 Celery Beat 补偿兜底。
+
+    由 `app/tasks/execute_task.py::run_task_celery` 的 `finally` 调用，确保任务无论成功/失败/
+    取消都会触发结算。
+
+    **不要在 asyncio.create_task 启动的任务里调用本函数**：会触发
+    `asyncio.run() cannot be called from a running event loop`。进程内任务（merge/variant）
+    请直接 `await settle_task_billing_async(task_id)`。
+    """
+    try:
+        asyncio.run(settle_task_billing_async(task_id))
+    except Exception:  # noqa: BLE001 - 结算失败不阻断任务流程，补偿任务(Task 7)兜底
+        logger.exception(
+            "settle_task_billing_sync failed for task_id=%s", task_id
+        )
 
 
 async def quote_points(

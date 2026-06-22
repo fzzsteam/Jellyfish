@@ -297,6 +297,39 @@ async def _resolve_related_shot_id(
     return image_row.shot_detail_id
 
 
+async def _find_active_image_task(
+    db: AsyncSession,
+    *,
+    relation_type: str,
+    relation_entity_id: str,
+) -> GenerationTask | None:
+    """按业务关联查询任意活动中的图片任务。
+
+    为什么需要：5b 起对图片任务新增「复用进行中任务」语义，避免对同一资产槽位
+    重复冻结积分/创建任务。逻辑镜像 `script_processing_tasks._find_active_task`：
+    仅判定是否已存在运行中的同类任务，无需排序。
+    """
+    from app.models.task import GenerationTask, GenerationTaskStatus
+    from sqlalchemy import select
+
+    active_statuses = (
+        GenerationTaskStatus.pending,
+        GenerationTaskStatus.running,
+        GenerationTaskStatus.streaming,
+    )
+    stmt = (
+        select(GenerationTask)
+        .join(GenerationTaskLink, GenerationTaskLink.task_id == GenerationTask.id)
+        .where(
+            GenerationTaskLink.relation_type == relation_type,
+            GenerationTaskLink.relation_entity_id == relation_entity_id,
+            GenerationTask.status.in_(active_statuses),
+        )
+        .limit(1)
+    )
+    return (await db.execute(stmt)).scalars().first()
+
+
 async def create_image_task_and_link(
     *,
     db: AsyncSession,
@@ -310,8 +343,41 @@ async def create_image_task_and_link(
     resolution_profile: str | None = None,
     purpose: str = "generic",
     render_context: dict | None = None,
+    quote_token: str | None = None,
 ) -> str:
-    """创建图片生成任务（归属 user_id），并建立任务关联；默认模型按用户解析。"""
+    """创建图片生成任务（归属 user_id），并建立任务关联；默认模型按用户解析。
+
+    积分计费（Task 5b）：
+    - `quote_token` 非空时，先调用 `freeze_for_task` 冻结积分，并把 `billing_id`
+      透传给 `TaskManager.create`；冻结失败（余额不足/报价失效）抛 `PointsDomainError`
+      直接上抛到路由层，任务不会被创建。
+    - `quote_token` 为空时跳过冻结（向后兼容：存量内部调用方/未计费场景）。
+    - 新增「复用进行中任务」检查：同一 `(relation_type, relation_entity_id)` 已有
+      pending/running/streaming 任务时，直接返回该任务 ID，不冻结积分也不创建新任务。
+    """
+    # 1. 复用检查：已有运行中同类任务 → 直接返回，不冻结/不创建。
+    existing = await _find_active_image_task(
+        db, relation_type=relation_type, relation_entity_id=relation_entity_id
+    )
+    if existing is not None:
+        return existing.id
+
+    # 2. 冻结积分（仅在传入 quote_token 时；freeze_for_task 内部已 COMMIT）。
+    billing_id: str | None = None
+    if quote_token:
+        from app.models.llm import ModelCategoryKey
+        from app.services.points.billing import freeze_for_task
+
+        frozen = await freeze_for_task(
+            db,
+            user_id=user_id,
+            quote_token=quote_token,
+            business_type="image_generation",
+            category=ModelCategoryKey.image,
+            model_id=model_id,
+        )
+        billing_id = frozen.billing_id
+
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
 
@@ -337,13 +403,22 @@ async def create_image_task_and_link(
     if render_context:
         run_args["render_context"] = render_context
 
-    task_record = await tm.create(
-        task=_CreateOnlyTask(),
-        mode=DeliveryMode.async_polling,
-        user_id=user_id,
-        task_kind="image_generation",
-        run_args=run_args,
-    )
+    try:
+        task_record = await tm.create(
+            task=_CreateOnlyTask(),
+            mode=DeliveryMode.async_polling,
+            user_id=user_id,
+            task_kind="image_generation",
+            run_args=run_args,
+            billing_id=billing_id,
+        )
+    except Exception:
+        # 任务创建失败：按 5a 契约回滚冻结，避免冻结悬挂。
+        if billing_id:
+            from app.services.points import unfreeze_frozen
+
+            await unfreeze_frozen(db, user_id=user_id, billing_id=billing_id)
+        raise
 
     db.add(
         GenerationTaskLink(

@@ -51,6 +51,21 @@ from app.services.studio.image_task_runner import create_image_task_and_link as 
 router = APIRouter()
 
 
+def _require_quote_token(token: str | None) -> str:
+    """图片创建任务接口强制要求 quote_token（Task 5b 冻结积分）。
+
+    为什么在路由层强制：service 层 `create_image_task_and_link` 的 quote_token 形参默认
+    None（向后兼容存量内部调用与未计费场景）；只有面向前端的创建任务接口才必须冻结积分，
+    在此补一道必填校验，避免漏传导致任务免计费。
+    """
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="quote_token is required",
+        )
+    return token
+
+
 class StudioImageTaskRequest(BaseModel):
     """Studio 专用图片任务请求体：可选模型 ID，不传则用默认图片模型；供应商由模型反查。
 
@@ -78,6 +93,10 @@ class StudioImageTaskRequest(BaseModel):
     images: list[str] = Field(
         default_factory=list,
         description="参考图 file_id 列表（可多张，顺序有效）。创建任务接口会基于 file_id 从数据中解析为参考图",
+    )
+    quote_token: str | None = Field(
+        None,
+        description="积分试算凭证（POST /points/quote 签发）；创建任务接口必填，Task 5b 冻结积分",
     )
 
 
@@ -111,6 +130,10 @@ class ShotFrameImageTaskRequest(BaseModel):
     resolution_profile: ImageResolutionProfile | None = Field(
         "standard",
         description="关键帧输出分辨率档位，默认 standard",
+    )
+    quote_token: str | None = Field(
+        None,
+        description="积分试算凭证（POST /points/quote 签发）；创建任务接口必填，Task 5b 冻结积分",
     )
 
 
@@ -189,6 +212,7 @@ async def create_actor_image_generation_task(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="prompt is required for actor generation",
         )
+    quote_token = _require_quote_token(body.quote_token)
     submission = await _build_actor_image_submission_payload_service(
         db,
         actor_id=actor_id,
@@ -205,6 +229,7 @@ async def create_actor_image_generation_task(
         relation_entity_id=submission.relation_entity_id,
         prompt=submission.prompt,
         images=ref_images if ref_images else None,
+        quote_token=quote_token,
     )
     return created_response(TaskCreated(task_id=task_id))
 
@@ -257,6 +282,7 @@ async def create_asset_image_generation_task(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="prompt is required for asset image generation",
         )
+    quote_token = _require_quote_token(body.quote_token)
     submission = await _build_asset_image_submission_payload_service(
         db,
         asset_type=asset_type,
@@ -275,6 +301,7 @@ async def create_asset_image_generation_task(
         relation_entity_id=submission.relation_entity_id,
         prompt=submission.prompt,
         images=ref_images if ref_images else None,
+        quote_token=quote_token,
     )
     return created_response(TaskCreated(task_id=task_id))
 
@@ -327,6 +354,7 @@ async def create_character_image_generation_task(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="prompt is required for character image generation",
         )
+    quote_token = _require_quote_token(body.quote_token)
     submission = await _build_character_image_submission_payload_service(
         db,
         character_id=character_id,
@@ -343,6 +371,7 @@ async def create_character_image_generation_task(
         relation_entity_id=submission.relation_entity_id,
         prompt=submission.prompt,
         images=ref_images if ref_images else None,
+        quote_token=quote_token,
     )
     return created_response(TaskCreated(task_id=task_id))
 
@@ -389,6 +418,7 @@ async def create_shot_frame_image_generation_task(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="prompt is required for shot frame generation",
         )
+    quote_token = _require_quote_token(body.quote_token)
     shot_detail = await db.get(ShotDetail, shot_id)
     if shot_detail is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ShotDetail not found")
@@ -457,6 +487,7 @@ async def create_shot_frame_image_generation_task(
         resolution_profile=body.resolution_profile,
         purpose="video_reference",
         render_context=submission_extra.get("render_context"),
+        quote_token=quote_token,
     )
     return created_response(TaskCreated(task_id=task_id))
 

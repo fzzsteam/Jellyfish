@@ -87,6 +87,18 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/script-processing", tags=["script-processing"])
 
 
+def _require_quote_token(token: str | None) -> str:
+    """异步任务接口强制要求 quote_token（Task 5b 冻结积分）。
+
+    为什么在路由层强制：service 层 creator 的 quote_token 形参默认 None（向后兼容
+    存量内部调用与未计费场景）；只有真正面向前端的异步任务接口才必须冻结积分，
+    故在此补一道必填校验，避免漏传导致任务免计费。
+    """
+    if not token:
+        raise HTTPException(status_code=400, detail="quote_token is required")
+    return token
+
+
 # ============================================================================
 # 1. ScriptDividerAgent - 剧本分镜
 # ============================================================================
@@ -99,6 +111,10 @@ class ScriptDividerRequest(BaseModel):
         None,
         description="章节 ID（write_to_db=true 时必填）",
         min_length=1,
+    )
+    quote_token: str | None = Field(
+        None,
+        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
     )
 
 
@@ -115,6 +131,7 @@ async def divide_script_async(
 ) -> ApiResponse[AsyncTaskCreateRead]:
     if not request.chapter_id:
         raise HTTPException(status_code=400, detail=required_field("chapter_id", when="divide-async"))
+    quote_token = _require_quote_token(request.quote_token)
 
     task_info = await create_divide_task(
         db,
@@ -122,6 +139,7 @@ async def divide_script_async(
         chapter_id=request.chapter_id,
         script_text=request.script_text,
         write_to_db=request.write_to_db,
+        quote_token=quote_token,
     )
     await db.commit()
     if not task_info.reused:
@@ -216,6 +234,10 @@ class EntityMergerRequest(BaseModel):
         None,
         description="冲突解决建议列表（可选；用于冲突重试合并）",
     )
+    quote_token: str | None = Field(
+        None,
+        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+    )
 
 
 @router.post(
@@ -233,6 +255,7 @@ async def merge_entities_async(
         chapter_id=request.chapter_id,
         project_id=request.project_id,
     )
+    quote_token = _require_quote_token(request.quote_token)
     task_info = await create_merge_task(
         db,
         user_id=current_user.id,
@@ -242,6 +265,7 @@ async def merge_entities_async(
         script_division=request.script_division,
         previous_merge=request.previous_merge,
         conflict_resolutions=request.conflict_resolutions,
+        quote_token=quote_token,
     )
     await db.commit()
     if not task_info.reused:
@@ -327,6 +351,10 @@ class VariantAnalysisRequest(BaseModel):
         None,
         description="脚本分镜结果（可选；ScriptDivisionResult 序列化），用于章节/段落分组",
     )
+    quote_token: str | None = Field(
+        None,
+        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+    )
 
 
 @router.post(
@@ -344,6 +372,7 @@ async def analyze_variants_async(
         chapter_id=request.chapter_id,
         project_id=request.project_id,
     )
+    quote_token = _require_quote_token(request.quote_token)
     task_info = await create_variant_task(
         db,
         user_id=current_user.id,
@@ -351,6 +380,7 @@ async def analyze_variants_async(
         merged_library=request.merged_library,
         all_shot_extractions=request.all_shot_extractions,
         script_division=request.script_division,
+        quote_token=quote_token,
     )
     await db.commit()
     if not task_info.reused:
@@ -415,6 +445,10 @@ class ScriptConsistencyCheckRequest(BaseModel):
     project_id: str | None = Field(None, description="项目 ID（异步任务关联可选）")
     chapter_id: str | None = Field(None, description="章节 ID（异步任务关联可选）")
     script_text: str = Field(..., description="完整剧本文本", min_length=1)
+    quote_token: str | None = Field(
+        None,
+        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+    )
 
 
 @router.post(
@@ -432,11 +466,13 @@ async def check_consistency_async(
         chapter_id=request.chapter_id,
         project_id=request.project_id,
     )
+    quote_token = _require_quote_token(request.quote_token)
     task_info = await create_consistency_task(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         script_text=request.script_text,
+        quote_token=quote_token,
     )
     await db.commit()
     if not task_info.reused:
@@ -499,6 +535,10 @@ class CharacterPortraitAnalysisRequest(BaseModel):
         description="原文人物上下文（可为空；用于提供额外背景，帮助判断缺失信息）",
     )
     character_description: str = Field(..., description="原文人物描述", min_length=1)
+    quote_token: str | None = Field(
+        None,
+        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+    )
 
 
 @router.post(
@@ -518,12 +558,14 @@ async def analyze_character_portrait_async(
         project_id=request.project_id,
         endpoint="analyze-character-portrait-async",
     )
+    quote_token = _require_quote_token(request.quote_token)
     task_info = await create_character_portrait_task(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         character_context=request.character_context,
         character_description=request.character_description,
+        quote_token=quote_token,
     )
     await db.commit()
     if not task_info.reused:
@@ -578,6 +620,10 @@ class PropInfoAnalysisRequest(BaseModel):
         description="原文道具上下文（可为空；用于提供额外背景，帮助判断缺失信息）",
     )
     prop_description: str = Field(..., description="原文道具描述", min_length=1)
+    quote_token: str | None = Field(
+        None,
+        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+    )
 
 
 @router.post(
@@ -597,12 +643,14 @@ async def analyze_prop_info_async(
         project_id=request.project_id,
         endpoint="analyze-prop-info-async",
     )
+    quote_token = _require_quote_token(request.quote_token)
     task_info = await create_prop_info_task(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         prop_context=request.prop_context,
         prop_description=request.prop_description,
+        quote_token=quote_token,
     )
     await db.commit()
     if not task_info.reused:
@@ -657,6 +705,10 @@ class SceneInfoAnalysisRequest(BaseModel):
         description="原文场景上下文（可为空；用于提供额外背景，帮助判断缺失信息）",
     )
     scene_description: str = Field(..., description="原文场景描述", min_length=1)
+    quote_token: str | None = Field(
+        None,
+        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+    )
 
 
 @router.post(
@@ -676,12 +728,14 @@ async def analyze_scene_info_async(
         project_id=request.project_id,
         endpoint="analyze-scene-info-async",
     )
+    quote_token = _require_quote_token(request.quote_token)
     task_info = await create_scene_info_task(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         scene_context=request.scene_context,
         scene_description=request.scene_description,
+        quote_token=quote_token,
     )
     await db.commit()
     if not task_info.reused:
@@ -736,6 +790,10 @@ class CostumeInfoAnalysisRequest(BaseModel):
         description="原文服装上下文（可为空；用于提供额外背景，帮助判断缺失信息）",
     )
     costume_description: str = Field(..., description="原文服装描述", min_length=1)
+    quote_token: str | None = Field(
+        None,
+        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+    )
 
 
 @router.post(
@@ -755,12 +813,14 @@ async def analyze_costume_info_async(
         project_id=request.project_id,
         endpoint="analyze-costume-info-async",
     )
+    quote_token = _require_quote_token(request.quote_token)
     task_info = await create_costume_info_task(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         costume_context=request.costume_context,
         costume_description=request.costume_description,
+        quote_token=quote_token,
     )
     await db.commit()
     if not task_info.reused:
@@ -811,6 +871,10 @@ class ScriptOptimizeRequest(BaseModel):
     chapter_id: str | None = Field(None, description="章节 ID（异步任务关联可选）")
     script_text: str = Field(..., description="原文剧本文本", min_length=1)
     consistency: dict[str, Any] = Field(..., description="一致性检查输出（ScriptConsistencyCheckResult 序列化）")
+    quote_token: str | None = Field(
+        None,
+        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+    )
 
 
 class ScriptSimplifyRequest(BaseModel):
@@ -819,6 +883,10 @@ class ScriptSimplifyRequest(BaseModel):
     project_id: str | None = Field(None, description="项目 ID（异步任务关联可选）")
     chapter_id: str | None = Field(None, description="章节 ID（异步任务关联可选）")
     script_text: str = Field(..., description="原文剧本文本", min_length=1)
+    quote_token: str | None = Field(
+        None,
+        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+    )
 
 
 @router.post(
@@ -837,12 +905,14 @@ async def optimize_script_async(
         project_id=request.project_id,
         endpoint="optimize-script-async",
     )
+    quote_token = _require_quote_token(request.quote_token)
     task_info = await create_script_optimization_task(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         script_text=request.script_text,
         consistency=request.consistency,
+        quote_token=quote_token,
     )
     await db.commit()
     if not task_info.reused:
@@ -925,11 +995,13 @@ async def simplify_script_async(
         project_id=request.project_id,
         endpoint="simplify-script-async",
     )
+    quote_token = _require_quote_token(request.quote_token)
     task_info = await create_script_simplification_task(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
         script_text=request.script_text,
+        quote_token=quote_token,
     )
     await db.commit()
     if not task_info.reused:
@@ -956,6 +1028,10 @@ class ScriptExtractRequest(BaseModel):
     script_division: dict[str, Any] = Field(..., description="分镜结果（ScriptDivisionResult 序列化）")
     consistency: dict[str, Any] | None = Field(None, description="一致性检查结果（可选；ScriptConsistencyCheckResult 序列化）")
     refresh_cache: bool = Field(False, description="是否跳过后端缓存并强制重新提取")
+    quote_token: str | None = Field(
+        None,
+        description="积分试算凭证（异步接口必填，Task 5b 冻结积分）；同步接口忽略",
+    )
 
 
 @router.post(
@@ -969,6 +1045,7 @@ async def extract_script_async(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[AsyncTaskCreateRead]:
+    quote_token = _require_quote_token(request.quote_token)
     task_info = await create_extract_task(
         db,
         user_id=current_user.id,
@@ -977,6 +1054,7 @@ async def extract_script_async(
         script_division=request.script_division,
         consistency=request.consistency,
         refresh_cache=request.refresh_cache,
+        quote_token=quote_token,
     )
     await db.commit()
     if not task_info.reused:

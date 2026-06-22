@@ -49,7 +49,7 @@ def test_create_actor_image_task_requires_prompt(client: TestClient) -> None:
     try:
         response = client.post(
             "/api/v1/studio/image-tasks/actors/actor-1/image-tasks",
-            json={"image_id": 1, "prompt": "   ", "images": []},
+            json={"image_id": 1, "prompt": "   ", "images": [], "quote_token": "qt-1"},
         )
     finally:
         app.dependency_overrides.clear()
@@ -109,7 +109,7 @@ def test_create_shot_frame_image_task_requires_prompt(client: TestClient) -> Non
     try:
         response = client.post(
             "/api/v1/studio/image-tasks/shot/shot-1/frame-image-tasks",
-            json={"frame_type": "first", "prompt": "   ", "target_ratio": "16:9", "images": []},
+            json={"frame_type": "first", "prompt": "   ", "target_ratio": "16:9", "images": [], "quote_token": "qt-1"},
         )
     finally:
         app.dependency_overrides.clear()
@@ -255,6 +255,7 @@ def test_create_shot_frame_image_task_renders_prompt_before_submit(client: TestC
                 "prompt": "陆远站在温室里",
                 "target_ratio": "9:16",
                 "resolution_profile": "standard",
+                "quote_token": "qt-1",
                 "images": [
                     {"type": "character", "id": "char-1", "name": "陆远", "file_id": "file-1"},
                 ],

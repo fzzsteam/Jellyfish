@@ -92,6 +92,50 @@ async def _cancel_if_requested(
     return True
 
 
+async def _freeze_for_script_task(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    quote_token: str | None,
+    business_type: str,
+) -> str | None:
+    """脚本类异步任务冻结积分的统一入口（Task 5b）。
+
+    为什么集中：11 个 creator 共用同一套「按 quote_token 冻结 + 失败回滚」逻辑，
+    集中到一处避免 11 份拷贝。脚本任务统一走默认文本模型，故 `category=text`、
+    `model_id=None`（报价单据内已绑定模型 ID，权威）。
+
+    返回：
+    - `quote_token` 为空 → 跳过冻结，返回 None（向后兼容：未计费/内部调用）。
+    - 冻结成功 → 返回 `billing_id`，调用方需透传到 `tm.create(billing_id=...)`，
+      且若 `tm.create` 后续失败必须调用 `unfreeze_frozen` 回滚（各 creator 自行处理）。
+    - 冻结失败 → `freeze_for_task` 抛 `PointsDomainError`，直接上抛到路由层。
+    """
+    if not quote_token:
+        return None
+    from app.models.llm import ModelCategoryKey
+    from app.services.points.billing import freeze_for_task
+
+    frozen = await freeze_for_task(
+        db,
+        user_id=user_id,
+        quote_token=quote_token,
+        business_type=business_type,
+        category=ModelCategoryKey.text,
+        model_id=None,
+    )
+    return frozen.billing_id
+
+
+async def _unfreeze_script_task(db: AsyncSession, *, user_id: str, billing_id: str | None) -> None:
+    """任务创建失败时按 5a 契约回滚冻结；billing_id 为空则无操作。"""
+    if not billing_id:
+        return
+    from app.services.points import unfreeze_frozen
+
+    await unfreeze_frozen(db, user_id=user_id, billing_id=billing_id)
+
+
 async def find_active_divide_task(
     db: AsyncSession,
     *,
@@ -136,6 +180,7 @@ async def create_divide_task(
     chapter_id: str,
     script_text: str,
     write_to_db: bool,
+    quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
     existing = await find_active_divide_task(db, chapter_id=chapter_id)
     if existing is not None:
@@ -148,6 +193,9 @@ async def create_divide_task(
             relation_entity_id=chapter_id,
         )
 
+    billing_id = await _freeze_for_script_task(
+        db, user_id=user_id, quote_token=quote_token, business_type=SCRIPT_DIVIDE_TASK_KIND
+    )
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
     run_args = {
@@ -155,13 +203,18 @@ async def create_divide_task(
         "script_text": script_text,
         "write_to_db": write_to_db,
     }
-    task_record = await tm.create(
-        task=_CreateOnlyTask(),
-        mode=DeliveryMode.async_polling,
-        user_id=user_id,
-        task_kind=SCRIPT_DIVIDE_TASK_KIND,
-        run_args=run_args,
-    )
+    try:
+        task_record = await tm.create(
+            task=_CreateOnlyTask(),
+            mode=DeliveryMode.async_polling,
+            user_id=user_id,
+            task_kind=SCRIPT_DIVIDE_TASK_KIND,
+            run_args=run_args,
+            billing_id=billing_id,
+        )
+    except Exception:
+        await _unfreeze_script_task(db, user_id=user_id, billing_id=billing_id)
+        raise
     db.add(
         GenerationTaskLink(
             task_id=task_record.id,
@@ -290,6 +343,7 @@ async def create_extract_task(
     script_division: dict,
     consistency: dict | None,
     refresh_cache: bool,
+    quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
     existing = await find_active_extract_task(db, chapter_id=chapter_id)
     if existing is not None:
@@ -302,6 +356,9 @@ async def create_extract_task(
             relation_entity_id=chapter_id,
         )
 
+    billing_id = await _freeze_for_script_task(
+        db, user_id=user_id, quote_token=quote_token, business_type=SCRIPT_EXTRACT_TASK_KIND
+    )
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
     run_args = {
@@ -311,13 +368,18 @@ async def create_extract_task(
         "consistency": consistency,
         "refresh_cache": refresh_cache,
     }
-    task_record = await tm.create(
-        task=_CreateOnlyTask(),
-        mode=DeliveryMode.async_polling,
-        user_id=user_id,
-        task_kind=SCRIPT_EXTRACT_TASK_KIND,
-        run_args=run_args,
-    )
+    try:
+        task_record = await tm.create(
+            task=_CreateOnlyTask(),
+            mode=DeliveryMode.async_polling,
+            user_id=user_id,
+            task_kind=SCRIPT_EXTRACT_TASK_KIND,
+            run_args=run_args,
+            billing_id=billing_id,
+        )
+    except Exception:
+        await _unfreeze_script_task(db, user_id=user_id, billing_id=billing_id)
+        raise
     db.add(
         GenerationTaskLink(
             task_id=task_record.id,
@@ -346,6 +408,7 @@ async def create_merge_task(
     script_division: dict | None,
     previous_merge: dict | None,
     conflict_resolutions: list[dict] | None,
+    quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
     existing = await find_active_merge_task(db, relation_entity_id=relation_entity_id)
     if existing is not None:
@@ -358,6 +421,9 @@ async def create_merge_task(
             relation_entity_id=relation_entity_id,
         )
 
+    billing_id = await _freeze_for_script_task(
+        db, user_id=user_id, quote_token=quote_token, business_type=SCRIPT_MERGE_TASK_KIND
+    )
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
     run_args = {
@@ -367,13 +433,18 @@ async def create_merge_task(
         "previous_merge": previous_merge,
         "conflict_resolutions": conflict_resolutions,
     }
-    task_record = await tm.create(
-        task=_CreateOnlyTask(),
-        mode=DeliveryMode.async_polling,
-        user_id=user_id,
-        task_kind=SCRIPT_MERGE_TASK_KIND,
-        run_args=run_args,
-    )
+    try:
+        task_record = await tm.create(
+            task=_CreateOnlyTask(),
+            mode=DeliveryMode.async_polling,
+            user_id=user_id,
+            task_kind=SCRIPT_MERGE_TASK_KIND,
+            run_args=run_args,
+            billing_id=billing_id,
+        )
+    except Exception:
+        await _unfreeze_script_task(db, user_id=user_id, billing_id=billing_id)
+        raise
     db.add(
         GenerationTaskLink(
             task_id=task_record.id,
@@ -398,6 +469,7 @@ async def create_consistency_task(
     user_id: str,
     relation_entity_id: str,
     script_text: str,
+    quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
     existing = await find_active_consistency_task(db, relation_entity_id=relation_entity_id)
     if existing is not None:
@@ -410,15 +482,23 @@ async def create_consistency_task(
             relation_entity_id=relation_entity_id,
         )
 
+    billing_id = await _freeze_for_script_task(
+        db, user_id=user_id, quote_token=quote_token, business_type=SCRIPT_CONSISTENCY_TASK_KIND
+    )
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
-    task_record = await tm.create(
-        task=_CreateOnlyTask(),
-        mode=DeliveryMode.async_polling,
-        user_id=user_id,
-        task_kind=SCRIPT_CONSISTENCY_TASK_KIND,
-        run_args={"script_text": script_text},
-    )
+    try:
+        task_record = await tm.create(
+            task=_CreateOnlyTask(),
+            mode=DeliveryMode.async_polling,
+            user_id=user_id,
+            task_kind=SCRIPT_CONSISTENCY_TASK_KIND,
+            run_args={"script_text": script_text},
+            billing_id=billing_id,
+        )
+    except Exception:
+        await _unfreeze_script_task(db, user_id=user_id, billing_id=billing_id)
+        raise
     db.add(
         GenerationTaskLink(
             task_id=task_record.id,
@@ -445,6 +525,7 @@ async def create_variant_task(
     merged_library: dict,
     all_shot_extractions: list[dict],
     script_division: dict | None,
+    quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
     existing = await find_active_variant_task(db, relation_entity_id=relation_entity_id)
     if existing is not None:
@@ -457,19 +538,27 @@ async def create_variant_task(
             relation_entity_id=relation_entity_id,
         )
 
+    billing_id = await _freeze_for_script_task(
+        db, user_id=user_id, quote_token=quote_token, business_type=SCRIPT_VARIANT_TASK_KIND
+    )
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
-    task_record = await tm.create(
-        task=_CreateOnlyTask(),
-        mode=DeliveryMode.async_polling,
-        user_id=user_id,
-        task_kind=SCRIPT_VARIANT_TASK_KIND,
-        run_args={
-            "merged_library": merged_library,
-            "all_shot_extractions": all_shot_extractions,
-            "script_division": script_division,
-        },
-    )
+    try:
+        task_record = await tm.create(
+            task=_CreateOnlyTask(),
+            mode=DeliveryMode.async_polling,
+            user_id=user_id,
+            task_kind=SCRIPT_VARIANT_TASK_KIND,
+            run_args={
+                "merged_library": merged_library,
+                "all_shot_extractions": all_shot_extractions,
+                "script_division": script_division,
+            },
+            billing_id=billing_id,
+        )
+    except Exception:
+        await _unfreeze_script_task(db, user_id=user_id, billing_id=billing_id)
+        raise
     db.add(
         GenerationTaskLink(
             task_id=task_record.id,
@@ -496,6 +585,7 @@ async def _create_analysis_task(
     relation_type: str,
     relation_entity_id: str,
     run_args: dict,
+    quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
     existing = await _find_active_analysis_task(db, relation_type=relation_type, relation_entity_id=relation_entity_id)
     if existing is not None:
@@ -508,15 +598,23 @@ async def _create_analysis_task(
             relation_entity_id=relation_entity_id,
         )
 
+    billing_id = await _freeze_for_script_task(
+        db, user_id=user_id, quote_token=quote_token, business_type=task_kind
+    )
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
-    task_record = await tm.create(
-        task=_CreateOnlyTask(),
-        mode=DeliveryMode.async_polling,
-        user_id=user_id,
-        task_kind=task_kind,
-        run_args=run_args,
-    )
+    try:
+        task_record = await tm.create(
+            task=_CreateOnlyTask(),
+            mode=DeliveryMode.async_polling,
+            user_id=user_id,
+            task_kind=task_kind,
+            run_args=run_args,
+            billing_id=billing_id,
+        )
+    except Exception:
+        await _unfreeze_script_task(db, user_id=user_id, billing_id=billing_id)
+        raise
     db.add(
         GenerationTaskLink(
             task_id=task_record.id,
@@ -542,6 +640,7 @@ async def create_character_portrait_task(
     relation_entity_id: str,
     character_context: str | None,
     character_description: str,
+    quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
     return await _create_analysis_task(
         db,
@@ -553,6 +652,7 @@ async def create_character_portrait_task(
             "character_context": character_context,
             "character_description": character_description,
         },
+        quote_token=quote_token,
     )
 
 
@@ -563,6 +663,7 @@ async def create_prop_info_task(
     relation_entity_id: str,
     prop_context: str | None,
     prop_description: str,
+    quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
     return await _create_analysis_task(
         db,
@@ -574,6 +675,7 @@ async def create_prop_info_task(
             "prop_context": prop_context,
             "prop_description": prop_description,
         },
+        quote_token=quote_token,
     )
 
 
@@ -584,6 +686,7 @@ async def create_scene_info_task(
     relation_entity_id: str,
     scene_context: str | None,
     scene_description: str,
+    quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
     return await _create_analysis_task(
         db,
@@ -595,6 +698,7 @@ async def create_scene_info_task(
             "scene_context": scene_context,
             "scene_description": scene_description,
         },
+        quote_token=quote_token,
     )
 
 
@@ -605,6 +709,7 @@ async def create_costume_info_task(
     relation_entity_id: str,
     costume_context: str | None,
     costume_description: str,
+    quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
     return await _create_analysis_task(
         db,
@@ -616,6 +721,7 @@ async def create_costume_info_task(
             "costume_context": costume_context,
             "costume_description": costume_description,
         },
+        quote_token=quote_token,
     )
 
 
@@ -626,6 +732,7 @@ async def create_script_optimization_task(
     relation_entity_id: str,
     script_text: str,
     consistency: dict,
+    quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
     return await _create_analysis_task(
         db,
@@ -637,6 +744,7 @@ async def create_script_optimization_task(
             "script_text": script_text,
             "consistency": consistency,
         },
+        quote_token=quote_token,
     )
 
 
@@ -646,6 +754,7 @@ async def create_script_simplification_task(
     user_id: str,
     relation_entity_id: str,
     script_text: str,
+    quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
     return await _create_analysis_task(
         db,
@@ -656,6 +765,7 @@ async def create_script_simplification_task(
         run_args={
             "script_text": script_text,
         },
+        quote_token=quote_token,
     )
 
 
@@ -673,7 +783,12 @@ async def run_merge_task(task_id: str) -> None:
             logger.warning("merge task not found: %s", task_id)
             return
 
+        # 入口取消：任务尚未进入 running，但用户已请求取消 → 标记 cancelled 并结算。
+        # 必须结算（解冻）：merge/variant 经 asyncio.create_task 执行，不走 Celery 的
+        # finally 钩子，cancel 路由的立即解冻也不适用（非 Celery executor 无法 revoke），
+        # 故每个到达 cancelled 终态的分支都要显式 `await _settle_billing(task_id)`，否则冻结积分泄漏。
         if await _cancel_if_requested(store, task_id, db):
+            await _settle_billing(task_id)
             return
 
         await store.set_status(task_id, TaskStatus.running)
@@ -685,7 +800,9 @@ async def run_merge_task(task_id: str) -> None:
     try:
         async with async_session_maker() as db:
             store = SqlAlchemyTaskStore(db)
+            # try 起点取消：已 running、尚未调用 LLM → 同样必须结算。
             if await _cancel_if_requested(store, task_id, db):
+                await _settle_billing(task_id)
                 return
 
             # 按任务归属用户解析其默认文本模型（任务隔离：执行器使用该用户的模型配置）。
@@ -701,9 +818,11 @@ async def run_merge_task(task_id: str) -> None:
             await store.set_progress(task_id, 100)
             await store.set_result(task_id, result.model_dump())
             if await _cancel_if_requested(store, task_id, db):
+                await _settle_billing(task_id)
                 return
             await store.set_status(task_id, TaskStatus.succeeded)
             await db.commit()
+            await _settle_billing(task_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("merge task failed: %s", task_id)
         async with async_session_maker() as db:
@@ -711,6 +830,26 @@ async def run_merge_task(task_id: str) -> None:
             await store.set_error(task_id, str(exc))
             await store.set_status(task_id, TaskStatus.failed)
             await db.commit()
+        await _settle_billing(task_id)
+
+
+async def _settle_billing(task_id: str) -> None:
+    """进程内任务（merge/variant，不走 Celery）终态结算积分。
+
+    为什么是 async：merge/variant 通过 `asyncio.create_task` 在**已运行的事件循环**内执行，
+    若调用同步桥 `settle_task_billing_sync`（内部 `asyncio.run`）会抛
+    `RuntimeError: asyncio.run() cannot be called from a running event loop`，导致结算
+    静默失败（被 sync 包装的 except 吞掉）→ 冻结积分泄漏，只能等 Task 7 的 Beat 补偿兜底。
+    故直接 `await settle_task_billing_async(task_id)`，在同一事件循环内完成结算。
+
+    幂等：`settle_task_billing_async` 对 billing_id=None 与非终态均安全跳过；账本层幂等。
+    """
+    from app.services.points.billing import settle_task_billing_async
+
+    try:
+        await settle_task_billing_async(task_id)
+    except Exception:  # noqa: BLE001 - 结算失败不阻断任务流程，Task 7 补偿兜底
+        logger.exception("in-process settle failed for task_id=%s", task_id)
 
 
 def spawn_merge_task(task_id: str) -> None:
@@ -729,7 +868,12 @@ async def run_variant_task(task_id: str) -> None:
             logger.warning("variant task not found: %s", task_id)
             return
 
+        # 入口取消：任务尚未进入 running，但用户已请求取消 → 标记 cancelled 并结算。
+        # 必须结算（解冻）：merge/variant 经 asyncio.create_task 执行，不走 Celery 的
+        # finally 钩子，cancel 路由的立即解冻也不适用（非 Celery executor 无法 revoke），
+        # 故每个到达 cancelled 终态的分支都要显式 `await _settle_billing(task_id)`，否则冻结积分泄漏。
         if await _cancel_if_requested(store, task_id, db):
+            await _settle_billing(task_id)
             return
 
         await store.set_status(task_id, TaskStatus.running)
@@ -741,7 +885,9 @@ async def run_variant_task(task_id: str) -> None:
     try:
         async with async_session_maker() as db:
             store = SqlAlchemyTaskStore(db)
+            # try 起点取消：已 running、尚未调用 LLM → 同样必须结算。
             if await _cancel_if_requested(store, task_id, db):
+                await _settle_billing(task_id)
                 return
 
             # 按任务归属用户解析其默认文本模型（任务隔离）。
@@ -755,9 +901,11 @@ async def run_variant_task(task_id: str) -> None:
             await store.set_progress(task_id, 100)
             await store.set_result(task_id, result.model_dump())
             if await _cancel_if_requested(store, task_id, db):
+                await _settle_billing(task_id)
                 return
             await store.set_status(task_id, TaskStatus.succeeded)
             await db.commit()
+            await _settle_billing(task_id)
     except Exception as exc:  # noqa: BLE001
         logger.exception("variant task failed: %s", task_id)
         async with async_session_maker() as db:
@@ -765,6 +913,7 @@ async def run_variant_task(task_id: str) -> None:
             await store.set_error(task_id, str(exc))
             await store.set_status(task_id, TaskStatus.failed)
             await db.commit()
+        await _settle_billing(task_id)
 
 
 def spawn_variant_task(task_id: str) -> None:

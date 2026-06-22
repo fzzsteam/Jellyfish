@@ -410,11 +410,43 @@ def _build_sync_db_with_task(
     return session_local, engine, task_id
 
 
+async def _seed_task_row_async(
+    db_factory,
+    *,
+    task_id: str,
+    billing_id: str | None,
+    status: GenerationTaskStatus,
+    user_id: str = USER_ID,
+) -> None:
+    """在 async 库内插入一个 GenerationTask 行（供 settle_task_billing_async 读取）。
+
+    为什么需要：Task 5a/5b 重构后 settle_task_billing_async 直接从 async_session_maker
+    读任务终态；测试必须把任务行落到 async 库（与冻结/充值流水同库），settle 才能命中。
+    """
+    async with db_factory() as db:
+        db.add(
+            GenerationTask(
+                id=task_id,
+                user_id=user_id,
+                mode="async_polling",
+                task_kind="video_generation",
+                status=status.value,
+                progress=0,
+                payload={"task_kind": "video_generation"},
+                result=None,
+                error="",
+                billing_id=billing_id,
+            )
+        )
+        await db.commit()
+
+
 def test_settle_succeeded_consumes_frozen(monkeypatch) -> None:
     """succeeded → consume：balance 与 frozen 同步减少。
 
     注意：本测试不在 asyncio 事件循环中运行（settle_task_billing_sync 内部用 asyncio.run
-    启动循环，与 Celery worker 同步上下文一致），故不能用 @pytest.mark.asyncio。
+    启动循环驱动 settle_task_billing_async，与 Celery worker 同步上下文一致），故不能用
+    @pytest.mark.asyncio。任务行落在 async 库（settle_task_billing_async 的读取侧）。
     """
     import asyncio
 
@@ -448,11 +480,15 @@ def test_settle_succeeded_consumes_frozen(monkeypatch) -> None:
             return billing_id
 
     billing_id = asyncio.run(_seed())
-
-    sync_session_local, sync_engine, task_id = _build_sync_db_with_task(
-        billing_id=billing_id, status=GenerationTaskStatus.succeeded
+    task_id = "task-" + uuid4().hex[:8]
+    asyncio.run(
+        _seed_task_row_async(
+            async_session_local,
+            task_id=task_id,
+            billing_id=billing_id,
+            status=GenerationTaskStatus.succeeded,
+        )
     )
-    monkeypatch.setattr("app.services.points.billing.sync_session_maker", sync_session_local)
     monkeypatch.setattr("app.services.points.billing.async_session_maker", async_session_local)
 
     settle_task_billing_sync(task_id)
@@ -467,7 +503,6 @@ def test_settle_succeeded_consumes_frozen(monkeypatch) -> None:
 
     asyncio.run(_check())
     asyncio.run(async_engine.dispose())
-    sync_engine.dispose()
 
 
 def test_settle_failed_unfreezes(monkeypatch) -> None:
@@ -502,11 +537,15 @@ def test_settle_failed_unfreezes(monkeypatch) -> None:
             return billing_id
 
     billing_id = asyncio.run(_seed())
-
-    sync_session_local, sync_engine, task_id = _build_sync_db_with_task(
-        billing_id=billing_id, status=GenerationTaskStatus.failed
+    task_id = "task-" + uuid4().hex[:8]
+    asyncio.run(
+        _seed_task_row_async(
+            async_session_local,
+            task_id=task_id,
+            billing_id=billing_id,
+            status=GenerationTaskStatus.failed,
+        )
     )
-    monkeypatch.setattr("app.services.points.billing.sync_session_maker", sync_session_local)
     monkeypatch.setattr("app.services.points.billing.async_session_maker", async_session_local)
 
     settle_task_billing_sync(task_id)
@@ -521,7 +560,6 @@ def test_settle_failed_unfreezes(monkeypatch) -> None:
 
     asyncio.run(_check())
     asyncio.run(async_engine.dispose())
-    sync_engine.dispose()
 
 
 def test_settle_cancelled_unfreezes(monkeypatch) -> None:
@@ -556,10 +594,15 @@ def test_settle_cancelled_unfreezes(monkeypatch) -> None:
             return billing_id
 
     billing_id = asyncio.run(_seed())
-    sync_session_local, sync_engine, task_id = _build_sync_db_with_task(
-        billing_id=billing_id, status=GenerationTaskStatus.cancelled
+    task_id = "task-" + uuid4().hex[:8]
+    asyncio.run(
+        _seed_task_row_async(
+            async_session_local,
+            task_id=task_id,
+            billing_id=billing_id,
+            status=GenerationTaskStatus.cancelled,
+        )
     )
-    monkeypatch.setattr("app.services.points.billing.sync_session_maker", sync_session_local)
     monkeypatch.setattr("app.services.points.billing.async_session_maker", async_session_local)
 
     settle_task_billing_sync(task_id)
@@ -574,26 +617,35 @@ def test_settle_cancelled_unfreezes(monkeypatch) -> None:
 
     asyncio.run(_check())
     asyncio.run(async_engine.dispose())
-    sync_engine.dispose()
 
 
 def test_settle_non_terminal_is_noop(monkeypatch) -> None:
     """running（非终态）→ 不结算。"""
     import asyncio
 
-    sync_session_local, sync_engine, task_id = _build_sync_db_with_task(
-        billing_id="b-running", status=GenerationTaskStatus.running
-    )
-    # async_session_maker 不应被实际触达（终态判断会先返回），但为安全用空库
     async_engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     async_session_local = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
-    monkeypatch.setattr("app.services.points.billing.sync_session_maker", sync_session_local)
+    import app.models.task  # noqa: F401
+    import app.models.points  # noqa: F401
+
+    task_id = "task-" + uuid4().hex[:8]
+
+    async def _seed():
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await _seed_task_row_async(
+            async_session_local,
+            task_id=task_id,
+            billing_id="b-running",
+            status=GenerationTaskStatus.running,
+        )
+
+    asyncio.run(_seed())
     monkeypatch.setattr("app.services.points.billing.async_session_maker", async_session_local)
 
     # 不应抛错，也不应有副作用
     settle_task_billing_sync(task_id)
 
-    sync_engine.dispose()
     asyncio.run(async_engine.dispose())
 
 
@@ -601,17 +653,28 @@ def test_settle_billing_id_none_is_noop(monkeypatch) -> None:
     """billing_id=None → 直接跳过（存量任务零行为变更）。"""
     import asyncio
 
-    sync_session_local, sync_engine, task_id = _build_sync_db_with_task(
-        billing_id=None, status=GenerationTaskStatus.succeeded
-    )
     async_engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
     async_session_local = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
-    monkeypatch.setattr("app.services.points.billing.sync_session_maker", sync_session_local)
+    import app.models.task  # noqa: F401
+    import app.models.points  # noqa: F401
+
+    task_id = "task-" + uuid4().hex[:8]
+
+    async def _seed():
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        await _seed_task_row_async(
+            async_session_local,
+            task_id=task_id,
+            billing_id=None,
+            status=GenerationTaskStatus.succeeded,
+        )
+
+    asyncio.run(_seed())
     monkeypatch.setattr("app.services.points.billing.async_session_maker", async_session_local)
 
     settle_task_billing_sync(task_id)
 
-    sync_engine.dispose()
     asyncio.run(async_engine.dispose())
 
 
@@ -646,10 +709,15 @@ def test_settle_idempotent(monkeypatch) -> None:
             return billing_id
 
     billing_id = asyncio.run(_seed())
-    sync_session_local, sync_engine, task_id = _build_sync_db_with_task(
-        billing_id=billing_id, status=GenerationTaskStatus.succeeded
+    task_id = "task-" + uuid4().hex[:8]
+    asyncio.run(
+        _seed_task_row_async(
+            async_session_local,
+            task_id=task_id,
+            billing_id=billing_id,
+            status=GenerationTaskStatus.succeeded,
+        )
     )
-    monkeypatch.setattr("app.services.points.billing.sync_session_maker", sync_session_local)
     monkeypatch.setattr("app.services.points.billing.async_session_maker", async_session_local)
 
     settle_task_billing_sync(task_id)
@@ -666,7 +734,6 @@ def test_settle_idempotent(monkeypatch) -> None:
 
     asyncio.run(_check())
     asyncio.run(async_engine.dispose())
-    sync_engine.dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -768,14 +835,17 @@ def test_run_task_celery_finally_settles_on_executor_exception(monkeypatch) -> N
     """executor.run 抛异常时,run_task_celery 的 finally 仍触发结算 → 冻结积分被解冻。
 
     策略:
-    - 用真实的 sync SessionMaker(含一个 failed 状态的 GenerationTask + billing_id)替换
-      billing 模块引用的 sync_session_maker,使 run_task_celery 能读到任务行;
-    - 同时让 execute_task 模块引用同一个 SessionMaker(它内部也用 sync_session_maker 读任务);
+    - sync 侧:用真实 sync SessionMaker(含一个 failed 状态的 GenerationTask + billing_id)
+      替换 execute_task 模块引用的 sync_session_maker,使 run_task_celery 能读到任务行并解析
+      task_kind → 解析到 crashing executor;
+    - async 侧:同一 task_id + billing_id 的 GenerationTask 行 + 冻结积分,落在 async 库
+      (settle_task_billing_async 的读取侧);finally 钩子委托 asyncio.run(settle_task_billing_async)
+      命中 async 任务行 → unfreeze;
     - monkeypatch task_executor_registry.resolve 返回一个 .run 会抛 RuntimeError 的假执行器
       (模拟 worker 执行失败);
-    - 预先用 async 引擎冻结积分,调用 `run_task_celery.run(task_id)`(Celery 装饰器下未装饰
-      的可调用对象,直接同步调用),断言:即便执行器抛异常,frozen 仍被解冻(balance 不变、
-      frozen 归零),证明 finally 结算钩子确实触发。
+    - 调用 `run_task_celery.run(task_id)`(Celery 装饰器下未装饰的可调用对象,直接同步调用),
+      断言:即便执行器抛异常,frozen 仍被解冻(balance 不变、frozen 归零),证明 finally 结算钩子
+      确实触发且走通新的 async 结算核心。
     """
     import asyncio
 
@@ -811,11 +881,20 @@ def test_run_task_celery_finally_settles_on_executor_exception(monkeypatch) -> N
 
     billing_id = asyncio.run(_seed())
 
-    # 2. sync 侧:建一个 failed 终态的任务行(模拟 executor 失败后已回写状态)
+    # 2. sync 侧:建一个 failed 终态的任务行(模拟 executor 失败后已回写状态),
+    #    供 run_task_celery 解析 task_kind。
     sync_session_local, sync_engine, task_id = _build_sync_db_with_task(
         billing_id=billing_id, status=GenerationTaskStatus.failed
     )
-    monkeypatch.setattr("app.services.points.billing.sync_session_maker", sync_session_local)
+    # async 侧也插入同一任务行(settle_task_billing_async 的读取侧)
+    asyncio.run(
+        _seed_task_row_async(
+            async_session_local,
+            task_id=task_id,
+            billing_id=billing_id,
+            status=GenerationTaskStatus.failed,
+        )
+    )
     monkeypatch.setattr("app.services.points.billing.async_session_maker", async_session_local)
     # execute_task 内部用同一 SessionMaker 读任务行
     monkeypatch.setattr("app.tasks.execute_task.sync_session_maker", sync_session_local)
@@ -847,3 +926,864 @@ def test_run_task_celery_finally_settles_on_executor_exception(monkeypatch) -> N
     asyncio.run(_check())
     asyncio.run(async_engine.dispose())
     sync_engine.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Task 5b：image / async-text 任务冻结集成 + cancel-unfreeze + merge/variant 结算
+# ---------------------------------------------------------------------------
+
+
+async def _seed_async_with_text_and_image_models(db: AsyncSession) -> None:
+    """建表并预置 user/provider + 文本模型 m_text 与图片模型 m_img。
+
+    文本：unit_points=7（category=text → required = unit_points * 1 = 7）。
+    图片：unit_points=5（category=image → required = unit_points * 1 = 5）。
+    """
+    import app.models.task  # noqa: F401
+    import app.models.points  # noqa: F401
+    import app.models.task_links  # noqa: F401
+
+    async with db.begin():
+        db.add(User(id=USER_ID, username="u1", hashed_password="x", is_admin=False, is_active=True, token_version=0))
+        db.add(Provider(id="p1", user_id=USER_ID, name="prov", base_url="http://x", api_key="k"))
+        db.add(
+            Model(
+                id="m_text",
+                user_id=USER_ID,
+                name="text-model",
+                category=ModelCategoryKey.text,
+                provider_id="p1",
+                unit_points=7,
+            )
+        )
+        db.add(
+            Model(
+                id="m_img",
+                user_id=USER_ID,
+                name="img-model",
+                category=ModelCategoryKey.image,
+                provider_id="p1",
+                unit_points=5,
+            )
+        )
+
+
+def _make_text_quote_token(*, required_points: int = 7, model_id: str = "m_text") -> str:
+    """构造合法的文本任务 quote_token（category=text，generation_count=1）。"""
+    params_hash = hash_quote_params(
+        {
+            "category": str(ModelCategoryKey.text),
+            "duration_seconds": None,
+            "resolution": None,
+            "generation_count": 1,
+        }
+    )
+    return create_quote_token(
+        QuoteClaims(
+            user_id=USER_ID,
+            business_type="script_divide",
+            model_id=model_id,
+            params_hash=params_hash,
+            required_points=required_points,
+        )
+    )
+
+
+def _make_image_quote_token(*, required_points: int = 5, model_id: str = "m_img") -> str:
+    """构造合法的图片任务 quote_token（category=image，generation_count=1）。"""
+    params_hash = hash_quote_params(
+        {
+            "category": str(ModelCategoryKey.image),
+            "duration_seconds": None,
+            "resolution": None,
+            "generation_count": 1,
+        }
+    )
+    return create_quote_token(
+        QuoteClaims(
+            user_id=USER_ID,
+            business_type="image_generation",
+            model_id=model_id,
+            params_hash=params_hash,
+            required_points=required_points,
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_create_divide_task_freezes_points_on_fresh_create() -> None:
+    """文本异步任务（divide）首次创建冻结积分；business_type=script_divide。"""
+    from app.services.points.ledger import get_points, recharge
+    from app.services.script_processing_tasks import create_divide_task
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_local = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    db = session_local()
+    try:
+        await _seed_async_with_text_and_image_models(db)
+        await recharge(db, user_id=USER_ID, amount=100, created_by="tester", remark="seed")
+
+        token = _make_text_quote_token(required_points=7)
+        result = await create_divide_task(
+            db,
+            user_id=USER_ID,
+            chapter_id="chapter-1",
+            script_text="剧本",
+            write_to_db=False,
+            quote_token=token,
+        )
+        assert result.reused is False
+        pts = await get_points(db, user_id=USER_ID)
+        assert pts.balance == 100
+        assert pts.frozen == 7
+        # 任务行携带 billing_id（非空）
+        row = await db.get(GenerationTask, result.task_id)
+        assert row is not None and row.billing_id
+        # business_type 落到冻结流水
+        from app.models.points import PointTransaction, PointTransactionType
+        from sqlalchemy import select
+
+        freeze_tx = (
+            await db.execute(
+                select(PointTransaction).where(
+                    PointTransaction.user_id == USER_ID,
+                    PointTransaction.type == PointTransactionType.freeze,
+                )
+            )
+        ).scalars().first()
+        assert freeze_tx is not None
+        assert freeze_tx.business_type == "script_divide"
+    finally:
+        await db.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_divide_task_reuse_skips_freeze() -> None:
+    """复用进行中文本任务时不冻结（第二次调用 reused=True，frozen 不增加）。"""
+    from app.services.points.ledger import get_points, recharge
+    from app.services.script_processing_tasks import create_divide_task
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_local = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    db = session_local()
+    try:
+        await _seed_async_with_text_and_image_models(db)
+        await recharge(db, user_id=USER_ID, amount=100, created_by="tester", remark="seed")
+
+        token = _make_text_quote_token(required_points=7)
+        first = await create_divide_task(
+            db,
+            user_id=USER_ID,
+            chapter_id="chapter-1",
+            script_text="第一版",
+            write_to_db=False,
+            quote_token=token,
+        )
+        # 第二次：同一 chapter_id，任务仍在 pending → 复用，不冻结
+        second = await create_divide_task(
+            db,
+            user_id=USER_ID,
+            chapter_id="chapter-1",
+            script_text="第二版",
+            write_to_db=False,
+            quote_token=_make_text_quote_token(required_points=7),
+        )
+        assert second.reused is True
+        assert second.task_id == first.task_id
+        pts = await get_points(db, user_id=USER_ID)
+        assert pts.frozen == 7  # 只冻结一次
+    finally:
+        await db.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_divide_task_insufficient_raises_no_task() -> None:
+    """余额不足：PointsDomainError 上抛，任务不被创建。"""
+    from app.services.points.billing import PointsDomainError
+    from app.services.script_processing_tasks import create_divide_task
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_local = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    db = session_local()
+    try:
+        await _seed_async_with_text_and_image_models(db)
+        # 未充值，可用 0
+        token = _make_text_quote_token(required_points=7)
+        with pytest.raises(PointsDomainError) as exc_info:
+            await create_divide_task(
+                db,
+                user_id=USER_ID,
+                chapter_id="chapter-1",
+                script_text="剧本",
+                write_to_db=False,
+                quote_token=token,
+            )
+        assert exc_info.value.code == "INSUFFICIENT_POINTS"
+        # 无任务行
+        from sqlalchemy import select
+
+        rows = (await db.execute(select(GenerationTask))).scalars().all()
+        assert rows == []
+    finally:
+        await db.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_analysis_task_freezes_with_correct_business_type() -> None:
+    """分析类任务（以 character_portrait 为例）冻结且 business_type 正确。"""
+    from app.models.points import PointTransaction, PointTransactionType
+    from app.services.points.ledger import get_points, recharge
+    from app.services.script_processing_tasks import (
+        CHARACTER_PORTRAIT_ANALYSIS_RELATION_TYPE,
+        create_character_portrait_task,
+    )
+    from sqlalchemy import select
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_local = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    db = session_local()
+    try:
+        await _seed_async_with_text_and_image_models(db)
+        await recharge(db, user_id=USER_ID, amount=100, created_by="tester", remark="seed")
+
+        token = _make_text_quote_token(required_points=7)
+        result = await create_character_portrait_task(
+            db,
+            user_id=USER_ID,
+            relation_entity_id="char-1",
+            character_context=None,
+            character_description="主角",
+            quote_token=token,
+        )
+        assert result.reused is False
+        assert result.relation_type == CHARACTER_PORTRAIT_ANALYSIS_RELATION_TYPE
+        pts = await get_points(db, user_id=USER_ID)
+        assert pts.frozen == 7
+        freeze_tx = (
+            await db.execute(
+                select(PointTransaction).where(
+                    PointTransaction.user_id == USER_ID,
+                    PointTransaction.type == PointTransactionType.freeze,
+                )
+            )
+        ).scalars().first()
+        assert freeze_tx is not None
+        assert freeze_tx.business_type == "script_character_portrait"
+    finally:
+        await db.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_image_task_and_link_freezes_then_reuses() -> None:
+    """图片任务：首次冻结；复用进行中任务不重复冻结。"""
+    from app.services.points.ledger import get_points, recharge
+    from app.services.studio.image_task_runner import create_image_task_and_link
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_local = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    db = session_local()
+    try:
+        await _seed_async_with_text_and_image_models(db)
+        await recharge(db, user_id=USER_ID, amount=100, created_by="tester", remark="seed")
+        # monkeypatch resolve_image_model / load_provider_config，避免外部依赖
+        import app.services.studio.image_task_runner as runner
+
+        original_resolve = runner.resolve_image_model
+        original_load = runner.load_provider_config
+
+        async def _fake_resolve(_db, _model_id, *, user_id):
+            return type("M", (), {"id": "m_img", "name": "img-model", "provider_id": "p1"})()
+
+        async def _fake_load(_db, _provider_id):
+            return type("PC", (), {"provider": "openai", "api_key": "k", "base_url": None})()
+
+        runner.resolve_image_model = _fake_resolve  # type: ignore[assignment]
+        runner.load_provider_config = _fake_load  # type: ignore[assignment]
+        # 关闭任务派发（避免触发 Celery）
+        import app.tasks.execute_task as exec_mod
+
+        original_enqueue = exec_mod.enqueue_task_execution
+        exec_mod.enqueue_task_execution = lambda _tid: None  # type: ignore[assignment]
+        try:
+            token = _make_image_quote_token(required_points=5)
+            first_id = await create_image_task_and_link(
+                db=db,
+                user_id=USER_ID,
+                model_id="m_img",
+                relation_type="actor_image",
+                relation_entity_id="1",
+                prompt="演员形象",
+                quote_token=token,
+            )
+            pts_after_first = await get_points(db, user_id=USER_ID)
+            assert pts_after_first.frozen == 5
+            row = await db.get(GenerationTask, first_id)
+            assert row is not None and row.billing_id
+
+            # 第二次：同一 (relation_type, relation_entity_id)，任务 pending → 复用，不冻结
+            second_id = await create_image_task_and_link(
+                db=db,
+                user_id=USER_ID,
+                model_id="m_img",
+                relation_type="actor_image",
+                relation_entity_id="1",
+                prompt="再来一次",
+                quote_token=_make_image_quote_token(required_points=5),
+            )
+            assert second_id == first_id
+            pts_after_second = await get_points(db, user_id=USER_ID)
+            assert pts_after_second.frozen == 5  # 仍只冻结一次
+        finally:
+            runner.resolve_image_model = original_resolve  # type: ignore[assignment]
+            runner.load_provider_config = original_load  # type: ignore[assignment]
+            exec_mod.enqueue_task_execution = original_enqueue  # type: ignore[assignment]
+    finally:
+        await db.close()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_image_task_insufficient_raises_and_no_task() -> None:
+    """图片任务余额不足：PointsDomainError 上抛，任务不被创建。"""
+    from app.services.points.billing import PointsDomainError
+    from app.services.studio.image_task_runner import create_image_task_and_link
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_local = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    db = session_local()
+    try:
+        await _seed_async_with_text_and_image_models(db)
+        # 未充值
+        token = _make_image_quote_token(required_points=5)
+        with pytest.raises(PointsDomainError) as exc_info:
+            await create_image_task_and_link(
+                db=db,
+                user_id=USER_ID,
+                model_id="m_img",
+                relation_type="actor_image",
+                relation_entity_id="1",
+                prompt="演员形象",
+                quote_token=token,
+            )
+        assert exc_info.value.code == "INSUFFICIENT_POINTS"
+        from sqlalchemy import select
+
+        rows = (await db.execute(select(GenerationTask))).scalars().all()
+        assert rows == []
+    finally:
+        await db.close()
+        await engine.dispose()
+
+
+def test_cancel_task_unfreezes_billing(monkeypatch) -> None:
+    """取消立即生效时，cancel_task 解冻冻结积分（frozen 回退、balance 不变）。
+
+    策略：构造一个带 billing_id 的 pending 任务行 + 已冻结的积分账户，调用
+    cancel_task 路由（revoke_task_execution 成功 → effective_immediately=True），
+    断言路由内 unfreeze_frozen 被触发，frozen 归零。
+    """
+    import asyncio
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.v1.routes.film import task_status as cancel_route
+    from app.dependencies import get_current_user, get_db
+    from app.services.points.ledger import freeze_points, get_points, recharge
+
+    async_engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async_session_local = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+    import app.models.task  # noqa: F401
+    import app.models.points  # noqa: F401
+    import app.models.task_links  # noqa: F401
+
+    async def _seed() -> str:
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with async_session_local() as db:
+            db.add(User(id=USER_ID, username="u1", hashed_password="x", is_admin=False, is_active=True, token_version=0))
+            await db.commit()
+            await recharge(db, user_id=USER_ID, amount=100, created_by="tester", remark="seed")
+            billing_id = uuid4().hex
+            await freeze_points(
+                db,
+                user_id=USER_ID,
+                billing_id=billing_id,
+                amount=30,
+                model_id="m_text",
+                business_type="script_divide",
+                business_id=None,
+                snapshot={"required_points": 30},
+            )
+            # 插入一个 pending 任务（cancel_task 会把它标记为 cancelled → effective）
+            task_id = "task-" + uuid4().hex[:8]
+            db.add(
+                GenerationTask(
+                    id=task_id,
+                    user_id=USER_ID,
+                    mode="async_polling",
+                    task_kind="script_divide",
+                    status=GenerationTaskStatus.pending.value,
+                    progress=0,
+                    payload={"task_kind": "script_divide"},
+                    result=None,
+                    error="",
+                    billing_id=billing_id,
+                )
+            )
+            await db.commit()
+            return task_id
+
+    task_id = asyncio.run(_seed())
+
+    # 让 revoke_task_execution 始终返回 True（→ effective_immediately=True）
+    monkeypatch.setattr(cancel_route, "revoke_task_execution", lambda _tid: True)
+
+    async def _override_db():
+        async with async_session_local() as db:
+            yield db
+
+    class _FakeUser:
+        id = USER_ID
+
+    async def _override_user():
+        return _FakeUser()
+
+    app_obj = FastAPI()
+    app_obj.include_router(cancel_route.router, prefix="/api/v1/film")
+    app_obj.dependency_overrides[get_db] = _override_db
+    app_obj.dependency_overrides[get_current_user] = _override_user
+
+    client = TestClient(app_obj)
+    resp = client.post(f"/api/v1/film/tasks/{task_id}/cancel", json={"reason": "user aborted"})
+    assert resp.status_code == 200
+    body = resp.json()["data"]
+    assert body["effective_immediately"] is True
+
+    async def _check():
+        async with async_session_local() as db:
+            after = await get_points(db, user_id=USER_ID)
+            assert after.balance == 100
+            assert after.frozen == 0
+
+    asyncio.run(_check())
+    asyncio.run(async_engine.dispose())
+
+
+def test_cancel_task_without_billing_id_is_noop(monkeypatch) -> None:
+    """取消 billing_id 为空的任务（存量/未计费）→ 不触达账本，正常返回。"""
+    import asyncio
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.v1.routes.film import task_status as cancel_route
+    from app.dependencies import get_current_user, get_db
+
+    async_engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async_session_local = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+    import app.models.task  # noqa: F401
+    import app.models.task_links  # noqa: F401
+
+    async def _seed() -> str:
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with async_session_local() as db:
+            db.add(User(id=USER_ID, username="u1", hashed_password="x", is_admin=False, is_active=True, token_version=0))
+            await db.commit()
+            task_id = "task-" + uuid4().hex[:8]
+            db.add(
+                GenerationTask(
+                    id=task_id,
+                    user_id=USER_ID,
+                    mode="async_polling",
+                    task_kind="script_divide",
+                    status=GenerationTaskStatus.pending.value,
+                    progress=0,
+                    payload={"task_kind": "script_divide"},
+                    result=None,
+                    error="",
+                    billing_id=None,
+                )
+            )
+            await db.commit()
+            return task_id
+
+    task_id = asyncio.run(_seed())
+    monkeypatch.setattr(cancel_route, "revoke_task_execution", lambda _tid: True)
+
+    async def _override_db():
+        async with async_session_local() as db:
+            yield db
+
+    class _FakeUser:
+        id = USER_ID
+
+    async def _override_user():
+        return _FakeUser()
+
+    app_obj = FastAPI()
+    app_obj.include_router(cancel_route.router, prefix="/api/v1/film")
+    app_obj.dependency_overrides[get_db] = _override_db
+    app_obj.dependency_overrides[get_current_user] = _override_user
+
+    client = TestClient(app_obj)
+    resp = client.post(f"/api/v1/film/tasks/{task_id}/cancel", json={"reason": "noop"})
+    assert resp.status_code == 200
+    asyncio.run(async_engine.dispose())
+
+
+@pytest.mark.asyncio
+async def test_in_process_merge_task_settles_on_success_and_failure(monkeypatch) -> None:
+    """进程内 merge/variant 任务（不走 Celery）在成功/失败分支触发 settle。
+
+    为什么是 async 测试：`_settle_billing` 重构后是 async（直接 `await settle_task_billing_async`），
+    与 run_merge_task/run_variant_task 终态点的真实调用形态一致。本测试直接 `await` 它，
+    同时也证明 `settle_task_billing_async` 在已运行的事件循环内可被直接调用（生产 merge/variant 场景）。
+
+    策略：在 async 库内 seed User + 冻结 + 终态任务行，monkeypatch billing 模块的
+    async_session_maker，直接 `await _settle_billing(task_id)`，断言账本状态变化
+    （成功→consume：balance 60、frozen 0；失败→unfreeze：balance 不变、frozen 0）。
+    """
+    from app.services.points.ledger import freeze_points, get_points, recharge
+    from app.services.script_processing_tasks import _settle_billing
+
+    # ---- 成功路径 ----
+    async_engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async_session_local = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+    import app.models.task  # noqa: F401
+    import app.models.points  # noqa: F401
+
+    async with async_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    async with async_session_local() as db:
+        db.add(User(id=USER_ID, username="u1", hashed_password="x", is_admin=False, is_active=True, token_version=0))
+        await db.commit()
+        await recharge(db, user_id=USER_ID, amount=100, created_by="tester", remark="seed")
+        billing_id_ok = uuid4().hex
+        await freeze_points(
+            db,
+            user_id=USER_ID,
+            billing_id=billing_id_ok,
+            amount=40,
+            model_id="m_text",
+            business_type="script_merge",
+            business_id=None,
+            snapshot={"required_points": 40},
+        )
+        success_task_id = "merge-ok-" + uuid4().hex[:8]
+        db.add(
+            GenerationTask(
+                id=success_task_id,
+                user_id=USER_ID,
+                mode="async_polling",
+                task_kind="script_merge",
+                status=GenerationTaskStatus.succeeded.value,
+                progress=100,
+                payload={"task_kind": "script_merge"},
+                result={"ok": True},
+                error="",
+                billing_id=billing_id_ok,
+            )
+        )
+        await db.commit()
+
+    monkeypatch.setattr("app.services.points.billing.async_session_maker", async_session_local)
+
+    # 成功 → consume（balance 60、frozen 0）
+    await _settle_billing(success_task_id)
+
+    async with async_session_local() as db:
+        after = await get_points(db, user_id=USER_ID)
+        assert after.balance == 60
+        assert after.frozen == 0
+    await async_engine.dispose()
+
+    # ---- 失败路径 ----
+    async_engine2 = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async_session_local2 = async_sessionmaker(async_engine2, class_=AsyncSession, expire_on_commit=False)
+
+    async with async_engine2.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    async with async_session_local2() as db:
+        db.add(User(id=USER_ID, username="u1", hashed_password="x", is_admin=False, is_active=True, token_version=0))
+        await db.commit()
+        await recharge(db, user_id=USER_ID, amount=80, created_by="tester", remark="seed2")
+        billing_id_fail = uuid4().hex
+        await freeze_points(
+            db,
+            user_id=USER_ID,
+            billing_id=billing_id_fail,
+            amount=30,
+            model_id="m_text",
+            business_type="script_variant",
+            business_id=None,
+            snapshot={"required_points": 30},
+        )
+        fail_task_id = "variant-fail-" + uuid4().hex[:8]
+        db.add(
+            GenerationTask(
+                id=fail_task_id,
+                user_id=USER_ID,
+                mode="async_polling",
+                task_kind="script_variant",
+                status=GenerationTaskStatus.failed.value,
+                progress=0,
+                payload={"task_kind": "script_variant"},
+                result=None,
+                error="boom",
+                billing_id=billing_id_fail,
+            )
+        )
+        await db.commit()
+
+    monkeypatch.setattr("app.services.points.billing.async_session_maker", async_session_local2)
+
+    # 失败 → unfreeze（balance 不变、frozen 0）
+    await _settle_billing(fail_task_id)
+
+    async with async_session_local2() as db:
+        after = await get_points(db, user_id=USER_ID)
+        assert after.balance == 80  # 解冻不扣
+        assert after.frozen == 0
+    await async_engine2.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Bug fix：run_merge_task / run_variant_task 的「早期取消」分支必须结算
+#
+# 背景：merge/variant 经 asyncio.create_task 执行（不走 Celery），且每个函数有三个
+# `_cancel_if_requested` 取消分支——entry、try-start、result-after。原先只有 result-after
+# 分支调用 `_settle_billing`，导致 entry / try-start 取消时冻结积分永不结算 → 永久泄漏。
+#
+# 二次修复（本批）：原 `_settle_billing` 委托 `settle_task_billing_sync`（内部 asyncio.run），
+# 在 asyncio.create_task 启动的事件循环里会抛 RuntimeError 被静默吞掉 → 所有分支结算实际失效。
+# 现已改为 `await settle_task_billing_async(task_id)`（直接在已运行循环内结算）。
+#
+# 测试策略：
+# - 直接驱动 `run_merge_task` / `run_variant_task`；
+# - monkeypatch 模块内 `async_session_maker`（任务体读写）与 billing 模块的
+#   `async_session_maker`（settle_task_billing_async 读取）→ 同一测试 async 会话工厂；
+# - monkeypatch `_cancel_if_requested` → 控制命中 entry / try-start 早期取消分支；
+# - 不再 stub `_settle_billing`：让真实的 `settle_task_billing_async` 跑通，断言账本状态变化
+#   （cancelled → unfreeze：balance 不变、frozen 归零），证明 async 结算路径在生产中确实生效。
+# ---------------------------------------------------------------------------
+
+
+async def _build_cancel_test_db(
+    *, task_kind: str, business_type: str, amount: int, balance: int
+) -> tuple[object, object, str, str, str]:
+    """构造 cancel 测试所需 DB：user + 冻结 + pending 任务行。
+
+    返回 (engine, async_session_local, task_id, billing_id, USER_ID)。
+    """
+    async_engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async_session_local = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+    import app.models.task  # noqa: F401
+    import app.models.points  # noqa: F401
+    import app.models.task_links  # noqa: F401
+
+    from app.services.points.ledger import freeze_points, recharge
+
+    async with async_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    async with async_session_local() as db:
+        db.add(User(id=USER_ID, username="u1", hashed_password="x", is_admin=False, is_active=True, token_version=0))
+        await db.commit()
+        await recharge(db, user_id=USER_ID, amount=balance, created_by="tester", remark="seed")
+        billing_id = uuid4().hex
+        await freeze_points(
+            db,
+            user_id=USER_ID,
+            billing_id=billing_id,
+            amount=amount,
+            model_id="m_text",
+            business_type=business_type,
+            business_id=None,
+            snapshot={"required_points": amount},
+        )
+        task_id = f"{task_kind}-cancel-" + uuid4().hex[:8]
+        db.add(
+            GenerationTask(
+                id=task_id,
+                user_id=USER_ID,
+                mode="async_polling",
+                task_kind=task_kind,
+                status=GenerationTaskStatus.pending.value,
+                progress=0,
+                payload={"task_kind": task_kind, "run_args": {}},
+                result=None,
+                error="",
+                billing_id=billing_id,
+            )
+        )
+        await db.commit()
+    return async_engine, async_session_local, task_id, billing_id, USER_ID
+
+
+def _wire_async_session(monkeypatch, async_session_local) -> None:
+    """把任务体与 billing 结算核心指向同一测试 async 会话工厂。
+
+    - `script_processing_tasks.async_session_maker`：run_merge_task/run_variant_task 体内读写；
+    - `app.services.points.billing.async_session_maker`：settle_task_billing_async 读任务终态 + 账本操作。
+    """
+    from app.services import script_processing_tasks as spt
+
+    monkeypatch.setattr(spt, "async_session_maker", async_session_local)
+    monkeypatch.setattr("app.services.points.billing.async_session_maker", async_session_local)
+
+
+def _make_cancel_stub(*, cancel_on_call: int = 1):
+    """构造 `_cancel_if_requested` 的测试替身：命中第 `cancel_on_call` 次及之后返回 True，
+    且在命中时**真正调用 `store.mark_cancelled` + `db.commit`**（与生产实现一致）。
+
+    为什么必须真正 mark_cancelled：现在跑的是真实 `settle_task_billing_async`，它读任务终态；
+    若只返回 True 不落库，任务行仍停留在 pending/running → 非终态 → settle no-op → 冻结不释放。
+    旧 spy 测试因为 stub 了 _settle_billing 直接解冻，绕过了终态读取，故不需要真正 mark_cancelled。
+    """
+    state = {"n": 0}
+
+    async def _stub(store, task_id, db):  # noqa: ANN001 - test stub
+        state["n"] += 1
+        if state["n"] < cancel_on_call:
+            return False
+        await store.mark_cancelled(task_id)
+        await db.commit()
+        return True
+
+    return _stub
+
+
+@pytest.mark.asyncio
+async def test_run_merge_task_settles_on_entry_cancel(monkeypatch) -> None:
+    """merge 入口取消（首次 `_cancel_if_requested` 即 True）→ 真实 async 结算释放冻结。
+
+    覆盖 run_merge_task entry-cancel 分支：修复前直接 return 不结算 → 冻结泄漏；
+    二次修复前 `_settle_billing` 委托 sync 桥在运行循环中静默失败；现在 `await
+    settle_task_billing_async` 在事件循环内直接解冻 → frozen 归零。
+    """
+    from app.services.points.ledger import get_points
+
+    async_engine, async_session_local, task_id, _bid, _uid = await _build_cancel_test_db(
+        task_kind="script_merge", business_type="script_merge", amount=40, balance=100
+    )
+    _wire_async_session(monkeypatch, async_session_local)
+
+    monkeypatch.setattr(
+        "app.services.script_processing_tasks._cancel_if_requested",
+        _make_cancel_stub(cancel_on_call=1),
+    )
+
+    await _run_merge_task_via_public_api(task_id)
+
+    async with async_session_local() as db:
+        after = await get_points(db, user_id=USER_ID)
+        assert after.balance == 100  # 解冻不扣
+        assert after.frozen == 0  # 冻结释放
+    await async_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_merge_task_settles_on_try_start_cancel(monkeypatch) -> None:
+    """merge try-start 取消（第二次 `_cancel_if_requested` True）→ 真实 async 结算释放冻结。
+
+    覆盖 run_merge_task try-start-cancel 分支。首次调用（entry）返回 False 让函数进入
+    running；第二次（try-start）返回 True → 取消 → 结算。
+    """
+    from app.services.points.ledger import get_points
+
+    async_engine, async_session_local, task_id, _bid, _uid = await _build_cancel_test_db(
+        task_kind="script_merge", business_type="script_merge", amount=40, balance=100
+    )
+    _wire_async_session(monkeypatch, async_session_local)
+
+    monkeypatch.setattr(
+        "app.services.script_processing_tasks._cancel_if_requested",
+        _make_cancel_stub(cancel_on_call=2),
+    )
+
+    await _run_merge_task_via_public_api(task_id)
+
+    async with async_session_local() as db:
+        after = await get_points(db, user_id=USER_ID)
+        assert after.balance == 100
+        assert after.frozen == 0
+    await async_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_variant_task_settles_on_entry_cancel(monkeypatch) -> None:
+    """variant 入口取消 → 真实 async 结算释放冻结。覆盖 run_variant_task entry-cancel 分支。"""
+    from app.services.points.ledger import get_points
+
+    async_engine, async_session_local, task_id, _bid, _uid = await _build_cancel_test_db(
+        task_kind="script_variant", business_type="script_variant", amount=30, balance=90
+    )
+    _wire_async_session(monkeypatch, async_session_local)
+
+    monkeypatch.setattr(
+        "app.services.script_processing_tasks._cancel_if_requested",
+        _make_cancel_stub(cancel_on_call=1),
+    )
+
+    await _run_variant_task_via_public_api(task_id)
+
+    async with async_session_local() as db:
+        after = await get_points(db, user_id=USER_ID)
+        assert after.balance == 90
+        assert after.frozen == 0
+    await async_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_variant_task_settles_on_try_start_cancel(monkeypatch) -> None:
+    """variant try-start 取消 → 真实 async 结算释放冻结。覆盖 run_variant_task try-start 分支。"""
+    from app.services.points.ledger import get_points
+
+    async_engine, async_session_local, task_id, _bid, _uid = await _build_cancel_test_db(
+        task_kind="script_variant", business_type="script_variant", amount=30, balance=90
+    )
+    _wire_async_session(monkeypatch, async_session_local)
+
+    monkeypatch.setattr(
+        "app.services.script_processing_tasks._cancel_if_requested",
+        _make_cancel_stub(cancel_on_call=2),
+    )
+
+    await _run_variant_task_via_public_api(task_id)
+
+    async with async_session_local() as db:
+        after = await get_points(db, user_id=USER_ID)
+        assert after.balance == 90
+        assert after.frozen == 0
+    await async_engine.dispose()
+
+
+async def _run_merge_task_via_public_api(task_id: str) -> None:
+    """直接 await run_merge_task（与 asyncio.create_task 启动后等价的执行路径）。"""
+    from app.services.script_processing_tasks import run_merge_task
+
+    await run_merge_task(task_id)
+
+
+async def _run_variant_task_via_public_api(task_id: str) -> None:
+    """直接 await run_variant_task（与 asyncio.create_task 启动后等价的执行路径）。"""
+    from app.services.script_processing_tasks import run_variant_task
+
+    await run_variant_task(task_id)
