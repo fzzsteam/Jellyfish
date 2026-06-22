@@ -754,7 +754,10 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       if (isAssetNameConflictError(error)) {
         message.error(`${assetDisplayName}名称已存在，请修改名称或编辑已有资产后再生成`)
       } else {
-        message.error('发起生成失败')
+        // 优先识别积分业务错误（积分不足/报价已变更），命中后刷新报价并返回语义文案。
+        const pointsAware = makePointsAwareGetErrorMessage(imageQuote.refresh)
+        const msg = pointsAware(error, '发起生成失败')
+        message.error(msg)
       }
     } finally {
       setSavingBase(false)
