@@ -227,6 +227,7 @@ async def create_model(
             category=body.category,
             provider_id=body.provider_id,
             params=body.params,
+            unit_points=body.unit_points,
             description=body.description,
             created_by=body.created_by,
         ),

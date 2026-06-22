@@ -123,10 +123,18 @@ class GenerationTask(Base, UserOwnedMixin, TimestampMixin):
         nullable=True,
         comment="执行器侧任务 ID，如 celery task id",
     )
+    billing_id: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+        comment="积分计费单据 ID（关联 point_transactions.billing_id，可空表示未计费）",
+    )
 
     __table_args__ = (
         # 轮询高频：按 id 主键读最常见；列表/后台清理可按状态与更新时间过滤
         Index("ix_generation_tasks_status_updated_at", "status", "updated_at"),
         Index("ix_generation_tasks_mode_updated_at", "mode", "updated_at"),
         Index("ix_generation_tasks_status_cancel_requested", "status", "cancel_requested"),
+        # billing_id 单列索引由 mapped_column(index=True) 自动生成（ix_generation_tasks_billing_id），
+        # 不在此重复声明，避免 SQLite/MySQL 报"索引已存在"。
     )

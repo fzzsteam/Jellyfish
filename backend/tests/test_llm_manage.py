@@ -55,6 +55,34 @@ async def test_create_model_persists_with_non_default_flag() -> None:
             ),
         )
         assert created.id == "m1"
+
+
+@pytest.mark.asyncio
+async def test_create_model_defaults_unit_points_to_zero() -> None:
+    """未显式传 unit_points 时，模型持久化后应回填默认值 0。"""
+    db, engine = await _build_session()
+    async with db:
+        await create_provider(
+            db,
+            user_id="u1",
+            body=ProviderCreate(
+                id="p1",
+                name="OpenAI",
+                base_url="https://api.openai.com/v1",
+                api_key="k",
+            ),
+        )
+        created = await create_model(
+            db,
+            user_id="u1",
+            body=ModelCreate(
+                id="m-points",
+                name="gpt-4o-mini",
+                category=ModelCategoryKey.text,
+                provider_id="p1",
+            ),
+        )
+        assert created.unit_points == 0
     await engine.dispose()
 
 

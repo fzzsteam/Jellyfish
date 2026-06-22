@@ -9,7 +9,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
@@ -114,6 +114,12 @@ class Model(Base, UserOwnedMixin, TimestampMixin):
         comment="所属供应商 ID",
     )
     params: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, comment="模型参数（JSON）")
+    unit_points: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=0,
+        comment="积分单价（单次调用消耗的积分数量，0 表示免费）",
+    )
     description: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="说明")
     created_by: Mapped[str] = mapped_column(String(64), nullable=False, default="", comment="创建人")
 

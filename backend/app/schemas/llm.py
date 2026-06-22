@@ -103,6 +103,7 @@ class ModelBase(BaseModel):
     category: ModelCategoryKey = Field(..., description="模型类别：text/image/video")
     provider_id: str = Field(..., description="所属供应商 ID")
     params: dict[str, Any] = Field(default_factory=dict, description="模型参数（JSON）")
+    unit_points: int = Field(0, ge=0, description="积分单价（单次调用消耗的积分数量）")
     description: str = Field("", description="说明")
     created_by: str = Field("", description="创建人")
 
@@ -120,6 +121,7 @@ class ModelUpdate(BaseModel):
     category: ModelCategoryKey | None = Field(None, description="模型类别")
     provider_id: str | None = Field(None, description="所属供应商 ID")
     params: dict[str, Any] | None = Field(None, description="模型参数（JSON）")
+    unit_points: int | None = Field(None, ge=0, description="积分单价")
     description: str | None = Field(None, description="说明")
 
 
