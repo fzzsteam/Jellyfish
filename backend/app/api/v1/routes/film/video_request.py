@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.core.contracts.video_generation import VideoRatio
+from app.core.contracts.video_generation import VideoRatio, VideoResolutionProfile
 
 
 class VideoGenerationTaskRequest(BaseModel):
@@ -31,4 +31,8 @@ class VideoGenerationTaskRequest(BaseModel):
         description="参考图 file_id 列表，数量需与 reference_mode 严格匹配",
     )
     ratio: VideoRatio = Field(..., description="视频画幅比例，如 16:9 / 9:16")
+    resolution_profile: VideoResolutionProfile | None = Field(
+        None,
+        description="输出分辨率档位：standard（标准/720p）或 high（高清/1080p）；不传则使用模型默认分辨率",
+    )
     # seconds 由 ShotDetail.duration 自动确定；请求体不再接收覆盖值。

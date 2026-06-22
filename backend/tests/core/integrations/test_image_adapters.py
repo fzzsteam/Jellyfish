@@ -7,6 +7,7 @@ import json
 import httpx
 import pytest
 
+from app.core.integrations.bailian.images import BailianImageApiAdapter
 from app.core.integrations.openai.images import OpenAIImageApiAdapter
 from app.core.integrations.volcengine.images import VolcengineImageApiAdapter
 from app.core.integrations.vidu.images import ViduImageApiAdapter
@@ -29,6 +30,23 @@ def _patch_httpx_client(monkeypatch: pytest.MonkeyPatch, transport: httpx.MockTr
         return real_client(transport=transport, timeout=timeout)  # type: ignore[arg-type]
 
     monkeypatch.setattr(httpx, "AsyncClient", factory)
+
+
+def test_bailian_asset_image_resolution_profiles_map_to_1k_and_2k() -> None:
+    """资产图生成使用 standard/high 档位映射到百炼 1K/2K 输出尺寸。"""
+    adapter = BailianImageApiAdapter(
+        provider_config=ProviderConfig(provider="aliyun_bailian", api_key="test-key")
+    )
+
+    standard = adapter._resolve_size(  # noqa: SLF001 - unit test locks adapter mapping
+        ImageGenerationInput(prompt="asset", purpose="asset_image", resolution_profile="standard")
+    )
+    high = adapter._resolve_size(  # noqa: SLF001 - unit test locks adapter mapping
+        ImageGenerationInput(prompt="asset", purpose="asset_image", resolution_profile="high")
+    )
+
+    assert standard == "1024*1024"
+    assert high == "2048*2048"
 
 
 @pytest.mark.asyncio

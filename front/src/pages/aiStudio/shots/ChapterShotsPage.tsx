@@ -30,7 +30,6 @@ import {
   PlusOutlined,
   ReloadOutlined,
   ScissorOutlined,
-  VideoCameraOutlined,
 } from '@ant-design/icons'
 import type { ShotRead, ShotRuntimeSummaryRead, ShotStatus } from '../../../services/generated'
 import { ScriptProcessingService, StudioChaptersService, StudioShotsService } from '../../../services/generated'
@@ -635,21 +634,13 @@ export function ChapterShotsPage() {
         </div>
 
         {shots.length > 0 ? (
-          <Space>
-            <Button
-              type="primary"
-              icon={<FileSearchOutlined />}
-              onClick={() => navigate(getChapterStudioPath(projectId, chapterId))}
-            >
-              进入分镜工作室
-            </Button>
-            <Button
-              icon={<VideoCameraOutlined />}
-              onClick={() => navigate(getChapterStudioPath(projectId, chapterId))}
-            >
-              继续当前镜头
-            </Button>
-          </Space>
+          <Button
+            type="primary"
+            icon={<FileSearchOutlined />}
+            onClick={() => navigate(getChapterStudioPath(projectId, chapterId))}
+          >
+            进入分镜工作室
+          </Button>
         ) : null}
       </Header>
 

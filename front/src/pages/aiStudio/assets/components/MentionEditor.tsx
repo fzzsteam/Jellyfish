@@ -355,7 +355,7 @@ export function MentionEditor({
           ) : (
             <div
               className="flex flex-wrap gap-2 p-2"
-              style={{ maxWidth: 1192 }}
+              style={{ maxWidth: 1192, justifyContent: 'center' }}
             >
               {imageOptions.map((option, idx) => (
                 <div

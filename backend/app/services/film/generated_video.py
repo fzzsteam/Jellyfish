@@ -200,6 +200,7 @@ async def build_run_args(
     prompt: str | None,
     images: list[str],
     ratio: str | None,
+    resolution_profile: str | None = None,
 ) -> dict:
     model = await resolve_video_model(db, model_id, user_id=user_id)
     provider_cfg = await load_provider_config_by_model(db, model)
@@ -241,6 +242,8 @@ async def build_run_args(
         "ratio": resolved_ratio,
         "seconds": shot_detail.duration,
     }
+    if resolution_profile:
+        input_dict["resolution_profile"] = resolution_profile
     if asset_reference_data_urls:
         input_dict["reference_image_base64s"] = asset_reference_data_urls
     if cap.supports_watermark:

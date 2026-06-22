@@ -248,6 +248,12 @@ class BailianImageApiAdapter:
         if input_.size:
             return input_.size
 
+        if input_.purpose == "asset_image":
+            profile = (input_.resolution_profile or "standard").strip().lower()
+            if profile == "high":
+                return "2048*2048"
+            return "1024*1024"
+
         return "1024*1024"
 
     @staticmethod

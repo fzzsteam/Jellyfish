@@ -30,5 +30,9 @@ export type StudioImageTaskRequest = {
      * 参考图 file_id 列表（可多张，顺序有效）。创建任务接口会基于 file_id 从数据中解析为参考图
      */
     images?: Array<string>;
+    /**
+     * 资产图片输出分辨率档位：standard=1K，high=2K
+     */
+    resolution_profile?: ('standard' | 'high' | null);
 };
 

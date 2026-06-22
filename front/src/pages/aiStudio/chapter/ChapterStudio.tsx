@@ -639,6 +639,7 @@ const ChapterStudio: React.FC = () => {
   const [promptAssetsUpdating, setPromptAssetsUpdating] = useState(false)
 
   const [keyframeResolutionProfile, setKeyframeResolutionProfile] = useState<KeyframeResolutionProfile>('standard')
+  const [videoResolutionProfile, setVideoResolutionProfile] = useState<'720p' | '1080p'>('720p')
   const [generatedVideos, setGeneratedVideos] = useState<GeneratedVideoItem[]>([])
   /** shotId → 该分镜被选中的视频 fileId */
   const [selectedVideosByShot, setSelectedVideosByShot] = useState<Record<string, string>>({})
@@ -1201,6 +1202,7 @@ const ChapterStudio: React.FC = () => {
       const shot = targets[i]
       setBatchGenerateProgress({ current: i + 1, total: targets.length })
       try {
+        const batchResolutionProfile = videoResolutionProfile === '1080p' ? 'high' : 'standard'
         const previewRes = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
             requestBody: {
               shot_id: shot.id,
@@ -1208,6 +1210,7 @@ const ChapterStudio: React.FC = () => {
               prompt: null,
               images: [],
             ratio,
+            resolution_profile: batchResolutionProfile,
           } as any,
         })
         const derived = (previewRes as any)?.data ?? null
@@ -1222,6 +1225,7 @@ const ChapterStudio: React.FC = () => {
             prompt,
             images,
             ratio,
+            resolution_profile: batchResolutionProfile,
           } as any,
         })
         successCount++
@@ -1236,7 +1240,7 @@ const ChapterStudio: React.FC = () => {
     } else {
       message.warning(`提交完成：${successCount} 成功，${failCount} 失败`)
     }
-  }, [resolveShotVideoRatio, shots, setBatchGenerating, setBatchGenerateProgress])
+  }, [resolveShotVideoRatio, shots, setBatchGenerating, setBatchGenerateProgress, videoResolutionProfile])
 
   /** 将所有已生成视频下载到用户选择的本地文件夹 */
   /** 下载每个分镜中被选中的视频到用户指定的本地文件夹 */
@@ -2453,6 +2457,8 @@ const ChapterStudio: React.FC = () => {
                 imageGenerationOptions={imageGenerationOptions}
                 keyframeResolutionProfile={keyframeResolutionProfile}
                 onChangeKeyframeResolutionProfile={setKeyframeResolutionProfile}
+                videoResolutionProfile={videoResolutionProfile}
+                onChangeVideoResolutionProfile={setVideoResolutionProfile}
                 loadingDetail={loadingDetail}
                 shotDetail={shotDetail}
                 frameImages={frameImages}
@@ -2521,6 +2527,8 @@ const ChapterStudio: React.FC = () => {
                     imageGenerationOptions={imageGenerationOptions}
                     keyframeResolutionProfile={keyframeResolutionProfile}
                     onChangeKeyframeResolutionProfile={setKeyframeResolutionProfile}
+                    videoResolutionProfile={videoResolutionProfile}
+                    onChangeVideoResolutionProfile={setVideoResolutionProfile}
                     loadingDetail={loadingDetail}
                     shotDetail={shotDetail}
                     frameImages={frameImages}
@@ -2659,6 +2667,8 @@ function Inspector(props: {
   imageGenerationOptions: ImageGenerationOptionsRead | null
   keyframeResolutionProfile: KeyframeResolutionProfile
   onChangeKeyframeResolutionProfile: (value: KeyframeResolutionProfile) => void
+  videoResolutionProfile: '720p' | '1080p'
+  onChangeVideoResolutionProfile: (value: '720p' | '1080p') => void
   loadingDetail: boolean
   shotDetail: ShotDetailRead | null
   frameImages: ShotFrameImageRead[]
@@ -2692,6 +2702,8 @@ function Inspector(props: {
     imageGenerationOptions,
     keyframeResolutionProfile,
     onChangeKeyframeResolutionProfile,
+    videoResolutionProfile,
+    onChangeVideoResolutionProfile,
     loadingDetail,
     shotDetail,
     frameImages,
@@ -2719,6 +2731,8 @@ function Inspector(props: {
   const [refFrameTypeSelectLoading, setRefFrameTypeSelectLoading] = useState(false)
   const [useBoneDepth, setUseBoneDepth] = useState(false)
   const [audioMode, setAudioMode] = useState<'none' | 'prompt' | 'upload'>('none')
+  const videoResolution = videoResolutionProfile
+  const setVideoResolution = onChangeVideoResolutionProfile
   const [inspectorTabKey, setInspectorTabKey] = useState<InspectorTabKey>('camera')
   const [sceneNameMap, setSceneNameMap] = useState<Record<string, string>>({})
   const [characterNameMap, setCharacterNameMap] = useState<Record<string, string>>({})
@@ -2870,6 +2884,7 @@ function Inspector(props: {
           prompt: (base.prompt || '').trim() || null,
           images: context.images,
           ratio,
+          resolution_profile: videoResolution === '1080p' ? 'high' : 'standard',
         } as any,
       })
       const data = (res as any)?.data ?? null
@@ -2895,6 +2910,7 @@ function Inspector(props: {
           prompt: (derived.prompt || '').trim(),
           images: derived.images,
           ratio,
+          resolution_profile: videoResolution === '1080p' ? 'high' : 'standard',
         } as any,
       })
       return {
@@ -4490,9 +4506,19 @@ function Inspector(props: {
                               }}
                               disabled={cameraUpdating}
                             />
-                            <div className="mt-1 text-[11px] text-gray-400">
-                              当前生效：{resolveVideoRatioForRequest() || '未设置'}
-                            </div>
+                          </div>
+                          <div>
+                            <div className="text-gray-500 text-xs mb-1">分辨率</div>
+                            <Select
+                              size="small"
+                              value={videoResolution}
+                              options={[
+                                { value: '720p', label: '720p' },
+                                { value: '1080p', label: '1080p' },
+                              ]}
+                              onChange={(value) => setVideoResolution(value)}
+                              disabled={cameraUpdating}
+                            />
                           </div>
                         </div>
                       </div>
@@ -5958,6 +5984,29 @@ function Inspector(props: {
                     </Image.PreviewGroup>
                   </div>
                 )}
+              </div>
+              <div className="flex items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-xs font-medium text-slate-600">生成参数</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">分辨率</span>
+                  <Select
+                    size="small"
+                    value={videoResolution}
+                    options={[
+                      { value: '720p', label: '720p（标准）' },
+                      { value: '1080p', label: '1080p（高清）' },
+                    ]}
+                    onChange={(value) => setVideoResolution(value)}
+                    disabled={videoPromptPreviewSubmitting}
+                    style={{ width: 130 }}
+                  />
+                  <span className="text-xs text-slate-400">
+                    {(videoResolution === '1080p'
+                      ? ({ '16:9': '1920×1080', '4:3': '1440×1080', '1:1': '1080×1080', '3:4': '1080×1440', '9:16': '1080×1920', '21:9': '2520×1080' } as Record<string, string>)
+                      : ({ '16:9': '1280×720', '4:3': '1024×768', '1:1': '1024×1024', '3:4': '768×1024', '9:16': '720×1280', '21:9': '1680×720' } as Record<string, string>)
+                    )[resolveVideoRatioForRequest()] ?? ''}
+                  </span>
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500 mb-2">提示词（可编辑）</div>

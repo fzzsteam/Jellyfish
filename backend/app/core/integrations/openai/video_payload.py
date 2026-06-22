@@ -33,7 +33,12 @@ def build_create_video_body(input_: VideoGenerationInput) -> dict[str, Any]:
     body: dict[str, Any] = {"prompt": input_.prompt or ""}
     if input_.model:
         body["model"] = input_.model
-    size = derive_provider_size(provider="openai", model=input_.model, ratio=input_.ratio)
+    size = derive_provider_size(
+        provider="openai",
+        model=input_.model,
+        ratio=input_.ratio,
+        resolution_profile=input_.resolution_profile,
+    )
     if size:
         body["size"] = size
     if input_.seconds is not None:

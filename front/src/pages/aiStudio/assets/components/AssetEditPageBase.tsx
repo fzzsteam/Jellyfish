@@ -8,6 +8,7 @@ import {
   Input,
   Modal,
   Row,
+  Select,
   Space,
   Spin,
   Tag,
@@ -85,7 +86,15 @@ type ImageGenerationPayload = {
   prompt: string
   images: string[]
   model_id: string | null
+  resolution_profile: AssetImageResolutionProfile
 }
+
+type AssetImageResolutionProfile = 'standard' | 'high'
+
+const ASSET_IMAGE_RESOLUTION_OPTIONS: Array<{ value: AssetImageResolutionProfile; label: string }> = [
+  { value: 'standard', label: '1K' },
+  { value: 'high', label: '2K' },
+]
 
 type ImageModelOption = ModelRead & {
   provider_name: string
@@ -270,6 +279,8 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   const [deletingCandidateId, setDeletingCandidateId] = useState<number | null>(null)
   const [uploadingCandidates, setUploadingCandidates] = useState(false)
   const [mentionedFileIds, setMentionedFileIds] = useState<string[]>([])
+  const [assetImageResolutionProfile, setAssetImageResolutionProfile] =
+    useState<AssetImageResolutionProfile>('standard')
 
   const smartDetectRelationType = useMemo(() => getSmartDetectRelationType(relationType), [relationType])
   const smartDetectRelationEntityId = useMemo(
@@ -664,6 +675,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
         prompt,
         images: mentionedFileIds,
         model_id: selectedImageModelId,
+        resolution_profile: assetImageResolutionProfile,
       })
       if (!taskId) {
         message.error('生成任务创建失败：缺少任务 ID')
@@ -945,6 +957,16 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                       })}
                     </div>
                   )}
+                  <div className="mt-3">
+                    <div className="text-gray-600 text-sm mb-1">分辨率</div>
+                    <Select
+                      size="small"
+                      value={assetImageResolutionProfile}
+                      options={ASSET_IMAGE_RESOLUTION_OPTIONS}
+                      onChange={(value) => setAssetImageResolutionProfile(value)}
+                      disabled={savingBase || smartDetectBusy || imageModelsLoading || imageModels.length === 0}
+                    />
+                  </div>
                 </div>
               </div>
             ),

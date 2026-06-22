@@ -79,6 +79,10 @@ class StudioImageTaskRequest(BaseModel):
         default_factory=list,
         description="参考图 file_id 列表（可多张，顺序有效）。创建任务接口会基于 file_id 从数据中解析为参考图",
     )
+    resolution_profile: ImageResolutionProfile | None = Field(
+        "standard",
+        description="资产图片输出分辨率档位：standard=1K，high=2K",
+    )
 
 
 class ShotFrameImageTaskRequest(BaseModel):
@@ -205,6 +209,8 @@ async def create_actor_image_generation_task(
         relation_entity_id=submission.relation_entity_id,
         prompt=submission.prompt,
         images=ref_images if ref_images else None,
+        resolution_profile=body.resolution_profile,
+        purpose="asset_image",
     )
     return created_response(TaskCreated(task_id=task_id))
 
@@ -275,6 +281,8 @@ async def create_asset_image_generation_task(
         relation_entity_id=submission.relation_entity_id,
         prompt=submission.prompt,
         images=ref_images if ref_images else None,
+        resolution_profile=body.resolution_profile,
+        purpose="asset_image",
     )
     return created_response(TaskCreated(task_id=task_id))
 
@@ -343,6 +351,8 @@ async def create_character_image_generation_task(
         relation_entity_id=submission.relation_entity_id,
         prompt=submission.prompt,
         images=ref_images if ref_images else None,
+        resolution_profile=body.resolution_profile,
+        purpose="asset_image",
     )
     return created_response(TaskCreated(task_id=task_id))
 

@@ -379,7 +379,10 @@ class BailianVideoApiAdapter:
 
     @staticmethod
     def _resolve_resolution(input_: VideoGenerationInput) -> str:
-        """解析视频分辨率。支持 480P/720P，默认 720P。"""
+        """解析视频分辨率：resolution_profile=high → 1080P，standard/未设置 → 720P，兼容旧 size 字段。"""
+        profile = getattr(input_, "resolution_profile", None)
+        if profile == "high":
+            return "1080P"
         size_val = getattr(input_, "size", None)
         if size_val:
             size_str = str(size_val).upper()

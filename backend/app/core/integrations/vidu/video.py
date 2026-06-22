@@ -295,10 +295,14 @@ class ViduVideoApiAdapter:
         aspect_ratio: str,
         model: str,
     ) -> str:
-        """Resolve Vidu video resolution, defaulting by payload mode."""
+        """Resolve Vidu video resolution; resolution_profile takes precedence over capability mapping."""
         if inp.source_video_base64:
             return "1080p"
-
+        # 用户选择的分辨率档位优先
+        if inp.resolution_profile == "high":
+            return "1080p"
+        if inp.resolution_profile == "standard":
+            return "720p"
         mapping = cap.ratio_to_size_mapping or {}
         fallback = "720p" if ViduVideoApiAdapter._uses_flat_images_payload(model) else "1080p"
         return mapping.get(aspect_ratio) or fallback

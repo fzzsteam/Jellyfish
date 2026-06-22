@@ -16,6 +16,14 @@ DEFAULT_RATIO_TO_SIZE_MAPPING: dict[str, str] = {
     "9:16": "720x1280",
     "21:9": "1680x720",
 }
+HIGH_RATIO_TO_SIZE_MAPPING: dict[str, str] = {
+    "16:9": "1920x1080",
+    "4:3": "1440x1080",
+    "1:1": "1080x1080",
+    "3:4": "1080x1440",
+    "9:16": "1080x1920",
+    "21:9": "2520x1080",
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,10 +160,14 @@ def derive_provider_size(
     provider: ProviderKey,
     model: str | None,
     ratio: VideoRatio,
+    resolution_profile: str | None = None,
 ) -> str | None:
-    """Derive provider-specific size or resolution from a normalized ratio."""
+    """Derive provider-specific size or resolution from a normalized ratio and resolution profile."""
     cap = resolve_video_capability(provider=provider, model=model)
-    mapping = cap.ratio_to_size_mapping or DEFAULT_RATIO_TO_SIZE_MAPPING
+    if resolution_profile == "high":
+        mapping = HIGH_RATIO_TO_SIZE_MAPPING
+    else:
+        mapping = cap.ratio_to_size_mapping or DEFAULT_RATIO_TO_SIZE_MAPPING
     return mapping.get(ratio)
 
 

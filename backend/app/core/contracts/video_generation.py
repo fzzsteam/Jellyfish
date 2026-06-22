@@ -17,6 +17,7 @@ def _strip_optional_b64(value: str | None) -> str | None:
 
 
 VideoRatio = Literal["16:9", "4:3", "1:1", "3:4", "9:16", "21:9"]
+VideoResolutionProfile = Literal["standard", "high"]
 
 
 class VideoGenerationInput(BaseModel):
@@ -55,6 +56,10 @@ class VideoGenerationInput(BaseModel):
         description="随机种子，-1 或 [0, 2^32-1]，供应商/模型可能有差异",
     )
     watermark: Optional[bool] = Field(None, description="是否包含水印，供应商/模型可能有差异")
+    resolution_profile: Optional[VideoResolutionProfile] = Field(
+        None,
+        description="输出分辨率档位：standard（标准/720p）或 high（高清/1080p）；由供应商适配层映射为最终分辨率",
+    )
 
     @model_validator(mode="after")
     def require_prompt_or_any_reference(self) -> "VideoGenerationInput":
