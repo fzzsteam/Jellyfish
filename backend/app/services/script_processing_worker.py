@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import uuid as _uuid
 from typing import Any
 
 from fastapi import HTTPException
@@ -360,24 +362,183 @@ def apply_auto_extraction_after_division(
     chapter_id: str,
     result: ScriptDivisionResult,
 ) -> AutoPreparationSummary:
-    """在分镜拆分写库后，串行提取每个镜头的资产/对白并执行自动准备。返回自动准备摘要。"""
+    """在分镜拆分写库后，串行提取每个镜头的资产/对白并执行自动准备。返回自动准备摘要。
 
+    计费契约（修复 auto-extract 漏费）：
+    - auto-extract 会触发一次文本 LLM 调用（``ElementExtractorAgent.extract``），可能命中缓存
+      也可能真正调用模型。此处按用户默认文本模型单价**乐观冻结**一笔积分：
+      - 缓存命中（``from_cache=True``）→ LLM 未被调用 → **解冻**（用户免费）。
+      - 缓存未命中（``from_cache=False``）→ LLM 已调用 → **消费**冻结积分。
+    - 余额不足 → 跳过 auto-extraction（记 warning），divide 主流程不受影响，后续 auto-prep
+      仍正常执行（图片级联各自独立冻结）。
+    - 冻结/解冻/消费通过 ``asyncio.run`` 桥接异步账本（与 ``settle_task_billing_sync`` 同款），
+      DivideTaskExecutor 在 Celery worker 同步上下文运行，无运行中的事件循环，``asyncio.run`` 安全。
+    """
     chapter = db.get(Chapter, chapter_id)
     if chapter is None:
         raise HTTPException(status_code=404, detail="Chapter not found")
-    draft, _from_cache = generate_extraction_result(
-        db=db,
-        user_id=user_id,
-        project_id=chapter.project_id,
-        chapter_id=chapter_id,
-        script_division=result.model_dump(),
-        consistency=None,
-        refresh_cache=False,
-    )
+
+    # 解析默认文本模型单价，用于乐观冻结。模型未配置时 text_model=None：仍尝试提取
+    # （可能命中缓存，此时无需计费；缓存未命中则提取会在 LLM 构建处抛 503，与历史行为一致）。
+    text_model = None
+    try:
+        from app.services.llm.runtime import _require_provider_and_model_sync
+        from app.models.llm import ModelCategoryKey
+        _provider, text_model = _require_provider_and_model_sync(
+            db, user_id=user_id, category=ModelCategoryKey.text
+        )
+    except Exception:  # noqa: BLE001 - 无默认文本模型：跳过计费但保留提取（缓存可能命中）
+        logger.debug(
+            "auto_extract: 未配置默认文本模型，跳过计费 chapter_id=%s", chapter_id
+        )
+
+    billing_id: str | None = None
+    if text_model is not None:
+        from app.services.points import InsufficientPointsError, calculate_points
+        required = calculate_points(
+            category="text",
+            unit_points=int(text_model.unit_points),
+            duration_seconds=None,
+            resolution=None,
+            generation_count=1,
+        )
+        billing_id = _uuid.uuid4().hex
+
+        # 1. 乐观冻结（缓存命中后续解冻，缓存未命中后续消费）。
+        try:
+            asyncio.run(_freeze_text_call_async(
+                user_id=user_id,
+                billing_id=billing_id,
+                amount=required,
+                model_id=str(text_model.id),
+                unit_points=int(text_model.unit_points),
+            ))
+        except InsufficientPointsError as e:
+            logger.warning(
+                "auto_extract: 余额不足，跳过自动提取 chapter_id=%s available=%s required=%s shortfall=%s",
+                chapter_id, e.available, e.required, e.shortfall,
+            )
+            return auto_prepare_chapter_shots_sync(
+                db, user_id=user_id, project_id=chapter.project_id, chapter_id=chapter_id
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "auto_extract: 文本积分冻结失败，跳过自动提取 chapter_id=%s", chapter_id
+            )
+            return auto_prepare_chapter_shots_sync(
+                db, user_id=user_id, project_id=chapter.project_id, chapter_id=chapter_id
+            )
+
+    # 2. 执行提取（可能缓存命中也可能真正调用 LLM）。
+    try:
+        draft, from_cache = generate_extraction_result(
+            db=db,
+            user_id=user_id,
+            project_id=chapter.project_id,
+            chapter_id=chapter_id,
+            script_division=result.model_dump(),
+            consistency=None,
+            refresh_cache=False,
+        )
+    except BaseException:
+        # 提取异常 → 若已冻结则解冻，避免悬挂；再上抛让 divide 的 apply_result 链路感知。
+        if billing_id is not None:
+            try:
+                asyncio.run(_unfreeze_text_call_async(user_id=user_id, billing_id=billing_id))
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "auto_extract: 解冻失败 billing_id=%s；补偿任务(Task 7)将兜底", billing_id
+                )
+        raise
+
+    # 3. 按 cache 结果结算：命中 → 解冻（免费），未命中 → 消费（扣减）。仅在已冻结时结算。
+    if billing_id is not None:
+        try:
+            if from_cache:
+                asyncio.run(_unfreeze_text_call_async(user_id=user_id, billing_id=billing_id))
+            else:
+                asyncio.run(_consume_text_call_async(user_id=user_id, billing_id=billing_id))
+        except Exception:  # noqa: BLE001
+            # 结算失败（mutex race / 锁繁忙等）不阻断提取结果落库；补偿任务(Task 7)兜底。
+            logger.exception(
+                "auto_extract: 结算失败 billing_id=%s from_cache=%s；补偿任务(Task 7)将兜底",
+                billing_id, from_cache,
+            )
+
     apply_extraction_result(db, chapter_id=chapter_id, draft=draft)
     return auto_prepare_chapter_shots_sync(
         db, user_id=user_id, project_id=chapter.project_id, chapter_id=chapter_id
     )
+
+
+# ---------------------------------------------------------------------------
+# 同步 → 异步账本桥接（auto-extract 在 Celery worker 同步上下文运行）
+# 与 billing.settle_task_billing_sync / shot_auto_preparation._run_async 同款模式：
+# 开一个独立 async_session_maker 会话调用账本，账本内部自行 COMMIT。
+# ---------------------------------------------------------------------------
+
+
+async def _freeze_text_call_async(
+    *,
+    user_id: str,
+    billing_id: str,
+    amount: int,
+    model_id: str,
+    unit_points: int,
+) -> None:
+    """异步冻结一笔文本提取积分。抛 InsufficientPointsError 给调用方决策。"""
+    from app.core.db import async_session_maker
+    from app.services.points import freeze_points
+
+    async with async_session_maker() as async_db:
+        await freeze_points(
+            async_db,
+            user_id=user_id,
+            billing_id=billing_id,
+            amount=amount,
+            model_id=model_id,
+            business_type="script_extract",
+            business_id=None,
+            snapshot={
+                "category": "text",
+                "unit_points": unit_points,
+                "generation_count": 1,
+                "source": "auto_extract",
+            },
+        )
+
+
+async def _consume_text_call_async(*, user_id: str, billing_id: str) -> None:
+    """异步消费冻结（缓存未命中、LLM 已调用）。BillingStateError 视为良性竞争吞掉。"""
+    from app.core.db import async_session_maker
+    from app.services.points import BillingStateError, consume_frozen
+
+    async with async_session_maker() as async_db:
+        try:
+            await consume_frozen(async_db, user_id=user_id, billing_id=billing_id)
+        except BillingStateError:
+            logger.warning(
+                "auto_extract: consume benign race for billing_id=%s", billing_id
+            )
+
+
+async def _unfreeze_text_call_async(*, user_id: str, billing_id: str) -> None:
+    """异步解冻冻结（缓存命中或提取异常）。BillingStateError 视为良性竞争吞掉。"""
+    from app.core.db import async_session_maker
+    from app.services.points import BillingStateError, unfreeze_frozen
+
+    async with async_session_maker() as async_db:
+        try:
+            await unfreeze_frozen(
+                async_db,
+                user_id=user_id,
+                billing_id=billing_id,
+                remark="auto_extract cache hit or extraction error",
+            )
+        except BillingStateError:
+            logger.warning(
+                "auto_extract: unfreeze benign race for billing_id=%s", billing_id
+            )
 
 
 def run_divide_task_sync(task_id: str) -> None:

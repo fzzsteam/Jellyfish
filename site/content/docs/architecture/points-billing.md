@@ -193,6 +193,38 @@ CHECK 约束：
 
 当前共 **11 个同步端点**与 **11 个异步端点**携带 `quote_token`。
 
+## 异步任务级联计费（auto-extract / auto-prepare）
+
+divide（`write_to_db=true`）与 extract 两个异步任务在 `apply_result` 阶段会自动触发两类**此前漏费**的下游调用，必须在级联中补冻结/结算：
+
+### auto-prepare 图片任务（N 张图片）
+
+`auto_prepare_chapter_shots_sync` 循环为每个无图资产调用 `_schedule_image_task_sync` 创建 `GenerationTask(image_generation)` 行。修复后每张图片在创建任务行**之前**：
+
+1. 按用户默认图片模型单价冻结积分（`calculate_points(category="image", ...)`）。
+2. 生成 `billing_id` 并写入 `GenerationTask.billing_id`。
+3. 后续 `run_task_celery` 的 `finally → settle_task_billing_sync` 在图片任务终态时自动 consume / unfreeze——无需额外结算代码。
+
+容错：
+
+- **余额不足**（`InsufficientPointsError`）：auto-prep 是 best-effort 级联，仅跳过该张图片（不建任务、不冻结），级联继续，divide/extract 主流程不受影响。
+- **任务行创建失败**（`begin_nested` 抛错）：解冻已落库的冻结，避免悬挂。
+- **桥接方式**：Celery worker 同步上下文通过 `asyncio.run(...)` 调用异步账本（与 `settle_task_billing_sync` 同款），账本内部自行 COMMIT。
+
+### auto-extract 文本（1 次文本调用，缓存感知）
+
+`apply_auto_extraction_after_division` 在 divide 写库后串行调用 `generate_extraction_result`，该调用可能命中缓存也可能真正调用 LLM。修复后采用**乐观冻结 + 缓存感知结算**：
+
+1. 按用户默认文本模型单价冻结积分。
+2. 调用 `generate_extraction_result`。
+3. `from_cache=True`（LLM 未调用）→ **解冻**（用户免费）；`from_cache=False`（LLM 已调用）→ **消费**。
+4. 余额不足 → 跳过 auto-extract（仍执行 auto-prep），divide 主流程不受影响。
+5. 提取异常 → 解冻已落库的冻结后上抛。
+
+默认文本模型未配置时跳过计费但仍尝试提取（可能命中缓存）；缓存未命中则提取在 LLM 构建处抛 503，与历史行为一致。
+
+
+
 ## Celery Beat 对账
 
 `points.reconcile_stale_freezes` 由 Celery Beat 调度，周期 **300 秒**，兜底处理因 worker 崩溃 / 网络中断等原因停留在"已冻结但未结算"状态的单据：

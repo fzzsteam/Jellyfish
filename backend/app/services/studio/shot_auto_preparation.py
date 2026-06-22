@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid as _uuid_mod
 from dataclasses import dataclass, field
@@ -695,8 +696,19 @@ def _load_image_run_args_sync(
     relation_type: str,
     relation_entity_id: str,
     prompt: str,
-) -> dict | None:
-    """从 DB 加载该用户默认图片模型配置并构建 run_args；未配置时返回 None。"""
+) -> tuple[dict, str, int] | None:
+    """从 DB 加载该用户默认图片模型配置并构建 run_args；未配置时返回 None。
+
+    返回三元组 ``(run_args, model_id, unit_points)``：
+    - ``run_args``：图片任务执行的供应商/模型/输入参数。
+    - ``model_id``：默认图片模型 ID，用于积分冻结的 ``model_id`` 归属。
+    - ``unit_points``：模型单价，用于在创建任务行前预冻结积分。
+
+    为什么一并返回 model_id/unit_points：调用方 ``_schedule_image_task_sync`` 需要在
+    创建 GenerationTask 行之前就冻结积分，而冻结金额按 ``calculate_points(category="image",
+    unit_points=...)`` 计算；若此处分两次查询模型会导致逻辑重复且存在竞态（两次读到的模型可能不同），
+    因此在一次解析中把计价所需的权威字段一并带出。
+    """
     settings = db.execute(
         select(ModelSettings).where(ModelSettings.user_id == user_id)
     ).scalar_one_or_none()
@@ -712,7 +724,7 @@ def _load_image_run_args_sync(
         resolved = resolve_provider_config_from_provider(provider=provider, category=ModelCategoryKey.image)
     except Exception:  # noqa: BLE001
         return None
-    return {
+    run_args = {
         "provider": resolved.provider_key,
         "api_key": resolved.api_key,
         "base_url": resolved.base_url,
@@ -724,6 +736,87 @@ def _load_image_run_args_sync(
             "purpose": "generic",
         },
     }
+    return run_args, str(model.id), int(model.unit_points)
+
+
+# ---------------------------------------------------------------------------
+# 同步 → 异步账本桥接（auto-prep 在 Celery worker 同步上下文运行，账本是异步的）
+# 为什么不复用 billing.settle_task_billing_sync：那是「按 task 终态结算」的入口，
+# 这里需要的是「创建任务行之前先冻结」+「任务行创建失败时解冻回滚」两个细粒度动作，
+# 与 settle 的语义不同，因此单独提供三个薄包装。桥接模式与 settle_task_billing_sync
+# 完全一致：开一个独立 async_session_maker 会话调用账本，账本内部自行 COMMIT。
+# ---------------------------------------------------------------------------
+
+
+async def _freeze_image_task_async(
+    *,
+    user_id: str,
+    billing_id: str,
+    amount: int,
+    model_id: str,
+    unit_points: int,
+) -> None:
+    """异步冻结一笔图片生成积分。账本内部 COMMIT，返回时冻结已落库。
+
+    抛 ``InsufficientPointsError`` / ``PointsOperationBusyError`` 给调用方决策（跳过该图片）。
+    """
+    from app.core.db import async_session_maker
+    from app.services.points import freeze_points
+
+    async with async_session_maker() as async_db:
+        await freeze_points(
+            async_db,
+            user_id=user_id,
+            billing_id=billing_id,
+            amount=amount,
+            model_id=model_id,
+            business_type="image_generation",
+            business_id=None,
+            snapshot={
+                "category": "image",
+                "unit_points": unit_points,
+                "generation_count": 1,
+                "source": "auto_prepare",
+            },
+        )
+
+
+async def _unfreeze_image_task_async(*, user_id: str, billing_id: str) -> None:
+    """异步解冻一笔积分（任务行创建失败时回滚冻结）。
+
+    BillingStateError（幂等/互斥冲突）视为良性竞争吞掉；其它异常仅记录日志——
+    残留冻结由 Task 7 的 Celery Beat 补偿任务兜底，不应阻断 auto-prep 主流程。
+    """
+    from app.core.db import async_session_maker
+    from app.services.points import BillingStateError, unfreeze_frozen
+
+    async with async_session_maker() as async_db:
+        try:
+            await unfreeze_frozen(
+                async_db,
+                user_id=user_id,
+                billing_id=billing_id,
+                remark="auto_prepare image task creation failed",
+            )
+        except BillingStateError:
+            _logger.warning(
+                "auto_prep: unfreeze benign race for billing_id=%s", billing_id
+            )
+        except Exception:  # noqa: BLE001 - 解冻失败不阻断主流程，补偿任务兜底
+            _logger.exception(
+                "auto_prep: unfreeze failed for billing_id=%s; Celery Beat 补偿(Task 7)将兜底",
+                billing_id,
+            )
+
+
+def _run_async(coro):  # noqa: ANN001
+    """在同步 worker 上下文中驱动异步协程。
+
+    auto-prep 的 executor（DivideTaskExecutor/ExtractTaskExecutor）在 Celery worker 的
+    同步上下文运行（AbstractWorkerTaskExecutor，无运行中的事件循环），因此 ``asyncio.run``
+    是安全的——与 ``billing.settle_task_billing_sync`` 使用完全相同的桥接模式。
+    """
+    return asyncio.run(coro)
 
 
 def _schedule_image_task_sync(
@@ -732,8 +825,62 @@ def _schedule_image_task_sync(
     user_id: str,
     run_args: dict,
     summary: AutoPreparationSummary,
+    model_id: str,
+    unit_points: int,
 ) -> None:
-    """在当前事务的 SAVEPOINT 中创建归属 user_id 的图片生成任务记录；失败则静默回滚并跳过。"""
+    """在当前事务的 SAVEPOINT 中创建归属 user_id 的图片生成任务记录；失败则静默回滚并跳过。
+
+    计费契约（修复 auto-prep 漏费）：
+    - **创建任务行之前**先按图片模型单价冻结积分（``billing_id`` 绑定到任务行）。
+      这样后续 ``run_task_celery`` 的 ``finally → settle_task_billing_sync`` 会在图片任务
+      终态时自动 consume（成功）/ unfreeze（失败/取消），无需在此额外结算。
+    - **余额不足**（``InsufficientPointsError``）：auto-prep 是 best-effort 级联，不阻断
+      divide/extract 主流程，仅跳过这一张图片（不建任务、不冻结），记 warning 后返回。
+    - **任务行创建失败**（``begin_nested`` 抛错）：必须解冻已落库的冻结，否则会悬挂至
+      Celery Beat 补偿。解冻本身被包裹在 try/except 中吞掉异常（补偿兜底）。
+    """
+    from app.services.points import InsufficientPointsError, calculate_points
+
+    required = calculate_points(
+        category="image",
+        unit_points=unit_points,
+        duration_seconds=None,
+        resolution=None,
+        generation_count=1,
+    )
+    billing_id = _uuid_mod.uuid4().hex
+
+    # 1. 预冻结（账本内部 COMMIT，返回时已落库）。余额不足 → 跳过该图片，不阻断级联。
+    try:
+        _run_async(
+            _freeze_image_task_async(
+                user_id=user_id,
+                billing_id=billing_id,
+                amount=required,
+                model_id=model_id,
+                unit_points=unit_points,
+            )
+        )
+    except InsufficientPointsError as e:
+        _logger.warning(
+            "auto_prep: 余额不足，跳过图片生成 relation_type=%s relation_entity_id=%s "
+            "available=%s required=%s shortfall=%s",
+            run_args.get("relation_type"),
+            run_args.get("relation_entity_id"),
+            e.available,
+            e.required,
+            e.shortfall,
+        )
+        return
+    except Exception:  # noqa: BLE001 - 锁繁忙等其它账本异常：跳过该图片，不阻断主流程
+        _logger.exception(
+            "auto_prep: 图片积分冻结失败，跳过 relation_type=%s relation_entity_id=%s",
+            run_args.get("relation_type"),
+            run_args.get("relation_entity_id"),
+        )
+        return
+
+    # 2. 创建任务行（绑定 billing_id）。失败则解冻回滚。
     task_id = str(_uuid_mod.uuid4())
     try:
         with db.begin_nested():
@@ -744,6 +891,7 @@ def _schedule_image_task_sync(
                 task_kind="image_generation",
                 status=GenerationTaskStatus.pending,
                 payload={"run_args": run_args},
+                billing_id=billing_id,
             ))
             db.flush()
             db.add(GenerationTaskLink(
@@ -756,10 +904,12 @@ def _schedule_image_task_sync(
         summary.image_task_ids.append(task_id)
     except Exception:  # noqa: BLE001
         _logger.warning(
-            "auto_prep: 图片任务记录创建失败，跳过 relation_type=%s relation_entity_id=%s",
+            "auto_prep: 图片任务记录创建失败，解冻并跳过 relation_type=%s relation_entity_id=%s",
             run_args.get("relation_type"),
             run_args.get("relation_entity_id"),
         )
+        # 解冻已落库的冻结；解冻异常由 _unfreeze_image_task_async 内部吞掉（补偿兜底）。
+        _run_async(_unfreeze_image_task_async(user_id=user_id, billing_id=billing_id))
 
 
 def _auto_create_and_link_sync(
@@ -840,15 +990,23 @@ def _auto_create_and_link_sync(
                 slot_info = _get_or_create_image_slot_sync(db, candidate_type=candidate_type, entity_id=entity_id)
                 if slot_info is not None:
                     relation_type, relation_entity_id = slot_info
-                    run_args = _load_image_run_args_sync(
+                    image_spec = _load_image_run_args_sync(
                         db,
                         user_id=user_id,
                         relation_type=relation_type,
                         relation_entity_id=relation_entity_id,
                         prompt=prompt,
                     )
-                    if run_args is not None:
-                        _schedule_image_task_sync(db, user_id=user_id, run_args=run_args, summary=summary)
+                    if image_spec is not None:
+                        run_args, model_id, unit_points = image_spec
+                        _schedule_image_task_sync(
+                            db,
+                            user_id=user_id,
+                            run_args=run_args,
+                            summary=summary,
+                            model_id=model_id,
+                            unit_points=unit_points,
+                        )
             except Exception:  # noqa: BLE001
                 _logger.warning("auto_prep: 图片生成调度失败，候选 '%s' 仍将完成关联", candidate_name)
 
@@ -933,15 +1091,23 @@ def auto_prepare_chapter_shots_sync(
                 )
                 if slot_info is not None:
                     relation_type, relation_entity_id = slot_info
-                    run_args = _load_image_run_args_sync(
+                    image_spec = _load_image_run_args_sync(
                         db,
                         user_id=user_id,
                         relation_type=relation_type,
                         relation_entity_id=relation_entity_id,
                         prompt=prompt,
                     )
-                    if run_args is not None:
-                        _schedule_image_task_sync(db, user_id=user_id, run_args=run_args, summary=summary)
+                    if image_spec is not None:
+                        run_args, model_id, unit_points = image_spec
+                        _schedule_image_task_sync(
+                            db,
+                            user_id=user_id,
+                            run_args=run_args,
+                            summary=summary,
+                            model_id=model_id,
+                            unit_points=unit_points,
+                        )
             except Exception:  # noqa: BLE001
                 _logger.warning(
                     "auto_prep: 第一轮角色图片调度失败，候选 '%s'", candidate.candidate_name
