@@ -34,6 +34,11 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
 
+    # 积分计费
+    # 试算凭证（quote token）有效期：覆盖「试算 → 用户确认扣费」的典型交互窗口。
+    # 其他积分计费配置（锁定超时、对账阈值等）由后续任务按需追加。
+    points_quote_expire_seconds: int = 300
+
     # 初始管理员账号（仅在 users 表为空时用于播种）
     initial_admin_username: str = "admin"
     initial_admin_password: str | None = None
