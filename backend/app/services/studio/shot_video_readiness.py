@@ -9,6 +9,7 @@ from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider
 from app.models.studio import (
     Shot,
     ShotCandidateStatus,
+    ShotCandidateType,
     ShotDialogueCandidateStatus,
     ShotDetail,
     ShotExtractedCandidate,
@@ -51,6 +52,7 @@ async def _count_pending_candidates(db: AsyncSession, *, shot_id: str) -> tuple[
     asset_stmt = (
         select(func.count(ShotExtractedCandidate.id))
         .where(ShotExtractedCandidate.shot_id == shot_id)
+        .where(ShotExtractedCandidate.candidate_type != ShotCandidateType.costume)
         .where(ShotExtractedCandidate.candidate_status == ShotCandidateStatus.pending)
     )
     dialogue_stmt = (

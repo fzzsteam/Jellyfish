@@ -34,6 +34,10 @@ class VideoGenerationInput(BaseModel):
     first_frame_base64: Optional[str] = Field(None, description="首帧图：纯 base64 或 data:image/...;base64,...")
     last_frame_base64: Optional[str] = Field(None, description="尾帧图：纯 base64 或 data URL")
     key_frame_base64: Optional[str] = Field(None, description="关键帧图：纯 base64 或 data URL")
+    reference_image_base64s: list[str] = Field(
+        default_factory=list,
+        description="r2v 多参考图：角色、场景、道具等资产图，纯 base64 或 data URL",
+    )
 
     #: 视频编辑模式专用：源视频（base64 或 HTTP(S) URL），用于 video-edit 类模型
     source_video_base64: Optional[str] = Field(
@@ -61,6 +65,7 @@ class VideoGenerationInput(BaseModel):
                 _strip_optional_b64(self.last_frame_base64),
                 _strip_optional_b64(self.key_frame_base64),
                 _strip_optional_b64(self.source_video_base64),
+                *[_strip_optional_b64(item) for item in self.reference_image_base64s],
             ]
         )
         if not has_prompt and not has_ref:

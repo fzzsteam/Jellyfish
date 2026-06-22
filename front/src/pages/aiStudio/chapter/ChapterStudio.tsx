@@ -1202,11 +1202,11 @@ const ChapterStudio: React.FC = () => {
       setBatchGenerateProgress({ current: i + 1, total: targets.length })
       try {
         const previewRes = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
-          requestBody: {
-            shot_id: shot.id,
-            reference_mode: 'text_only',
-            prompt: null,
-            images: [],
+            requestBody: {
+              shot_id: shot.id,
+              reference_mode: 'text_only',
+              prompt: null,
+              images: [],
             ratio,
           } as any,
         })
@@ -2779,7 +2779,6 @@ function Inspector(props: {
     () => videoModels.find((item) => item.id === selectedVideoModelId) ?? null,
     [selectedVideoModelId, videoModels],
   )
-
   useEffect(() => {
     let active = true
     setVideoModelsLoading(true)
@@ -2866,6 +2865,7 @@ function Inspector(props: {
       const res = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
         requestBody: {
           shot_id: selectedShot.id,
+          model_id: selectedVideoModelId,
           reference_mode: context.referenceMode,
           prompt: (base.prompt || '').trim() || null,
           images: context.images,
@@ -2890,6 +2890,7 @@ function Inspector(props: {
       const created = await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
         requestBody: {
           shot_id: selectedShot.id,
+          model_id: selectedVideoModelId,
           reference_mode: context.referenceMode,
           prompt: (derived.prompt || '').trim(),
           images: derived.images,

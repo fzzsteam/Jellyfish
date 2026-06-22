@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.models.studio import (
     Shot,
     ShotCandidateStatus,
+    ShotCandidateType,
     ShotDialogueCandidateStatus,
     ShotExtractedCandidate,
     ShotExtractedDialogueCandidate,
@@ -33,10 +34,13 @@ async def _count_candidates(db: AsyncSession, *, shot_id: str) -> tuple[int, int
     """
     total_stmt = select(func.count(ShotExtractedCandidate.id)).where(
         ShotExtractedCandidate.shot_id == shot_id
+    ).where(
+        ShotExtractedCandidate.candidate_type != ShotCandidateType.costume
     )
     unresolved_stmt = (
         select(func.count(ShotExtractedCandidate.id))
         .where(ShotExtractedCandidate.shot_id == shot_id)
+        .where(ShotExtractedCandidate.candidate_type != ShotCandidateType.costume)
         .where(ShotExtractedCandidate.candidate_status == ShotCandidateStatus.pending)
     )
     total = int(await db.scalar(total_stmt) or 0)
@@ -99,10 +103,13 @@ async def mark_shot_generating(db: AsyncSession, *, shot_id: str) -> ShotStatus:
 def _count_candidates_sync(db: Session, *, shot_id: str) -> tuple[int, int]:
     total_stmt = select(func.count(ShotExtractedCandidate.id)).where(
         ShotExtractedCandidate.shot_id == shot_id
+    ).where(
+        ShotExtractedCandidate.candidate_type != ShotCandidateType.costume
     )
     unresolved_stmt = (
         select(func.count(ShotExtractedCandidate.id))
         .where(ShotExtractedCandidate.shot_id == shot_id)
+        .where(ShotExtractedCandidate.candidate_type != ShotCandidateType.costume)
         .where(ShotExtractedCandidate.candidate_status == ShotCandidateStatus.pending)
     )
     total = int(db.scalar(total_stmt) or 0)

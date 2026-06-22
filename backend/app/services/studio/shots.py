@@ -15,6 +15,7 @@ from app.models.studio import (
     Chapter,
     Shot,
     ShotCandidateStatus,
+    ShotCandidateType,
     ShotDetail,
     ShotDialogueCandidateStatus,
     ShotExtractedCandidate,
@@ -76,6 +77,7 @@ async def _fetch_extraction_counts_map(
             ),
         )
         .where(ShotExtractedCandidate.shot_id.in_(normalized_ids))
+        .where(ShotExtractedCandidate.candidate_type != ShotCandidateType.costume)
         .group_by(ShotExtractedCandidate.shot_id)
     )
     dialogue_stmt = (

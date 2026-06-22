@@ -155,6 +155,27 @@ async def test_replace_candidates_marks_pending_until_all_resolved() -> None:
 
 
 @pytest.mark.asyncio
+async def test_costume_candidates_do_not_block_shot_ready() -> None:
+    db, engine = await _build_session()
+    async with db:
+        shot = await _seed_graph(db)
+        await replace_shot_extracted_candidates(
+            db,
+            shot_id=shot.id,
+            candidates=[{"candidate_type": "costume", "candidate_name": "青衫"}],
+        )
+
+        status = await recompute_shot_status(db, shot_id=shot.id)
+        refreshed = await build_shot_read(db, shot=shot)
+
+        assert status == ShotStatus.ready
+        assert refreshed.extraction.asset_candidate_total == 0
+        assert refreshed.extraction.pending_asset_count == 0
+        assert refreshed.extraction.state == "extracted_empty"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_shot_ready_does_not_depend_on_dialog_lines() -> None:
     db, engine = await _build_session()
     async with db:

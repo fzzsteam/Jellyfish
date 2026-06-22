@@ -246,13 +246,25 @@ class BailianVideoApiAdapter:
         if mode == "r2v":
             payload_input = {"prompt": prompt_text}
             media_list = []
+            seen_ref_urls: set[str] = set()
+
+            def add_reference_image(value: str | None) -> None:
+                """Append one r2v reference image while preserving order and removing duplicates."""
+                if not value:
+                    return
+                url = self._ensure_url(value)
+                if url in seen_ref_urls:
+                    return
+                seen_ref_urls.add(url)
+                media_list.append({
+                    "type": "reference_image",
+                    "url": url,
+                })
+
             for img_field in ("first_frame_base64", "last_frame_base64", "key_frame_base64"):
-                val = getattr(input_, img_field, None)
-                if val:
-                    media_list.append({
-                        "type": "reference_image",   # r2v 统一用 reference_image
-                        "url": self._ensure_url(val),
-                    })
+                add_reference_image(getattr(input_, img_field, None))
+            for val in input_.reference_image_base64s:
+                add_reference_image(val)
 
             if media_list:
                 payload_input["media"] = media_list

@@ -69,6 +69,7 @@ async def create_video_generation_task(
         db,
         user_id=current_user.id,
         shot_id=body.shot_id,
+        model_id=body.model_id,
         reference_mode=body.reference_mode,
         prompt=body.prompt,
         images=body.images,

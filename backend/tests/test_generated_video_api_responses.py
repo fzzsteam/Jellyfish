@@ -135,8 +135,10 @@ def test_preview_video_generation_prompt_not_found_returns_api_response(
 
 def test_create_video_generation_task_returns_created_envelope(client: TestClient, monkeypatch) -> None:
     db = _FakeDB()
+    captured_build_kwargs: dict[str, object] = {}
 
     async def _fake_build_run_args(*_args, **_kwargs):
+        captured_build_kwargs.update(_kwargs)
         return {"prompt": "最终视频提示词", "images": ["file-1"]}
 
     monkeypatch.setattr(route, "build_run_args", _fake_build_run_args)
@@ -153,6 +155,7 @@ def test_create_video_generation_task_returns_created_envelope(client: TestClien
                 "prompt": "生成一个节奏紧张的视频片段",
                 "images": [],
                 "ratio": "9:16",
+                "model_id": "happyhorse-r2v",
             },
         )
     finally:
@@ -166,6 +169,7 @@ def test_create_video_generation_task_returns_created_envelope(client: TestClien
     assert body["meta"] is None
     assert db.committed is True
     assert len(db.added) == 1
+    assert captured_build_kwargs["model_id"] == "happyhorse-r2v"
 
 
 def test_create_video_generation_task_validation_error_returns_api_response(client: TestClient) -> None:
