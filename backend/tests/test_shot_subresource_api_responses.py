@@ -42,6 +42,24 @@ class _FakeShotSubresourceDB:
         self._line_id = 1
         self._frame_id = 1
 
+    class _ScalarResult:
+        """模拟 SQLAlchemy `scalars().first()` 结果，供候选回退逻辑读取。"""
+
+        def __init__(self, value: object | None) -> None:
+            self._value = value
+
+        def first(self) -> object | None:
+            return self._value
+
+    class _ExecuteResult:
+        """模拟 SQLAlchemy execute 返回对象，仅覆盖当前测试所需标量读取。"""
+
+        def __init__(self, value: object | None) -> None:
+            self._value = value
+
+        def scalars(self) -> "_FakeShotSubresourceDB._ScalarResult":
+            return _FakeShotSubresourceDB._ScalarResult(self._value)
+
     async def get(self, model: type, entity_id):  # noqa: ANN001
         if model is Project:
             return self.projects.get(entity_id)
@@ -104,6 +122,11 @@ class _FakeShotSubresourceDB:
             self.frame_images.pop(obj.id, None)
             return
         raise TypeError(f"Unsupported object type: {type(obj)!r}")
+
+    async def execute(self, statement):  # noqa: ANN001, ANN201
+        """提供对白 candidate 回退查询所需的空结果集。"""
+        _ = statement
+        return self._ExecuteResult(None)
 
 
 def _override_db(db: _FakeShotSubresourceDB):

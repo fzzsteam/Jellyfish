@@ -16,6 +16,7 @@ from app.models.studio import (
     ProjectStyle,
     ProjectVisualStyle,
     Shot,
+    ShotDetail,
     ShotStatus,
 )
 
@@ -27,6 +28,7 @@ class _FakeStudioDB:
         self.projects: dict[str, Project] = {}
         self.chapters: dict[str, Chapter] = {}
         self.shots: dict[str, Shot] = {}
+        self.shot_details: dict[str, ShotDetail] = {}
 
     async def get(self, model: type, entity_id: str):  # noqa: ANN001
         if model is Project:
@@ -35,6 +37,8 @@ class _FakeStudioDB:
             return self.chapters.get(entity_id)
         if model is Shot:
             return self.shots.get(entity_id)
+        if model is ShotDetail:
+            return self.shot_details.get(entity_id)
         return None
 
     def add(self, obj: object) -> None:
@@ -46,6 +50,9 @@ class _FakeStudioDB:
             return
         if isinstance(obj, Shot):
             self.shots[obj.id] = obj
+            return
+        if isinstance(obj, ShotDetail):
+            self.shot_details[obj.id] = obj
             return
         raise TypeError(f"Unsupported object type: {type(obj)!r}")
 
@@ -67,6 +74,9 @@ class _FakeStudioDB:
             return
         if isinstance(obj, Shot):
             self.shots.pop(obj.id, None)
+            return
+        if isinstance(obj, ShotDetail):
+            self.shot_details.pop(obj.id, None)
             return
         raise TypeError(f"Unsupported object type: {type(obj)!r}")
 
@@ -339,6 +349,7 @@ def test_create_shot_returns_created_envelope(client: TestClient) -> None:
     assert body["code"] == 201
     assert body["data"]["id"] == "shot-create"
     assert body["data"]["chapter_id"] == "ch-shot"
+    assert "shot-create" in db.shot_details
 
 
 def test_get_shot_not_found_returns_api_response(client: TestClient) -> None:
