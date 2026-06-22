@@ -33,7 +33,13 @@ def build_create_video_body(input_: VideoGenerationInput) -> dict[str, Any]:
     body: dict[str, Any] = {"prompt": input_.prompt or ""}
     if input_.model:
         body["model"] = input_.model
-    size = derive_provider_size(provider="openai", model=input_.model, ratio=input_.ratio)
+    # Task 5c：优先按业务层 resolution（720p/1080p）映射 WIDTHxHEIGHT，保证与计费一致。
+    size = derive_provider_size(
+        provider="openai",
+        model=input_.model,
+        ratio=input_.ratio,
+        resolution=input_.resolution,
+    )
     if size:
         body["size"] = size
     if input_.seconds is not None:

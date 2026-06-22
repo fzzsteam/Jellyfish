@@ -379,12 +379,26 @@ class BailianVideoApiAdapter:
 
     @staticmethod
     def _resolve_resolution(input_: VideoGenerationInput) -> str:
-        """解析视频分辨率。支持 480P/720P，默认 720P。"""
-        size_val = getattr(input_, "size", None)
-        if size_val:
-            size_str = str(size_val).upper()
-            if "480" in size_str or "SD" in size_str:
-                return "480P"
+        """解析视频分辨率（百炼 resolution 参数）。
+
+        Task 5c：业务层统一用 720p/1080p，百炼侧只支持 480P/720P。
+        - 业务 resolution=720p → "720P"（大写，符合 DashScope API 规范）。
+        - 业务 resolution=1080p → 百炼不支持，必须在调用前拒绝，否则会出现
+          「按 1080p 收费却生成 720p」的计费与生成不一致。拒绝以 ValueError 抛出，
+          交给上层转化为 HTTPException(400)。
+        - 未指定 resolution（None，存量/非计费路径）→ 默认 720P，保持原行为。
+        """
+        # VideoGenerationInput 契约上只有 resolution 一个分辨率来源（无 size 字段）。
+        business_resolution = input_.resolution
+        if business_resolution:
+            normalized = str(business_resolution).strip().lower()
+            if normalized == "720p":
+                return "720P"
+            if normalized == "1080p":
+                raise ValueError(
+                    "Bailian video does not support 1080p resolution; supported: 480P/720P"
+                )
+            raise ValueError(f"Unsupported business resolution for bailian: {business_resolution}")
         return "720P"
 
     @staticmethod

@@ -336,7 +336,8 @@ async def test_vidu_video_img2video_uses_official_payload(monkeypatch: pytest.Mo
                 "voice_id": "professional_host",
                 "duration": 5,
                 "seed": 0,
-                "resolution": "1080p",
+                # Task 5c：未传 resolution 时回退到 capability mapping（viduq3-pro → 540p）
+                "resolution": "540p",
                 "movement_amplitude": "auto",
                 "off_peak": False,
             }
@@ -397,7 +398,8 @@ async def test_vidu_video_start_end2video_uses_official_payload(monkeypatch: pyt
                 "prompt": "The camera zooms in on the bird, which then flies to the right.",
                 "duration": 5,
                 "seed": 0,
-                "resolution": "1080p",
+                # Task 5c：未传 resolution 时回退到 capability mapping（viduq3-pro → 540p）
+                "resolution": "540p",
                 "audio": True,
                 "off_peak": False,
             }

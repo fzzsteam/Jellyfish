@@ -200,6 +200,7 @@ async def build_run_args(
     prompt: str | None,
     images: list[str],
     ratio: str | None,
+    resolution: str | None = None,
 ) -> dict:
     model = await resolve_video_model(db, model_id, user_id=user_id)
     provider_cfg = await load_provider_config_by_model(db, model)
@@ -240,6 +241,12 @@ async def build_run_args(
         "model": model.name,
         "ratio": resolved_ratio,
         "seconds": shot_detail.duration,
+        # resolution 贯穿计费与生成两侧：保证「按 1080p 收费即按 1080p 生成」不变式。
+        # 透传 resolution（None 时不在此处隐式冻结为 720p）：
+        #   - None → 各供应商适配器 None 分支自行决定默认（存量行为），仅用于非计费/存量调用；
+        #   - 影视生成路由恒定传入显式 body.resolution（720p/1080p），从源头杜绝
+        #     「冻结档位与实际生成档位不一致」的隐患。
+        "resolution": resolution,
     }
     if asset_reference_data_urls:
         input_dict["reference_image_base64s"] = asset_reference_data_urls

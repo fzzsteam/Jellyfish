@@ -1787,3 +1787,611 @@ async def _run_variant_task_via_public_api(task_id: str) -> None:
     from app.services.script_processing_tasks import run_variant_task
 
     await run_variant_task(task_id)
+
+
+# ---------------------------------------------------------------------------
+# Task 5c：视频分辨率标准化 + 视频任务冻结
+#
+# 覆盖：
+# - 契约：VideoGenerationInput 接受 resolution；extra="forbid" 下不声明会拒绝。
+# - build_run_args：resolution 透传进 input_dict。
+# - 路由冻结：freeze_for_task 在 tm.create 之前；tm.create 失败回滚；billing_id 落任务行。
+# - 720p vs 1080p 冻结金额不同（factor 1.0 vs 2.0）。
+# - 报价篡改（resolution 不符）→ POINTS_QUOTE_CHANGED。
+# - 适配器：openai 按 resolution 映射 size；bailian 1080p 拒绝；vidu 透传 resolution。
+# - 视频任务终态结算（succeeded→consume / failed→unfreeze）：由 run_task_celery finally
+#   的 settle_task_billing_sync 覆盖（5a 已实现），此处直接构造 GenerationTask 行验证。
+# ---------------------------------------------------------------------------
+
+
+def test_video_generation_input_accepts_resolution_field() -> None:
+    """契约层：VideoGenerationInput 接受 resolution 字段（720p/1080p），None 兼容存量。"""
+    from app.core.contracts.video_generation import VideoGenerationInput
+
+    # 720p
+    inp_720 = VideoGenerationInput.model_validate({"prompt": "x", "ratio": "16:9", "resolution": "720p"})
+    assert inp_720.resolution == "720p"
+    # 1080p
+    inp_1080 = VideoGenerationInput.model_validate({"prompt": "x", "ratio": "16:9", "resolution": "1080p"})
+    assert inp_1080.resolution == "1080p"
+    # None（兼容存量/未计费）
+    inp_none = VideoGenerationInput.model_validate({"prompt": "x", "ratio": "16:9"})
+    assert inp_none.resolution is None
+    # 非法值拒绝（Literal 校验）
+    import pytest as _pytest
+
+    with _pytest.raises(Exception):
+        VideoGenerationInput.model_validate({"prompt": "x", "ratio": "16:9", "resolution": "4k"})
+
+
+@pytest.mark.asyncio
+async def test_build_run_args_passes_resolution_into_input_dict(monkeypatch) -> None:
+    """build_run_args 将 resolution 透传到 input_dict；VideoGenerationInput 能校验通过。"""
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    from app.core.contracts.video_generation import VideoGenerationInput
+    from app.core.db import Base
+    from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider
+    from app.models.studio import (
+        CameraAngle,
+        CameraMovement,
+        CameraShotType,
+        Chapter,
+        Project,
+        ProjectStyle,
+        ProjectVisualStyle,
+        Shot,
+        ShotDetail,
+        VFXType,
+    )
+    from app.services.film.generated_video import build_run_args
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    session_local = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with session_local() as db:
+            db.add(User(id="tu", username="tu", hashed_password="x", is_active=True, token_version=0))
+            db.add(Project(id="proj-1", name="p", style=ProjectStyle.real_people_city, visual_style=ProjectVisualStyle.live_action, user_id="tu"))
+            db.add(Chapter(id="ch-1", project_id="proj-1", index=1, title="ch"))
+            db.add(Shot(id="sh-1", chapter_id="ch-1", index=1, title="sh", script_excerpt="..."))
+            db.add(ShotDetail(
+                id="sh-1",
+                camera_shot=CameraShotType.ms,
+                angle=CameraAngle.eye_level,
+                movement=CameraMovement.static,
+                duration=5,
+                description="x",
+                vfx_type=VFXType.none,
+            ))
+            db.add(Provider(id="pv1", user_id="tu", name="openai", base_url="http://x", api_key="k"))
+            db.add(Model(id="mv1", user_id="tu", name="sora-mini", category=ModelCategoryKey.video, provider_id="pv1", unit_points=10))
+            db.add(ModelSettings(id=1, default_video_model_id="mv1", user_id="tu"))
+            await db.commit()
+
+            run_args = await build_run_args(
+                db,
+                user_id="tu",
+                shot_id="sh-1",
+                reference_mode="text_only",
+                prompt="提示词",
+                images=[],
+                ratio="16:9",
+                resolution="1080p",
+            )
+            # resolution 落进 input_dict
+            assert run_args["input"]["resolution"] == "1080p"
+            assert run_args["input"]["seconds"] == 5
+            # VideoGenerationInput 能校验通过（含 resolution 字段）
+            inp = VideoGenerationInput.model_validate(run_args["input"])
+            assert inp.resolution == "1080p"
+            assert inp.seconds == 5
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_video_freeze_720p_vs_1080p_factor_differs() -> None:
+    """720p(factor 1.0) 与 1080p(factor 2.0) 冻结金额不同；同 duration 下 1080p = 2 × 720p。
+
+    计价基准：m1 unit_points=10，5s。720p → 10*5*1.0=50；1080p → 10*5*2.0=100。
+    """
+    from app.services.points.ledger import get_points, recharge
+
+    # ---- 720p ----
+    db1, engine1 = await _build_async_db()
+    try:
+        await recharge(db1, user_id=USER_ID, amount=200, created_by="t", remark="seed")
+        token_720 = _make_quote_token(required_points=50, duration_seconds=5, resolution="720p")
+        frozen_720 = await freeze_for_task(
+            db1,
+            user_id=USER_ID,
+            quote_token=token_720,
+            business_type="video_generation",
+            category=ModelCategoryKey.video,
+            model_id="m1",
+            duration_seconds=5,
+            resolution="720p",
+        )
+        assert frozen_720.required_points == 50
+        pts_720 = await get_points(db1, user_id=USER_ID)
+        assert pts_720.frozen == 50
+    finally:
+        await db1.close()
+        await engine1.dispose()
+
+    # ---- 1080p ----
+    db2, engine2 = await _build_async_db()
+    try:
+        await recharge(db2, user_id=USER_ID, amount=200, created_by="t", remark="seed")
+        token_1080 = _make_quote_token(required_points=100, duration_seconds=5, resolution="1080p")
+        frozen_1080 = await freeze_for_task(
+            db2,
+            user_id=USER_ID,
+            quote_token=token_1080,
+            business_type="video_generation",
+            category=ModelCategoryKey.video,
+            model_id="m1",
+            duration_seconds=5,
+            resolution="1080p",
+        )
+        assert frozen_1080.required_points == 100
+        assert frozen_1080.required_points == 2 * frozen_720.required_points
+    finally:
+        await db2.close()
+        await engine2.dispose()
+
+
+@pytest.mark.asyncio
+async def test_video_freeze_resolution_mismatch_raises_quote_changed() -> None:
+    """quote_token 绑定 720p，但请求传 1080p → POINTS_QUOTE_CHANGED（防篡改）。"""
+    db, engine = await _build_async_db()
+    try:
+        # token 绑定 720p（required=50），调用方传 1080p（重算=100，价格变更）
+        token = _make_quote_token(required_points=50, duration_seconds=5, resolution="720p")
+        with pytest.raises(PointsDomainError) as exc_info:
+            await freeze_for_task(
+                db,
+                user_id=USER_ID,
+                quote_token=token,
+                business_type="video_generation",
+                category=ModelCategoryKey.video,
+                model_id="m1",
+                duration_seconds=5,
+                resolution="1080p",
+            )
+        assert exc_info.value.code == "POINTS_QUOTE_CHANGED"
+    finally:
+        await db.close()
+        await engine.dispose()
+
+
+def test_openai_video_payload_resolution_drives_size() -> None:
+    """OpenAI 适配器：resolution 决定 body["size"]（720p→1280x720，1080p→1920x1080）。"""
+    from app.core.contracts.video_generation import VideoGenerationInput
+    from app.core.integrations.openai.video_payload import build_create_video_body
+
+    # 1080p
+    inp_1080 = VideoGenerationInput.model_validate(
+        {"prompt": "a cat", "ratio": "16:9", "resolution": "1080p"}
+    )
+    body_1080 = build_create_video_body(inp_1080)
+    assert body_1080["size"] == "1920x1080"
+    # 720p
+    inp_720 = VideoGenerationInput.model_validate(
+        {"prompt": "a cat", "ratio": "16:9", "resolution": "720p"}
+    )
+    body_720 = build_create_video_body(inp_720)
+    assert body_720["size"] == "1280x720"
+    # 未指定 → 回退到 ratio mapping（16:9 → 1280x720）
+    inp_none = VideoGenerationInput.model_validate({"prompt": "a cat", "ratio": "16:9"})
+    body_none = build_create_video_body(inp_none)
+    assert body_none["size"] == "1280x720"
+
+
+def test_bailian_video_payload_rejects_1080p_before_vendor_call() -> None:
+    """百炼不支持 1080p：resolution=1080p → _build_payload 在调用前抛 ValueError。
+
+    保证不变式「不能按 1080p 收费却生成 720p」——百炼只支持 480P/720P，必须拒绝。
+    """
+    from app.core.contracts.video_generation import VideoGenerationInput
+    from app.core.integrations.bailian.video import BailianVideoApiAdapter
+    from app.core.contracts.provider import ProviderConfig
+
+    adapter = BailianVideoApiAdapter(
+        provider_config=ProviderConfig(provider="aliyun_bailian", api_key="k"),
+    )
+    inp = VideoGenerationInput.model_validate(
+        {"model": "happyhorse-1.0-t2v", "prompt": "x", "ratio": "16:9", "resolution": "1080p"}
+    )
+    with pytest.raises(ValueError, match="1080p"):
+        adapter._build_payload(inp)
+
+    # 720p 通过，parameters.resolution = "720P"
+    inp_720 = VideoGenerationInput.model_validate(
+        {"model": "happyhorse-1.0-t2v", "prompt": "x", "ratio": "16:9", "resolution": "720p"}
+    )
+    payload = adapter._build_payload(inp_720)
+    assert payload["parameters"]["resolution"] == "720P"
+
+
+def test_vidu_video_payload_resolution_is_passed_through() -> None:
+    """Vidu 适配器：业务层 resolution 透传到 body["resolution"]（720p/1080p）。"""
+    from app.core.contracts.video_generation import VideoGenerationInput
+    from app.core.contracts.provider import ProviderConfig
+    from app.core.integrations.vidu.video import ViduVideoApiAdapter
+
+    adapter = ViduVideoApiAdapter()
+    inp_720 = VideoGenerationInput.model_validate(
+        {
+            "model": "viduq3",
+            "prompt": "@subject_1 抱团",
+            "ratio": "3:4",
+            "seconds": 5,
+            "resolution": "720p",
+            "first_frame_base64": "https://cdn.example.com/a.png",
+        }
+    )
+    body_720 = adapter._build_request_body(inp_720)
+    assert body_720["resolution"] == "720p"
+
+    inp_1080 = VideoGenerationInput.model_validate(
+        {
+            "model": "viduq3",
+            "prompt": "@subject_1 抱团",
+            "ratio": "3:4",
+            "seconds": 5,
+            "resolution": "1080p",
+            "first_frame_base64": "https://cdn.example.com/a.png",
+        }
+    )
+    body_1080 = adapter._build_request_body(inp_1080)
+    assert body_1080["resolution"] == "1080p"
+
+
+def test_video_route_freezes_before_task_create(monkeypatch) -> None:
+    """路由层：freeze_for_task 在 tm.create 之前；billing_id 落到任务行。
+
+    策略：构造带 video model + shot 的库，monkeypatch build_run_args 避免外部依赖，
+    关闭 enqueue，用 TestClient 调 POST /tasks/video，断言冻结积分 + 任务行 billing_id 非空。
+    """
+    import asyncio
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.v1.routes.film import generated_video as video_route
+    from app.dependencies import get_current_user, get_db
+    from app.services.points.ledger import get_points, recharge
+
+    async_engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async_session_local = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+    import app.models.task  # noqa: F401
+    import app.models.points  # noqa: F401
+    import app.models.task_links  # noqa: F401
+
+    async def _seed():
+        from app.models.studio import (
+            Chapter,
+            Project,
+            ProjectStyle,
+            ProjectVisualStyle,
+            Shot,
+        )
+
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with async_session_local() as db:
+            db.add(User(id=USER_ID, username="u1", hashed_password="x", is_active=True, token_version=0))
+            db.add(Provider(id="p1", user_id=USER_ID, name="openai", base_url="http://x", api_key="k"))
+            db.add(Model(id="m1", user_id=USER_ID, name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", unit_points=10))
+            # Shot 图：mark_shot_generating → recompute_shot_status 需要 Shot 行
+            db.add(Project(id="proj-1", name="p", style=ProjectStyle.real_people_city, visual_style=ProjectVisualStyle.live_action, user_id=USER_ID))
+            db.add(Chapter(id="ch-1", project_id="proj-1", index=1, title="ch"))
+            db.add(Shot(id="sh-1", chapter_id="ch-1", index=1, title="sh", script_excerpt="x"))
+            await db.commit()
+            await recharge(db, user_id=USER_ID, amount=200, created_by="t", remark="seed")
+
+    asyncio.run(_seed())
+
+    # monkeypatch build_run_args：避免文件解析等外部依赖，直接返回包含 seconds 的 run_args
+    async def _fake_build_run_args(_db, **kwargs):
+        return {
+            "shot_id": kwargs["shot_id"],
+            "provider": "openai",
+            "api_key": "k",
+            "base_url": None,
+            "input": {
+                "prompt": "p",
+                "first_frame_base64": None,
+                "last_frame_base64": None,
+                "key_frame_base64": None,
+                "model": "sora-mini",
+                "ratio": kwargs.get("ratio", "16:9"),
+                "seconds": 5,
+                "resolution": kwargs.get("resolution", "1080p"),
+            },
+        }
+
+    # 替换 video_route 模块内导入的 build_run_args（路由内 `from ... import build_run_args`）
+    monkeypatch.setattr(video_route, "build_run_args", _fake_build_run_args)
+    # 关闭 enqueue
+    monkeypatch.setattr(video_route, "enqueue_task_execution", lambda _tid: None)
+
+    async def _override_db():
+        async with async_session_local() as db:
+            yield db
+
+    class _FakeUser:
+        id = USER_ID
+
+    async def _override_user():
+        return _FakeUser()
+
+    app_obj = FastAPI()
+    app_obj.include_router(video_route.router, prefix="/api/v1/film")
+    app_obj.dependency_overrides[get_db] = _override_db
+    app_obj.dependency_overrides[get_current_user] = _override_user
+
+    token = _make_quote_token(required_points=100, duration_seconds=5, resolution="1080p")
+    client = TestClient(app_obj)
+    resp = client.post(
+        "/api/v1/film/tasks/video",
+        json={
+            "shot_id": "sh-1",
+            "reference_mode": "text_only",
+            "prompt": "x",
+            "images": [],
+            "ratio": "16:9",
+            "resolution": "1080p",
+            "quote_token": token,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    task_id = resp.json()["data"]["task_id"]
+
+    async def _check():
+        from app.models.task import GenerationTask
+
+        async with async_session_local() as db:
+            pts = await get_points(db, user_id=USER_ID)
+            # 1080p*5s：10*5*2.0=100 → frozen=100，balance=200
+            assert pts.balance == 200
+            assert pts.frozen == 100
+            row = await db.get(GenerationTask, task_id)
+            assert row is not None
+            assert row.billing_id  # 非空
+
+    asyncio.run(_check())
+    asyncio.run(async_engine.dispose())
+
+
+def test_video_route_insufficient_points_no_task(monkeypatch) -> None:
+    """路由层：余额不足 → PointsDomainError 上抛，任务不被创建。"""
+    import asyncio
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.api.v1.routes.film import generated_video as video_route
+    from app.dependencies import get_current_user, get_db
+
+    async_engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async_session_local = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+    import app.models.task  # noqa: F401
+    import app.models.points  # noqa: F401
+    import app.models.task_links  # noqa: F401
+
+    async def _seed():
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with async_session_local() as db:
+            db.add(User(id=USER_ID, username="u1", hashed_password="x", is_active=True, token_version=0))
+            db.add(Provider(id="p1", user_id=USER_ID, name="openai", base_url="http://x", api_key="k"))
+            db.add(Model(id="m1", user_id=USER_ID, name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", unit_points=10))
+            await db.commit()
+            # 未充值 → 可用 0
+
+    asyncio.run(_seed())
+
+    async def _fake_build_run_args(_db, **kwargs):
+        return {
+            "shot_id": kwargs["shot_id"],
+            "provider": "openai",
+            "api_key": "k",
+            "base_url": None,
+            "input": {"prompt": "p", "first_frame_base64": None, "last_frame_base64": None, "key_frame_base64": None, "model": "sora-mini", "ratio": "16:9", "seconds": 5, "resolution": "1080p"},
+        }
+
+    monkeypatch.setattr(video_route, "build_run_args", _fake_build_run_args)
+    monkeypatch.setattr(video_route, "enqueue_task_execution", lambda _tid: None)
+
+    async def _override_db():
+        async with async_session_local() as db:
+            yield db
+
+    class _FakeUser:
+        id = USER_ID
+
+    async def _override_user():
+        return _FakeUser()
+
+    app_obj = FastAPI()
+    app_obj.include_router(video_route.router, prefix="/api/v1/film")
+    app_obj.dependency_overrides[get_db] = _override_db
+    app_obj.dependency_overrides[get_current_user] = _override_user
+    # 注册 PointsDomainError 处理器（与 main.py 一致），使 TestClient 拿到结构化响应而非抛出
+    from app.services.points.billing import PointsDomainError, build_insufficient_error
+
+    def _handler(_request, exc: PointsDomainError):
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(status_code=exc.status_code, content={"data": exc.data, "error_code": exc.code})
+
+    app_obj.add_exception_handler(PointsDomainError, _handler)
+
+    token = _make_quote_token(required_points=100, duration_seconds=5, resolution="1080p")
+    client = TestClient(app_obj)
+    resp = client.post(
+        "/api/v1/film/tasks/video",
+        json={
+            "shot_id": "sh-1",
+            "reference_mode": "text_only",
+            "prompt": "x",
+            "images": [],
+            "ratio": "16:9",
+            "resolution": "1080p",
+            "quote_token": token,
+        },
+    )
+    # PointsDomainError(INSUFFICIENT_POINTS) → 402
+    assert resp.status_code == 402
+
+    async def _check():
+        from app.models.task import GenerationTask
+        from sqlalchemy import select
+
+        async with async_session_local() as db:
+            rows = (await db.execute(select(GenerationTask))).scalars().all()
+            assert rows == []
+
+    asyncio.run(_check())
+    asyncio.run(async_engine.dispose())
+
+
+def test_video_task_terminal_settlement_succeeded_consumes() -> None:
+    """视频任务 succeeded → run_task_celery finally 的 settle_task_billing_sync 消费冻结积分。
+
+    直接构造带 billing_id 的 succeeded 任务行 + 冻结积分，调用 settle_task_billing_sync，
+    断言 balance 扣减、frozen 归零。证明视频任务的结算路径由 5a finally 钩子覆盖。
+
+    注意：settle_task_billing_sync 内部用 asyncio.run，必须在同步上下文调用（与 Celery worker
+    一致）；故本测试不在 asyncio 事件循环中运行，用 asyncio.run 驱动 seed/check。
+    """
+    import asyncio
+
+    import app.services.points.billing as billing_mod
+
+    async_engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async_session_local = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+    import app.models.task  # noqa: F401
+    import app.models.points  # noqa: F401
+
+    async def _seed():
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with async_session_local() as db:
+            from app.services.points.ledger import freeze_points, recharge
+
+            db.add(User(id=USER_ID, username="u1", hashed_password="x", is_active=True, token_version=0))
+            await db.commit()
+            await recharge(db, user_id=USER_ID, amount=200, created_by="t", remark="seed")
+            billing_id = uuid4().hex
+            await freeze_points(
+                db,
+                user_id=USER_ID,
+                billing_id=billing_id,
+                amount=100,
+                model_id="m1",
+                business_type="video_generation",
+                business_id=None,
+                snapshot={"required_points": 100, "resolution": "1080p"},
+            )
+            return billing_id
+
+    billing_id = asyncio.run(_seed())
+    task_id = "video-" + uuid4().hex[:8]
+    asyncio.run(
+        _seed_task_row_async(
+            async_session_local,
+            task_id=task_id,
+            billing_id=billing_id,
+            status=GenerationTaskStatus.succeeded,
+        )
+    )
+    original = billing_mod.async_session_maker
+    billing_mod.async_session_maker = async_session_local
+    try:
+        settle_task_billing_sync(task_id)
+    finally:
+        billing_mod.async_session_maker = original
+
+    async def _check():
+        from app.services.points.ledger import get_points
+
+        async with async_session_local() as db:
+            after = await get_points(db, user_id=USER_ID)
+            # 成功 → 消费 100：balance=100, frozen=0
+            assert after.balance == 100
+            assert after.frozen == 0
+
+    asyncio.run(_check())
+    asyncio.run(async_engine.dispose())
+
+
+def test_video_task_terminal_settlement_failed_unfreezes() -> None:
+    """视频任务 failed → run_task_celery finally 的 settle_task_billing_sync 解冻。
+
+    注意：settle_task_billing_sync 内部用 asyncio.run，必须在同步上下文调用（与 Celery worker
+    一致）；故本测试不在 asyncio 事件循环中运行，用 asyncio.run 驱动 seed/check。
+    """
+    import asyncio
+
+    import app.services.points.billing as billing_mod
+
+    async_engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    async_session_local = async_sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+    import app.models.task  # noqa: F401
+    import app.models.points  # noqa: F401
+
+    async def _seed():
+        async with async_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with async_session_local() as db:
+            from app.services.points.ledger import freeze_points, recharge
+
+            db.add(User(id=USER_ID, username="u1", hashed_password="x", is_active=True, token_version=0))
+            await db.commit()
+            await recharge(db, user_id=USER_ID, amount=200, created_by="t", remark="seed")
+            billing_id = uuid4().hex
+            await freeze_points(
+                db,
+                user_id=USER_ID,
+                billing_id=billing_id,
+                amount=100,
+                model_id="m1",
+                business_type="video_generation",
+                business_id=None,
+                snapshot={"required_points": 100, "resolution": "1080p"},
+            )
+            return billing_id
+
+    billing_id = asyncio.run(_seed())
+    task_id = "video-fail-" + uuid4().hex[:8]
+    asyncio.run(
+        _seed_task_row_async(
+            async_session_local,
+            task_id=task_id,
+            billing_id=billing_id,
+            status=GenerationTaskStatus.failed,
+        )
+    )
+    original = billing_mod.async_session_maker
+    billing_mod.async_session_maker = async_session_local
+    try:
+        settle_task_billing_sync(task_id)
+    finally:
+        billing_mod.async_session_maker = original
+
+    async def _check():
+        from app.services.points.ledger import get_points
+
+        async with async_session_local() as db:
+            after = await get_points(db, user_id=USER_ID)
+            # 失败 → 解冻：balance=200 不扣，frozen=0
+            assert after.balance == 200
+            assert after.frozen == 0
+
+    asyncio.run(_check())
+    asyncio.run(async_engine.dispose())

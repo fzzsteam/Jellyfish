@@ -152,8 +152,19 @@ def derive_provider_size(
     provider: ProviderKey,
     model: str | None,
     ratio: VideoRatio,
+    resolution: str | None = None,
 ) -> str | None:
-    """Derive provider-specific size or resolution from a normalized ratio."""
+    """Derive provider-specific size or resolution from a normalized ratio.
+
+    Task 5c：当传入业务层 resolution（720p/1080p）时，优先按 resolution 映射为
+    WIDTHxHEIGHT（720p→1280x720，1080p→1920x1080），保证「按 1080p 收费即按 1080p 生成」。
+    resolution 为 None 时回退到原有的 ratio→size 映射（兼容存量/未计费路径）。
+    """
+    if resolution:
+        normalized = resolution.strip().lower()
+        resolution_size_map = {"720p": "1280x720", "1080p": "1920x1080"}
+        if normalized in resolution_size_map:
+            return resolution_size_map[normalized]
     cap = resolve_video_capability(provider=provider, model=model)
     mapping = cap.ratio_to_size_mapping or DEFAULT_RATIO_TO_SIZE_MAPPING
     return mapping.get(ratio)

@@ -90,6 +90,8 @@ def test_preview_video_generation_prompt_returns_success_envelope(client: TestCl
                 "prompt": "生成一个压迫感强的镜头",
                 "images": [],
                 "ratio": "9:16",
+                "resolution": "1080p",
+                "quote_token": "tk-preview",
             },
         )
     finally:
@@ -124,6 +126,8 @@ def test_preview_video_generation_prompt_not_found_returns_api_response(
                 "prompt": "仅文本生成",
                 "images": [],
                 "ratio": "16:9",
+                "resolution": "720p",
+                "quote_token": "tk-preview",
             },
         )
     finally:
@@ -145,6 +149,18 @@ def test_create_video_generation_task_returns_created_envelope(client: TestClien
     monkeypatch.setattr(route, "TaskManager", _FakeTaskManager)
     monkeypatch.setattr(route, "enqueue_task_execution", lambda task_id: SimpleNamespace(id=f"celery-{task_id}"))
     monkeypatch.setattr(route, "mark_shot_generating", _async_noop)
+
+    # Task 5c：路由在任务创建前调用 freeze_for_task；mock 为返回 billing_id 句柄，
+    # unfreeze_frozen 作为 tm.create 失败时的回滚兜底（此处不触发）。
+    async def _fake_freeze_for_task(*_args, **_kwargs):
+        return SimpleNamespace(billing_id="billing-video-1", required_points=100, model_id="happyhorse-r2v", business_type="video_generation", snapshot={})
+
+    async def _fake_unfreeze(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(route, "freeze_for_task", _fake_freeze_for_task)
+    monkeypatch.setattr(route, "unfreeze_frozen", _fake_unfreeze)
+
     app.dependency_overrides[get_db] = _override_db(db)
     try:
         response = client.post(
@@ -156,6 +172,8 @@ def test_create_video_generation_task_returns_created_envelope(client: TestClien
                 "images": [],
                 "ratio": "9:16",
                 "model_id": "happyhorse-r2v",
+                "resolution": "1080p",
+                "quote_token": "tk-video",
             },
         )
     finally:
@@ -184,6 +202,8 @@ def test_create_video_generation_task_validation_error_returns_api_response(clie
                 "prompt": "bad",
                 "images": [],
                 "ratio": "16:9",
+                "resolution": "720p",
+                "quote_token": "tk-video",
             },
         )
     finally:

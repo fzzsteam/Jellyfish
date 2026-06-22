@@ -6,10 +6,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore, TaskManager
 from app.dependencies import get_current_user, get_db
+from app.models.llm import ModelCategoryKey
 from app.models.task_links import GenerationTaskLink
 from app.models.user import User
 from app.schemas.studio.shots import ShotVideoPromptPackRead
 from app.services.film.generated_video import build_run_args, preview_prompt_and_images
+from app.services.points import unfreeze_frozen
+from app.services.points.billing import freeze_for_task
 from app.services.studio.shot_status import mark_shot_generating
 from app.tasks.execute_task import enqueue_task_execution
 from app.schemas.common import ApiResponse, created_response, success_response
@@ -74,15 +77,37 @@ async def create_video_generation_task(
         prompt=body.prompt,
         images=body.images,
         ratio=body.ratio,
+        resolution=body.resolution,
     )
 
-    task_record = await tm.create(
-        task=_CreateOnlyTask(),
-        mode=DeliveryMode.async_polling,
+    # Task 5c：任务创建前按 quote_token 冻结积分。
+    # duration_seconds 来自镜头时长（build_run_args 已落进 input.seconds）。
+    # freeze_for_task 内部会 COMMIT；若后续 tm.create 失败，必须显式 unfreeze 兜底。
+    duration_seconds = (run_args.get("input") or {}).get("seconds")
+    frozen = await freeze_for_task(
+        db,
         user_id=current_user.id,
-        task_kind="video_generation",
-        run_args=run_args,
+        quote_token=body.quote_token,
+        business_type="video_generation",
+        category=ModelCategoryKey.video,
+        model_id=body.model_id,
+        duration_seconds=int(duration_seconds) if duration_seconds is not None else None,
+        resolution=body.resolution,
     )
+    try:
+        task_record = await tm.create(
+            task=_CreateOnlyTask(),
+            mode=DeliveryMode.async_polling,
+            user_id=current_user.id,
+            task_kind="video_generation",
+            run_args=run_args,
+            billing_id=frozen.billing_id,
+        )
+    except Exception:
+        # 任务创建失败：按 5a 契约回滚冻结，避免冻结悬挂直至 Celery Beat 补偿。
+        await unfreeze_frozen(db, user_id=current_user.id, billing_id=frozen.billing_id)
+        raise
+
     db.add(
         GenerationTaskLink(
             task_id=task_record.id,

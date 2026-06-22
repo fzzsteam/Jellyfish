@@ -132,7 +132,8 @@ class ViduVideoApiAdapter:
                     }
                     for image in images[1:]
                 ],
-                "resolution": "1080p",
+                # Task 5c：优先业务层 resolution（720p/1080p），保证计费与生成一致。
+                "resolution": resolution,
             }
 
         if self._uses_text2video_payload(model, images):
@@ -156,7 +157,7 @@ class ViduVideoApiAdapter:
                 "images": images[:2],
                 "prompt": inp.prompt or "",
                 "duration": duration,
-                "resolution": "1080p",
+                "resolution": resolution,
                 "audio": True,
                 "off_peak": False,
             }
@@ -172,7 +173,7 @@ class ViduVideoApiAdapter:
                 "audio": True,
                 "voice_id": "professional_host",
                 "duration": duration,
-                "resolution": "1080p",
+                "resolution": resolution,
                 "movement_amplitude": "auto",
                 "off_peak": False,
             }
@@ -295,7 +296,13 @@ class ViduVideoApiAdapter:
         aspect_ratio: str,
         model: str,
     ) -> str:
-        """Resolve Vidu video resolution, defaulting by payload mode."""
+        """Resolve Vidu video resolution, defaulting by payload mode.
+
+        Task 5c：业务层 `inp.resolution`（720p/1080p）为权威值，直接透传，保证计费
+        与生成一致；未指定时回退到原有的 capability/源视频推断（兼容存量/未计费路径）。
+        """
+        if getattr(inp, "resolution", None):
+            return str(inp.resolution).strip().lower()
         if inp.source_video_base64:
             return "1080p"
 
