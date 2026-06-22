@@ -14,8 +14,8 @@ Jellyfish 已支持文本、图片和视频模型调用，但当前没有统一�
 ## 目标
 
 - 管理员可通过正数或负数充值修改用户积分。
-- 每个模型使用统一的 `unit_price` 字段配置价格。
-- 文本按次、图片按张和分辨率、视频按秒和分辨率计费。
+- 每个模型使用统一的 `unit_points` 字段配置积分单价。
+- 文本按次、图片按张、视频按秒和分辨率计费。
 - 所有模型调用统一先冻结，成功后消费，失败或取消后解冻。
 - 积分不足时阻止供应商调用，并返回可用积分、本次需要和差额。
 - 用户可查看积分余额、冻结金额及完整消费和充值明细。
@@ -54,43 +54,43 @@ Jellyfish 已支持文本、图片和视频模型调用，但当前没有统一�
 
 | 字段 | 类型 | 说明 |
 |---|---|---|
-| `unit_price` | 非负整数 | 模型基础积分单价；具体单位由 `category` 决定 |
+| `unit_points` | 非负整数 | 模型基础积分单价；具体单位由 `category` 决定 |
 
 不同模型类别的字段语义：
 
-| 模型类别 | `unit_price` 单位 |
+| 模型类别 | `unit_points` 单位 |
 |---|---|
 | `text` | 积分/次 |
 | `image` | 积分/张 |
 | `video` | 积分/秒 |
 
-`unit_price` 必须为非负整数。价格为 `0` 表示允许免费调用，不能使用空值隐式表达免费。
+`unit_points` 必须为非负整数。值为 `0` 表示允许免费调用，不能使用空值隐式表达免费。
 
 ### 1.2 计算公式
 
 ```text
-文本积分 = unit_price
+文本积分 = unit_points
 
-图片积分 = ceil(unit_price × resolution_factor × generation_count)
+图片积分 = ceil(unit_points × resolution_factor × generation_count)
 
-视频积分 = ceil(unit_price × duration_seconds × resolution_factor × generation_count)
+视频积分 = ceil(unit_points × duration_seconds × resolution_factor × generation_count)
 ```
 
 首期 `generation_count` 固定为 `1`。所有结果以整数积分表示，并统一向上取整。
 
 ### 1.3 分辨率系数
 
-分辨率系数由后端计费模块集中维护，前端和供应商适配器不得重复定义。首期采用内部固定映射，例如：
+分辨率系数由后端计费模块集中维护，前端和供应商适配器不得重复定义。首期固定为：
 
-| 分辨率档位 | 系数示例 |
-|---|---|
-| 标准 | `1.0` |
-| 高清 | `1.5` |
-| 超高清 | `2.0` |
+| 类型 | 分辨率 | 系数 |
+|---|---|---|
+| 图片 | 当前唯一规格 | `1.0` |
+| 视频 | `720p` | `1.0` |
+| 视频 | `1080p` | `2.0` |
 
-实施时应根据项目真实支持的图片、视频分辨率枚举建立完整映射。未知分辨率必须拒绝计费和调用，不能静默使用默认系数。
+首期图片只有一个有效规格，因此图片分辨率系数固定为 `1.0`。视频只允许 `720p` 和 `1080p` 参与计费；大小写由后端规范化。未知分辨率必须拒绝计费和调用，不能静默使用默认系数。未来增加新规格时，必须同步增加明确系数。
 
-图片根据生成数量和分辨率变化；视频根据生成数量、时长和分辨率变化。宽高比不参与计费。
+首期图片只根据生成数量变化，唯一规格的系数恒为 `1.0`；视频根据生成数量、时长和分辨率变化。宽高比不参与计费。
 
 ### 1.4 确定价格
 
@@ -163,12 +163,12 @@ UNIQUE(billing_id, type)
 {
   "model_id": "model-123",
   "model_category": "video",
-  "unit_price": 10,
+  "unit_points": 10,
   "resolution": "1080p",
-  "resolution_factor": 1.5,
+  "resolution_factor": 2.0,
   "duration_seconds": 10,
   "generation_count": 1,
-  "required_points": 150
+  "required_points": 200
 }
 ```
 
@@ -219,7 +219,7 @@ POST /api/v1/points/quote
   "resolved_model_id": "model-123",
   "resolved_model_name": "Veo 3",
   "using_default_model": true,
-  "required_points": 150,
+  "required_points": 200,
   "available_points": 300,
   "sufficient": true,
   "quote_token": "signed-short-lived-token"
@@ -309,14 +309,27 @@ available = 180
 
 ### 4.5 超时补偿
 
-增加定时补偿任务扫描超时未结算的 `freeze` 流水：
+补偿任务复用项目现有 Celery 体系，由 Celery Beat 每 5 分钟触发一次：
+
+```text
+backend/app/tasks/points.py
+└── reconcile_stale_point_freezes       # Celery 定时任务入口
+
+backend/app/services/points/reconciliation.py
+└── reconcile_stale_freezes             # 查询、判断和结算逻辑
+```
+
+`app.core.celery_app` 注册 `app.tasks.points` 和 Beat schedule。部署环境新增一个且仅一个 Celery Beat 实例，避免多个调度器重复投递；即使发生重复投递，结算服务仍必须依靠幂等约束保证安全。
+
+任务每次扫描超时未结算的 `freeze` 流水：
 
 - 关联任务成功：补记消费。
 - 关联任务失败或取消：执行解冻。
-- 任务不存在：执行解冻并记录异常备注。
+- 任务不存在且冻结超过 30 分钟：执行解冻并记录异常备注。
+- 无异步任务关联的同步调用冻结超过 30 分钟：执行解冻。
 - 任务仍在运行：保持冻结，等待下次扫描。
 
-补偿任务必须复用正常结算服务和幂等约束，不能直接修改余额。
+`pending` 或 `running` 状态不能仅因时间过长而解冻，避免供应商仍在执行时释放积分。补偿任务必须复用正常结算服务、Redis 用户锁、数据库事务和幂等约束，不能直接修改余额。
 
 ---
 
@@ -426,7 +439,7 @@ API 层只负责：
 | `POST` | `/api/v1/admin/users/{user_id}/points/recharge` | 管理员 | 正数或负数充值 |
 | `GET` | `/api/v1/admin/users/{user_id}/points/transactions` | 管理员 | 查看用户流水 |
 
-模型管理的创建、更新和响应 DTO 增加 `unit_price`。
+模型管理的创建、更新和响应 DTO 增加 `unit_points`。
 
 所有 API 变化落地后必须运行 `pnpm run openapi:update`，前端统一使用 generated client。
 
@@ -474,7 +487,7 @@ Redis 锁有限重试失败时返回稳定错误码 `POINTS_OPERATION_BUSY`。�
 
 ### 9.1 调用前展示
 
-当模型、图片分辨率、视频分辨率或视频时长变化时，前端重新调用试算接口。
+当模型、视频分辨率或视频时长变化时，前端重新调用试算接口。首期图片只有一个规格，不需要因图片分辨率触发试算。
 
 展示位置遵循当前页面布局：
 
@@ -528,7 +541,7 @@ Redis 锁有限重试失败时返回稳定错误码 `POINTS_OPERATION_BUSY`。�
 
 ## 11. 验收标准
 
-- 每个文本、图片和视频模型均可配置统一的 `unit_price`。
+- 每个文本、图片和视频模型均可配置统一的 `unit_points`。
 - 显式模型和默认模型均能获得正确试算结果。
 - 前端切换模型或计费参数后能刷新“将消耗 X 积分”。
 - 正式提交使用与执行请求一致的最终模型和参数重新计费。
@@ -542,7 +555,8 @@ Redis 锁有限重试失败时返回稳定错误码 `POINTS_OPERATION_BUSY`。�
 - Redis 锁使用持有者 token 原子释放，数据库仍提供最终一致性。
 - 管理员可正数或负数充值，负数不能侵占冻结积分且必须填写备注。
 - 模型价格修改不影响历史计价快照。
-- 超时补偿能处理长期未结算冻结记录。
+- Celery Beat 每 5 分钟触发补偿任务，且部署环境仅运行一个 Beat 实例。
+- 超时补偿能处理终态任务、超过 30 分钟的无任务冻结和同步调用遗留冻结。
 - API 变更后 OpenAPI 和前端 generated client 已同步。
 - 后端相关测试、前端 `pnpm exec tsc --noEmit` 及积分关键流程测试通过。
 
