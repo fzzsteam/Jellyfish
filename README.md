@@ -138,7 +138,7 @@ curl http://127.0.0.1:8000/health
 
 ## 4. 执行数据库迁移
 
-迁移脚本位于 `backend/sql/`。全新环境和从旧版本升级的环境都应按文件名顺序执行当前脚本；执行 `009` 前必须确保 Backend 已至少成功启动一次，以便创建并播种初始管理员。
+迁移脚本位于 `backend/sql/`。全新环境和从旧版本升级的环境都应按文件名顺序执行当前脚本；执行 `009` 前必须确保 Backend 已至少成功启动一次，以便创建并播种初始管理员。`010-add-points-billing.sql`（用户积分计费）幂等，可在 `009` 之后的任意时机执行：新增 `user_points` / `point_transactions` 表，给 `models` 加 `unit_points` 列、给 `generation_tasks` 加 `billing_id` 列，并为存量用户回填 `balance=0, frozen=0`、存量模型回填 `unit_points=0`（即默认免费，由管理员按需调价）。
 
 建议先备份重要的本地数据，然后在仓库根目录执行：
 
@@ -203,6 +203,27 @@ uv run celery \
 ```text
 celery@<hostname> ready.
 ```
+
+## 6.1. 启动 Celery Beat（定时任务调度）
+
+Beat 负责周期性任务调度，当前已注册 `points.reconcile_stale_freezes`（积分冻结对账，每 300 秒一次）。开发环境可在终端 2-b 启动：
+
+```bash
+cd backend
+uv run celery \
+  -A app.core.celery_app:celery_app \
+  beat \
+  -l info
+```
+
+看到类似以下日志说明 Beat 已启动：
+
+```text
+celery beat v5.x.x is starting.
+Scheduler: Sending due task reconcile-stale-point-freezes
+```
+
+> **生产环境必须只运行一个 Beat 进程**：Docker Compose 部署用 `celery-beat` 服务（见 `deploy/compose/docker-compose.yml`），SAE 单容器部署用 supervisord 的 `[program:beat]`（见 `deploy/docker/supervisord.conf`），**两者只能选其一**，切勿同时启用，否则同一个定时任务会被重复触发。两份配置已互相注释说明，切换部署形态时同步调整。
 
 ## 7. 启动 Frontend
 
@@ -368,22 +389,23 @@ docker push <registry>/jellyfish:<tag>
 
 ```bash
 cd /app
-uv run python apply_migrations.py          # 执行全部 001-009
+uv run python apply_migrations.py          # 执行全部 001-010
 # uv run python apply_migrations.py 009    # 仅执行 009（用户隔离）
+# uv run python apply_migrations.py 010    # 仅执行 010（积分计费）
 ```
 
-脚本从 `DATABASE_URL` 取连接信息，无需额外配置密码；幂等，可重复执行。执行 `009` 前需保证应用至少成功启动过一次（已建 `users` 表并播种管理员），因为 `009` 要把历史数据回填给管理员。
+脚本从 `DATABASE_URL` 取连接信息，无需额外配置密码；幂等，可重复执行。执行 `009` 前需保证应用至少成功启动过一次（已建 `users` 表并播种管理员），因为 `009` 要把历史数据回填给管理员。`010` 幂等且无前置数据依赖，可在 `009` 之后任意时机执行。
 
 ### 4. 升级已有环境
 
-线上环境数据库已运行、但尚未执行 `001-009` 时（典型升级场景），步骤如下：
+线上环境数据库已运行、但尚未执行 `001-010` 时（典型升级场景），步骤如下：
 
 1. 构建并推送含最新代码与 `apply_migrations.py` 的镜像。
 2. SAE 部署新镜像——应用启动时 `create_all` 补建缺失的表，并按需播种管理员。
-3. 进入容器执行 `uv run python apply_migrations.py`，补齐 `001-009`（重点 `009` 的 `user_id` 用户隔离）。
-4. 验证：管理员可登录；业务表已含 `user_id` 列；历史数据已回填给管理员。
+3. 进入容器执行 `uv run python apply_migrations.py`，补齐 `001-010`（重点 `009` 的 `user_id` 用户隔离、`010` 的积分计费表与回填）。
+4. 验证：管理员可登录；业务表已含 `user_id` 列；历史数据已回填给管理员；`user_points` / `point_transactions` 表存在。
 
-> 多实例并发：`001-009` 设计为幂等（先探测列/约束是否存在再执行 DDL），重复执行安全。若多实例同时启动并各自执行迁移，偶发竞争重跑一次脚本即可恢复。
+> 多实例并发：`001-010` 设计为幂等（先探测列/约束是否存在再执行 DDL），重复执行安全。若多实例同时启动并各自执行迁移，偶发竞争重跑一次脚本即可恢复。
 
 ### 5. 验证
 
@@ -392,6 +414,23 @@ curl -f http://<线上域名>/health      # 预期 200
 ```
 
 并在前端完成管理员登录，确认用户管理、图片/视频生成等功能正常。
+
+### 6. 积分计费配置
+
+积分计费依赖 Redis（账户锁），**生产环境必须部署 Redis**——锁层在 Redis 不可用时不会降级为无操作，抢锁会直接失败。本地开发使用 Docker Compose 提供的 Redis 即可。
+
+以下配置项均可在 `backend/.env` 或环境变量中覆盖，默认值适用于绝大多数场景：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `POINTS_QUOTE_EXPIRE_SECONDS` | `300` | 报价令牌有效期（秒）。令牌过期后前端需重新报价 |
+| `POINTS_LOCK_TTL_MS` | `30000` | Redis 用户锁 TTL（毫秒），覆盖一次完整的账户变更 |
+| `POINTS_LOCK_WAIT_MS` | `3000` | 抢锁等待上限（毫秒），超时抛 `PointsOperationBusyError` |
+| `POINTS_LOCK_RETRY_MAX_BACKOFF_MS` | `250` | 抢锁指数退避上限（毫秒） |
+| `POINTS_RECONCILE_MIN_AGE_SECONDS` | `1800` | 对账扫描的最小冻结年龄（秒），冻结超过该年龄且未结算才会被兜底处理 |
+| `POINTS_RECONCILE_BATCH_SIZE` | `100` | 对账单批扫描上限，控制单次 Beat tick 的 DB 负载 |
+
+> 这些项通常无需调整；调高 `POINTS_LOCK_WAIT_MS` 可在高并发账户变更时减少 `PointsOperationBusyError`，但也会拉长最坏情况下的请求耗时。
 
 ## OpenAPI 客户端同步
 

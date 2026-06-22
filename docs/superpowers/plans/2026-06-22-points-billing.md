@@ -1,5 +1,7 @@
 # 用户积分计费 Implementation Plan
 
+> **状态：已落地。** 当前真实生效的实现见 [architecture/points-billing.md](/docs/architecture/points-billing/)。本文件为原始任务计划，保留用于追溯决策与拆分。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 为所有真实模型调用增加按用户积分试算、冻结、成功消费、失败解冻、管理员充值、流水审计和前端费用提示。
