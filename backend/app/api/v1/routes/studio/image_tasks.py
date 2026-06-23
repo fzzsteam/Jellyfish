@@ -98,6 +98,10 @@ class StudioImageTaskRequest(BaseModel):
         None,
         description="积分试算凭证（POST /points/quote 签发）；创建任务接口必填，Task 5b 冻结积分",
     )
+    resolution_profile: ImageResolutionProfile | None = Field(
+        "standard",
+        description="资产图片输出分辨率档位：standard=1K，high=2K",
+    )
 
 
 class ShotFrameImageTaskRequest(BaseModel):
@@ -230,6 +234,8 @@ async def create_actor_image_generation_task(
         prompt=submission.prompt,
         images=ref_images if ref_images else None,
         quote_token=quote_token,
+        resolution_profile=body.resolution_profile,
+        purpose="asset_image",
     )
     return created_response(TaskCreated(task_id=task_id))
 
@@ -302,6 +308,8 @@ async def create_asset_image_generation_task(
         prompt=submission.prompt,
         images=ref_images if ref_images else None,
         quote_token=quote_token,
+        resolution_profile=body.resolution_profile,
+        purpose="asset_image",
     )
     return created_response(TaskCreated(task_id=task_id))
 
@@ -372,6 +380,8 @@ async def create_character_image_generation_task(
         prompt=submission.prompt,
         images=ref_images if ref_images else None,
         quote_token=quote_token,
+        resolution_profile=body.resolution_profile,
+        purpose="asset_image",
     )
     return created_response(TaskCreated(task_id=task_id))
 

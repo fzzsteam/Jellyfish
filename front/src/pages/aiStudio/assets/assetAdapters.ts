@@ -20,6 +20,7 @@ type ImageGenerationPayload = {
   model_id: string | null
   // 积分试算返回的 quote_token，透传到后端做幂等冻结与价格复核。
   quote_token: string | null
+  resolution_profile: 'standard' | 'high'
 }
 
 function normalizeUpdateImagePayload(payload: UpdateImagePayload): UpdateImagePayload {
@@ -69,7 +70,14 @@ export const assetAdapters = {
     createGenerationTask: async (id: string, imageId: number, payload: ImageGenerationPayload) => {
       const res = await StudioImageTasksService.createCharacterImageGenerationTaskApiV1StudioImageTasksCharactersCharacterIdImageTasksPost({
         characterId: id,
-        requestBody: { image_id: imageId, model_id: payload.model_id, prompt: payload.prompt, images: payload.images, quote_token: payload.quote_token },
+        requestBody: {
+          image_id: imageId,
+          model_id: payload.model_id,
+          prompt: payload.prompt,
+          images: payload.images,
+          quote_token: payload.quote_token,
+          resolution_profile: payload.resolution_profile,
+        },
       })
       return res.data?.task_id ?? null
     },
@@ -113,7 +121,14 @@ export const assetAdapters = {
     createGenerationTask: async (id: string, imageId: number, payload: ImageGenerationPayload) => {
       const res = await StudioImageTasksService.createActorImageGenerationTaskApiV1StudioImageTasksActorsActorIdImageTasksPost({
         actorId: id,
-        requestBody: { image_id: imageId, model_id: payload.model_id, prompt: payload.prompt, images: payload.images, quote_token: payload.quote_token },
+        requestBody: {
+          image_id: imageId,
+          model_id: payload.model_id,
+          prompt: payload.prompt,
+          images: payload.images,
+          quote_token: payload.quote_token,
+          resolution_profile: payload.resolution_profile,
+        },
       })
       return res.data?.task_id ?? null
     },
@@ -158,7 +173,14 @@ export const assetAdapters = {
       const res = await StudioImageTasksService.createAssetImageGenerationTaskApiV1StudioImageTasksAssetsAssetTypeAssetIdImageTasksPost({
         assetType: 'scene',
         assetId: id,
-        requestBody: { image_id: imageId, model_id: payload.model_id, prompt: payload.prompt, images: payload.images, quote_token: payload.quote_token },
+        requestBody: {
+          image_id: imageId,
+          model_id: payload.model_id,
+          prompt: payload.prompt,
+          images: payload.images,
+          quote_token: payload.quote_token,
+          resolution_profile: payload.resolution_profile,
+        },
       })
       return res.data?.task_id ?? null
     },
@@ -203,7 +225,14 @@ export const assetAdapters = {
       const res = await StudioImageTasksService.createAssetImageGenerationTaskApiV1StudioImageTasksAssetsAssetTypeAssetIdImageTasksPost({
         assetType: 'prop',
         assetId: id,
-        requestBody: { image_id: imageId, model_id: payload.model_id, prompt: payload.prompt, images: payload.images, quote_token: payload.quote_token },
+        requestBody: {
+          image_id: imageId,
+          model_id: payload.model_id,
+          prompt: payload.prompt,
+          images: payload.images,
+          quote_token: payload.quote_token,
+          resolution_profile: payload.resolution_profile,
+        },
       })
       return res.data?.task_id ?? null
     },
@@ -248,7 +277,14 @@ export const assetAdapters = {
       const res = await StudioImageTasksService.createAssetImageGenerationTaskApiV1StudioImageTasksAssetsAssetTypeAssetIdImageTasksPost({
         assetType: 'costume',
         assetId: id,
-        requestBody: { image_id: imageId, model_id: payload.model_id, prompt: payload.prompt, images: payload.images, quote_token: payload.quote_token },
+        requestBody: {
+          image_id: imageId,
+          model_id: payload.model_id,
+          prompt: payload.prompt,
+          images: payload.images,
+          quote_token: payload.quote_token,
+          resolution_profile: payload.resolution_profile,
+        },
       })
       return res.data?.task_id ?? null
     },

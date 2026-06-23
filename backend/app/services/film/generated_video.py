@@ -36,6 +36,17 @@ from app.services.worker.async_task_support import cancel_if_requested_async
 from app.services.worker.task_logging import log_task_event, log_task_failure
 from app.utils.files import create_file_from_url_or_b64
 
+VIDEO_DURATION_MIN_SECONDS = 3
+VIDEO_DURATION_MAX_SECONDS = 15
+
+
+def normalize_video_duration_seconds(value: int | None) -> int:
+    """Normalize studio video duration to the supported HappyHorse 3-15s integer range."""
+    if value is None:
+        return VIDEO_DURATION_MIN_SECONDS
+    return max(VIDEO_DURATION_MIN_SECONDS, min(VIDEO_DURATION_MAX_SECONDS, int(round(value))))
+
+
 async def validate_shot_and_duration(db: AsyncSession, shot_id: str) -> ShotDetail:
     shot = await db.get(Shot, shot_id)
     if shot is None:
@@ -240,7 +251,7 @@ async def build_run_args(
         "key_frame_base64": frame_map.get(ShotFrameType.key),
         "model": model.name,
         "ratio": resolved_ratio,
-        "seconds": shot_detail.duration,
+        "seconds": normalize_video_duration_seconds(shot_detail.duration),
         # resolution 贯穿计费与生成两侧：保证「按 1080p 收费即按 1080p 生成」不变式。
         # 透传 resolution（None 时不在此处隐式冻结为 720p）：
         #   - None → 各供应商适配器 None 分支自行决定默认（存量行为），仅用于非计费/存量调用；

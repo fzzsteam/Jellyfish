@@ -245,6 +245,43 @@ async def test_build_run_args_maps_reference_images(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
+async def test_build_run_args_clamps_legacy_duration_to_studio_range(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Video tasks normalize old or external duration values to the current 3-15s studio range."""
+    db, engine = await _build_session()
+    async with db:
+        await _seed_shot_graph(db)
+        detail = await db.get(ShotDetail, "s1")
+        assert detail is not None
+        detail.duration = 30
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k", user_id="test-user")
+        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", user_id="test-user")
+        settings = ModelSettings(id=1, default_video_model_id="m_video", user_id="test-user")
+        db.add_all([provider, model, settings])
+        await db.commit()
+
+        async def _fake_file_id_to_data_url(_db: AsyncSession, *, file_id: str) -> str:
+            return f"data:image/png;base64,{file_id}"
+
+        monkeypatch.setattr(
+            "app.services.film.generated_video.file_id_to_data_url",
+            _fake_file_id_to_data_url,
+        )
+
+        run_args = await build_run_args(
+            db,
+            user_id="test-user",
+            shot_id="s1",
+            reference_mode="first_last",
+            prompt="final video prompt",
+            images=["img-first", "img-last"],
+            ratio="16:9",
+        )
+
+        assert run_args["input"]["seconds"] == 15
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_build_run_args_uses_explicit_video_model_over_default() -> None:
     """分镜工作室显式选择视频模型时，任务应使用该模型而不是默认视频模型。"""
     db, engine = await _build_session()

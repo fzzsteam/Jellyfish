@@ -553,6 +553,15 @@ const CAMERA_MOVEMENT_OPTIONS: { value: CameraMovement; label: string }[] = [
   { value: 'ZOOM_OUT', label: '变焦拉' },
 ]
 
+const VIDEO_DURATION_MIN_SECONDS = 3
+const VIDEO_DURATION_MAX_SECONDS = 15
+
+function normalizeVideoDurationSeconds(value: number | null | undefined): number {
+  // Keep the studio duration aligned with HappyHorse's official 3-15s integer range.
+  const rounded = Number.isFinite(Number(value)) ? Math.round(Number(value)) : VIDEO_DURATION_MIN_SECONDS
+  return Math.max(VIDEO_DURATION_MIN_SECONDS, Math.min(VIDEO_DURATION_MAX_SECONDS, rounded))
+}
+
 function useLocalStoragePrefs() {
   const [prefs, setPrefs] = useState<LayoutPrefs>(() => {
     try {
@@ -722,6 +731,7 @@ const ChapterStudio: React.FC = () => {
   const [promptAssetsUpdating, setPromptAssetsUpdating] = useState(false)
 
   const [keyframeResolutionProfile, setKeyframeResolutionProfile] = useState<KeyframeResolutionProfile>('standard')
+  const [videoResolutionProfile, setVideoResolutionProfile] = useState<'720p' | '1080p'>('720p')
   const [generatedVideos, setGeneratedVideos] = useState<GeneratedVideoItem[]>([])
   /** shotId → 该分镜被选中的视频 fileId */
   const [selectedVideosByShot, setSelectedVideosByShot] = useState<Record<string, string>>({})
@@ -2651,6 +2661,8 @@ const ChapterStudio: React.FC = () => {
                 imageGenerationOptions={imageGenerationOptions}
                 keyframeResolutionProfile={keyframeResolutionProfile}
                 onChangeKeyframeResolutionProfile={setKeyframeResolutionProfile}
+                videoResolutionProfile={videoResolutionProfile}
+                onChangeVideoResolutionProfile={setVideoResolutionProfile}
                 loadingDetail={loadingDetail}
                 shotDetail={shotDetail}
                 frameImages={frameImages}
@@ -2719,6 +2731,8 @@ const ChapterStudio: React.FC = () => {
                     imageGenerationOptions={imageGenerationOptions}
                     keyframeResolutionProfile={keyframeResolutionProfile}
                     onChangeKeyframeResolutionProfile={setKeyframeResolutionProfile}
+                    videoResolutionProfile={videoResolutionProfile}
+                    onChangeVideoResolutionProfile={setVideoResolutionProfile}
                     loadingDetail={loadingDetail}
                     shotDetail={shotDetail}
                     frameImages={frameImages}
@@ -2857,6 +2871,8 @@ function Inspector(props: {
   imageGenerationOptions: ImageGenerationOptionsRead | null
   keyframeResolutionProfile: KeyframeResolutionProfile
   onChangeKeyframeResolutionProfile: (value: KeyframeResolutionProfile) => void
+  videoResolutionProfile: '720p' | '1080p'
+  onChangeVideoResolutionProfile: (value: '720p' | '1080p') => void
   loadingDetail: boolean
   shotDetail: ShotDetailRead | null
   frameImages: ShotFrameImageRead[]
@@ -2890,6 +2906,8 @@ function Inspector(props: {
     imageGenerationOptions,
     keyframeResolutionProfile,
     onChangeKeyframeResolutionProfile,
+    videoResolutionProfile,
+    onChangeVideoResolutionProfile,
     loadingDetail,
     shotDetail,
     frameImages,
@@ -2917,6 +2935,8 @@ function Inspector(props: {
   const [refFrameTypeSelectLoading, setRefFrameTypeSelectLoading] = useState(false)
   const [useBoneDepth, setUseBoneDepth] = useState(false)
   const [audioMode, setAudioMode] = useState<'none' | 'prompt' | 'upload'>('none')
+  const videoResolution = videoResolutionProfile
+  const setVideoResolution = onChangeVideoResolutionProfile
   const [inspectorTabKey, setInspectorTabKey] = useState<InspectorTabKey>('camera')
   const [sceneNameMap, setSceneNameMap] = useState<Record<string, string>>({})
   const [characterNameMap, setCharacterNameMap] = useState<Record<string, string>>({})
@@ -2986,8 +3006,6 @@ function Inspector(props: {
     () => videoModels.find((item) => item.id === selectedVideoModelId) ?? null,
     [selectedVideoModelId, videoModels],
   )
-  // 视频清晰度档位（720p/1080p），决定计费因子与生成参数；单次提交路径使用。
-  const [videoResolution, setVideoResolution] = useState<'720p' | '1080p'>('720p')
   // 视频生成的积分试算（单次提交路径）。绑定 model + duration + resolution，
   // 任意一项缺失或试算未就绪时 canSubmit 为 false，门控「生成视频」按钮。
   const videoQuote = usePointsQuote({
@@ -4703,25 +4721,25 @@ function Inspector(props: {
                             />
                           </div>
                           <div>
-                            <div className="text-gray-500 text-xs mb-1">时长（3–30s，整数）</div>
+                            <div className="text-gray-500 text-xs mb-1">时长（3–15s，整数）</div>
                             <div className="flex items-center gap-2">
                               <Slider
-                                min={3}
-                                max={30}
+                                min={VIDEO_DURATION_MIN_SECONDS}
+                                max={VIDEO_DURATION_MAX_SECONDS}
                                 step={1}
-                                value={Math.max(3, Math.min(30, Math.round(shotDetail.duration ?? 3)))}
+                                value={normalizeVideoDurationSeconds(shotDetail.duration)}
                                 style={{ flex: 1 }}
-                                onChange={(v) => void onPatchShotDetailImmediate({ duration: Math.round(Number(v)) })}
+                                onChange={(v) => void onPatchShotDetailImmediate({ duration: normalizeVideoDurationSeconds(Number(v)) })}
                                 disabled={cameraUpdating}
                               />
                               <Input
                                 size="small"
-                                value={`${Math.max(3, Math.min(30, Math.round(shotDetail.duration ?? 3)))}`}
+                                value={`${normalizeVideoDurationSeconds(shotDetail.duration)}`}
                                 style={{ width: 72 }}
                                 onChange={(e) => {
                                   const raw = Number(e.target.value)
                                   if (!Number.isFinite(raw)) return
-                                  const n = Math.max(3, Math.min(30, Math.round(raw)))
+                                  const n = normalizeVideoDurationSeconds(raw)
                                   void onPatchShotDetailImmediate({ duration: n })
                                 }}
                                 disabled={cameraUpdating}
@@ -4741,9 +4759,19 @@ function Inspector(props: {
                               }}
                               disabled={cameraUpdating}
                             />
-                            <div className="mt-1 text-[11px] text-gray-400">
-                              当前生效：{resolveVideoRatioForRequest() || '未设置'}
-                            </div>
+                          </div>
+                          <div>
+                            <div className="text-gray-500 text-xs mb-1">分辨率</div>
+                            <Select
+                              size="small"
+                              value={videoResolution}
+                              options={[
+                                { value: '720p', label: '720p' },
+                                { value: '1080p', label: '1080p' },
+                              ]}
+                              onChange={(value) => setVideoResolution(value)}
+                              disabled={cameraUpdating}
+                            />
                           </div>
                         </div>
                       </div>
@@ -6228,6 +6256,29 @@ function Inspector(props: {
                     </Image.PreviewGroup>
                   </div>
                 )}
+              </div>
+              <div className="flex items-center gap-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="text-xs font-medium text-slate-600">生成参数</div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-500">分辨率</span>
+                  <Select
+                    size="small"
+                    value={videoResolution}
+                    options={[
+                      { value: '720p', label: '720p（标准）' },
+                      { value: '1080p', label: '1080p（高清）' },
+                    ]}
+                    onChange={(value) => setVideoResolution(value)}
+                    disabled={videoPromptPreviewSubmitting}
+                    style={{ width: 130 }}
+                  />
+                  <span className="text-xs text-slate-400">
+                    {(videoResolution === '1080p'
+                      ? ({ '16:9': '1920×1080', '4:3': '1440×1080', '1:1': '1080×1080', '3:4': '1080×1440', '9:16': '1080×1920', '21:9': '2520×1080' } as Record<string, string>)
+                      : ({ '16:9': '1280×720', '4:3': '1024×768', '1:1': '1024×1024', '3:4': '768×1024', '9:16': '720×1280', '21:9': '1680×720' } as Record<string, string>)
+                    )[resolveVideoRatioForRequest()] ?? ''}
+                  </span>
+                </div>
               </div>
               <div>
                 <div className="text-xs text-gray-500 mb-2">提示词（可编辑）</div>
