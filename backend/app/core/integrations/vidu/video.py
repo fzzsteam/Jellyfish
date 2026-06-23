@@ -221,13 +221,14 @@ class ViduVideoApiAdapter:
 
     @classmethod
     def _build_reference_images(cls, inp: VideoGenerationInput) -> list[str]:
-        """Collect Vidu reference images from the shared frame fields."""
+        """Collect Vidu reference images from frame fields plus r2v asset references."""
         return [
             cls._ensure_image_url(value)
             for value in (
                 inp.first_frame_base64,
                 inp.last_frame_base64,
                 inp.key_frame_base64,
+                *inp.reference_image_base64s,
             )
             if value
         ]

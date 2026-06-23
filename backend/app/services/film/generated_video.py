@@ -172,7 +172,21 @@ def _normalize_optional_text(value: str | None) -> str | None:
 def is_reference_to_video_model(model_name: str | None) -> bool:
     """Return whether a video model should receive linked asset images as r2v references."""
     name = (model_name or "").strip().lower()
-    return name.startswith("happyhorse-1.0-r2v") or name.startswith("r2v")
+    vidu_subject_names = {"viduq3", "vidu-q3"}
+    vidu_subject_prefixes = (
+        "viduq3-reference",
+        "viduq3-ref",
+        "viduq3-subject",
+        "vidu-q3-reference",
+        "vidu-q3-ref",
+        "vidu-q3-subject",
+    )
+    return (
+        name.startswith("happyhorse-1.0-r2v")
+        or name.startswith("r2v")
+        or name in vidu_subject_names
+        or name.startswith(vidu_subject_prefixes)
+    )
 
 
 async def resolve_r2v_asset_reference_file_ids(db: AsyncSession, *, shot_id: str) -> list[str]:

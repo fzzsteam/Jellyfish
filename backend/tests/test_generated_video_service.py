@@ -418,6 +418,103 @@ async def test_build_run_args_adds_r2v_asset_reference_images(monkeypatch: pytes
 
 
 @pytest.mark.asyncio
+async def test_build_run_args_adds_vidu_subject_asset_reference_images(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ViduQ3 subject reference video should receive linked character, scene, and prop images."""
+    db, engine = await _build_session()
+    async with db:
+        await _seed_shot_graph(db)
+        bootstrap_all_registries()
+        provider = Provider(id="p1", name="Vidu", base_url="https://api.vidu.cn", api_key="k", user_id="test-user")
+        model = Model(
+            id="vidu-subject",
+            name="viduq3",
+            category=ModelCategoryKey.video,
+            provider_id="p1",
+            user_id="test-user",
+        )
+        db.add_all(
+            [
+                provider,
+                model,
+                ModelSettings(id=1, default_video_model_id=model.id, user_id="test-user"),
+                Character(
+                    id="char-1",
+                    project_id="p1",
+                    name="苏过",
+                    description="",
+                    style=ProjectStyle.real_people_city,
+                    visual_style=ProjectVisualStyle.live_action,
+                ),
+                Scene(
+                    id="scene-1",
+                    name="合江楼",
+                    description="",
+                    style=ProjectStyle.real_people_city,
+                    visual_style=ProjectVisualStyle.live_action,
+                    user_id="test-user",
+                ),
+                Prop(
+                    id="prop-1",
+                    name="纸巾",
+                    description="",
+                    style=ProjectStyle.real_people_city,
+                    visual_style=ProjectVisualStyle.live_action,
+                    user_id="test-user",
+                ),
+                Costume(
+                    id="costume-1",
+                    name="青衣",
+                    description="",
+                    style=ProjectStyle.real_people_city,
+                    visual_style=ProjectVisualStyle.live_action,
+                    user_id="test-user",
+                ),
+                FileItem(id="file-char", type=FileType.image, name="char.png", storage_key="char.png", user_id="test-user"),
+                FileItem(id="file-scene", type=FileType.image, name="scene.png", storage_key="scene.png", user_id="test-user"),
+                FileItem(id="file-prop", type=FileType.image, name="prop.png", storage_key="prop.png", user_id="test-user"),
+                FileItem(id="file-costume", type=FileType.image, name="costume.png", storage_key="costume.png", user_id="test-user"),
+                ShotCharacterLink(shot_id="s1", character_id="char-1", index=1),
+                ProjectSceneLink(project_id="p1", chapter_id="c1", shot_id="s1", scene_id="scene-1"),
+                ProjectPropLink(project_id="p1", chapter_id="c1", shot_id="s1", prop_id="prop-1"),
+                ProjectCostumeLink(project_id="p1", chapter_id="c1", shot_id="s1", costume_id="costume-1"),
+                CharacterImage(character_id="char-1", file_id="file-char", view_angle=AssetViewAngle.front),
+                SceneImage(scene_id="scene-1", file_id="file-scene", view_angle=AssetViewAngle.front),
+                PropImage(prop_id="prop-1", file_id="file-prop", view_angle=AssetViewAngle.front),
+                CostumeImage(costume_id="costume-1", file_id="file-costume", view_angle=AssetViewAngle.front),
+            ]
+        )
+        await db.commit()
+
+        async def _fake_file_id_to_data_url(_db: AsyncSession, *, file_id: str) -> str:
+            return f"data:image/png;base64,{file_id}"
+
+        monkeypatch.setattr(
+            "app.services.film.generated_video.file_id_to_data_url",
+            _fake_file_id_to_data_url,
+        )
+
+        run_args = await build_run_args(
+            db,
+            user_id="test-user",
+            shot_id="s1",
+            model_id=model.id,
+            reference_mode="text_only",
+            prompt="最终视频提示词",
+            images=[],
+            ratio="9:16",
+        )
+
+        assert run_args["provider"] == "vidu"
+        assert run_args["input"]["model"] == "viduq3"
+        assert run_args["input"]["reference_image_base64s"] == [
+            "data:image/png;base64,file-char",
+            "data:image/png;base64,file-scene",
+            "data:image/png;base64,file-prop",
+        ]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_persist_generated_video_assigns_task_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     """视频生成文件必须继承任务归属，不能写入空 user_id。"""
     db, engine = await _build_session()
