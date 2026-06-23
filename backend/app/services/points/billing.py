@@ -288,6 +288,7 @@ async def freeze_for_task(
             business_type=business_type,
             business_id=None,
             snapshot=snapshot,
+            created_by=user_id,
         )
     except InsufficientPointsError as e:
         raise build_insufficient_error(
@@ -400,14 +401,14 @@ async def run_billed_text_operation(
         # warning 不再抛出——否则会掩盖 operation 抛出的原始异常。账本幂等 + Task 7
         # 的 Celery Beat 补偿任务会兜底清理悬挂冻结，因此吞掉解冻异常是可恢复的。
         try:
-            await unfreeze_frozen(db, user_id=user_id, billing_id=frozen.billing_id)
+            await unfreeze_frozen(db, user_id=user_id, billing_id=frozen.billing_id, created_by=user_id)
         except Exception:
             logger.warning(
                 "unfreeze failed during billed operation cleanup; Celery Beat 补偿(Task 7)将兜底",
                 exc_info=True,
             )
         raise
-    await consume_frozen(db, user_id=user_id, billing_id=frozen.billing_id)
+    await consume_frozen(db, user_id=user_id, billing_id=frozen.billing_id, created_by=user_id)
     return result
 
 
@@ -458,10 +459,10 @@ async def settle_task_billing_async(task_id: str) -> None:
         try:
             if status == GenerationTaskStatus.succeeded.value:
                 # consume_frozen / unfreeze_frozen 内部自行 COMMIT。
-                await consume_frozen(db, user_id=user_id, billing_id=billing_id)
+                await consume_frozen(db, user_id=user_id, billing_id=billing_id, created_by="system")
             else:
                 await unfreeze_frozen(
-                    db, user_id=user_id, billing_id=billing_id, remark=f"task {status}"
+                    db, user_id=user_id, billing_id=billing_id, remark=f"task {status}", created_by="system"
                 )
         except BillingStateError:
             # 幂等/互斥冲突（已结算过）：良性 mutex race，记 warning 后吞掉，不阻断任务流程。
@@ -492,6 +493,12 @@ def settle_task_billing_sync(task_id: str) -> None:
       `settle_task_billing_async`，本函数不再重复 status-reading 逻辑，避免双份维护。
     - **失败不阻断**：`asyncio.run` 抛出的任何异常（含异步核心内部已吞掉的之外）仅记录
       日志后吞掉，不阻断 Celery 任务流程；Task 7 的 Celery Beat 补偿兜底。
+    - **每次调用前重建 async DB runtime**：`AbstractAsyncDelegatingExecutor.run` 在
+      `asyncio.run` 完成后会 `close_db()`（dispose engine pool）。dispose 只关闭连接，
+      但 pool 对象内部的 asyncio 原语（Queue/Lock）仍绑定到已关闭的旧 event loop。
+      若不重建，新的 `asyncio.run` 会在旧 loop 的 pool 上操作，触发
+      "Future attached to a different loop"。`reset_db_runtime()` 创建全新 engine/pool，
+      保证新 event loop 的 asyncio 原语与 pool 绑定一致。
 
     由 `app/tasks/execute_task.py::run_task_celery` 的 `finally` 调用，确保任务无论成功/失败/
     取消都会触发结算。
@@ -500,7 +507,10 @@ def settle_task_billing_sync(task_id: str) -> None:
     `asyncio.run() cannot be called from a running event loop`。进程内任务（merge/variant）
     请直接 `await settle_task_billing_async(task_id)`。
     """
+    from app.core.db import reset_db_runtime
+
     try:
+        reset_db_runtime()
         asyncio.run(settle_task_billing_async(task_id))
     except Exception:  # noqa: BLE001 - 结算失败不阻断任务流程，补偿任务(Task 7)兜底
         logger.exception(

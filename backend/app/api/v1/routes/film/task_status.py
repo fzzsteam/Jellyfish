@@ -223,6 +223,7 @@ async def cancel_task(
                 user_id=current_user.id,
                 billing_id=owned.billing_id,
                 remark=f"cancelled: {body.reason or ''}".strip(),
+                created_by=current_user.id,
             )
         except BillingStateError:
             pass

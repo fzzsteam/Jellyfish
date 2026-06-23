@@ -101,7 +101,6 @@ class PointTransaction(Base, TimestampMixin):
     billing_id: Mapped[str | None] = mapped_column(
         String(64),
         nullable=True,
-        index=True,
         comment="计费单据 ID（可空，非业务流程为 NULL）",
     )
     business_type: Mapped[str | None] = mapped_column(
@@ -128,12 +127,16 @@ class PointTransaction(Base, TimestampMixin):
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment="备注")
     created_by: Mapped[str | None] = mapped_column(
         String(64),
-        ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
-        comment="操作人（删除用户时置空，保留流水）",
+        comment="操作人：用户主动触发时为 user_id，系统自动触发时为 'system'，历史未知时为 NULL",
     )
 
     __table_args__ = (
         UniqueConstraint("billing_id", "type", name="uq_point_transactions_billing_type"),
+        # 按用户查流水（含时间过滤/排序）
         Index("ix_point_transactions_user_id_created_at", "user_id", "created_at"),
+        # 按用户 + 流水类型组合查（type 放中间，最右侧 created_at 支持范围/排序）
+        Index("ix_point_transactions_user_id_type_created_at", "user_id", "type", "created_at"),
+        # 按业务实体 ID 反查流水（如查某生成任务的扣费记录）
+        Index("ix_point_transactions_business_id", "business_id"),
     )

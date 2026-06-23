@@ -26,6 +26,12 @@ export const PROJECT_STYLE_OPTIONS_BY_VISUAL: ProjectStyleOptionsByVisual = {
     { value: '动漫赛博', label: '动漫赛博' },
     { value: '动漫治愈', label: '动漫治愈' },
   ],
+  '2D': [
+    { value: '2D日漫', label: '2D日漫' },
+    { value: '2D国潮', label: '2D国潮' },
+    { value: '2D扁平', label: '2D扁平' },
+    { value: '2D都市恋爱', label: '2D都市恋爱' },
+  ],
   国风: [
     { value: '国漫', label: '国漫' },
     { value: '水墨画', label: '水墨画' },
@@ -42,6 +48,7 @@ const DEFAULT_VISUAL_STYLE_OPTIONS: OptionItem[] = [
   { value: '现实', label: '现实' },
   { value: '动漫', label: '动漫' },
   { value: '国风', label: '国风' },
+  { value: '2D', label: '2D' },
   { value: '3D', label: '3D' },
 ]
 const DEFAULT_STYLE_BY_VISUAL: Record<string, string> = {

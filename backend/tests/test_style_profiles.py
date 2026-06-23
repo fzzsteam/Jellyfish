@@ -20,9 +20,14 @@ def test_style_profiles_include_extra_visual_and_video_styles() -> None:
         ProjectVisualStyle.guofeng,
         ProjectStyle.guofeng_fantasy,
     ).director_guidance
+    assert get_style_profile(
+        ProjectVisualStyle.two_dimensional,
+        ProjectStyle.two_d_japanese_anime,
+    ).frame_prompt_guidance
     assert {profile.visual_style for profile in profiles} >= {
         ProjectVisualStyle.live_action,
         ProjectVisualStyle.anime,
+        ProjectVisualStyle.two_dimensional,
         ProjectVisualStyle.guofeng,
         ProjectVisualStyle.stylized_3d,
     }
@@ -32,6 +37,7 @@ def test_project_style_options_are_built_from_profiles() -> None:
     mapping, defaults = project_service.build_project_style_options()
 
     assert ProjectStyle.real_people_suspense in mapping[ProjectVisualStyle.live_action]
+    assert ProjectStyle.two_d_japanese_anime in mapping[ProjectVisualStyle.two_dimensional]
     assert ProjectStyle.guofeng_fantasy in mapping[ProjectVisualStyle.guofeng]
     assert ProjectStyle.stylized_3d_fantasy in mapping[ProjectVisualStyle.stylized_3d]
     assert defaults[ProjectVisualStyle.live_action] == mapping[ProjectVisualStyle.live_action][0]

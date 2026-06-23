@@ -105,7 +105,7 @@ async def create_video_generation_task(
         )
     except Exception:
         # 任务创建失败：按 5a 契约回滚冻结，避免冻结悬挂直至 Celery Beat 补偿。
-        await unfreeze_frozen(db, user_id=current_user.id, billing_id=frozen.billing_id)
+        await unfreeze_frozen(db, user_id=current_user.id, billing_id=frozen.billing_id, created_by=current_user.id)
         raise
 
     db.add(

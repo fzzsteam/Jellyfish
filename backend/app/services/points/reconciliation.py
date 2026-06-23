@@ -113,9 +113,10 @@ async def reconcile_stale_freezes(
                     user_id=frz.user_id,
                     billing_id=frz.billing_id,
                     remark="reconcile: orphan freeze",
+                    created_by="system",
                 )
             elif task.status == GenerationTaskStatus.succeeded:
-                await consume_frozen(db, user_id=frz.user_id, billing_id=frz.billing_id)
+                await consume_frozen(db, user_id=frz.user_id, billing_id=frz.billing_id, created_by="system")
             elif task.status in (GenerationTaskStatus.failed, GenerationTaskStatus.cancelled):
                 # task.status 列为 String(32)，读回为纯字符串。
                 # GenerationTaskStatus 是 str,Enum，直接 ==/in 比较即可
@@ -126,6 +127,7 @@ async def reconcile_stale_freezes(
                     user_id=frz.user_id,
                     billing_id=frz.billing_id,
                     remark=f"reconcile: task {task.status}",
+                    created_by="system",
                 )
             else:
                 # pending / running / streaming → 任务仍在跑，保持冻结

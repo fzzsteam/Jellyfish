@@ -40,13 +40,21 @@ from app.services.studio import projects as project_service
 router = APIRouter()
 
 
+_SYSTEM_CREATED_BY = "system"
+_SYSTEM_CREATED_BY_DISPLAY = "系统自动"
+
+
 async def _resolve_usernames(db: AsyncSession, items: list) -> dict[str, str]:
-    """从流水列表中取出 created_by ID 集合，批量查一次 users 表，返回 id→username 映射。"""
-    ids = {tx.created_by for tx in items if tx.created_by}
+    """从流水列表中取出 created_by ID 集合，批量查一次 users 表，返回 id→username 映射。
+    "system" 为系统自动触发的保留值，不走 DB 查询，直接映射为"系统自动"。
+    """
+    ids = {tx.created_by for tx in items if tx.created_by and tx.created_by != _SYSTEM_CREATED_BY}
+    result: dict[str, str] = {_SYSTEM_CREATED_BY: _SYSTEM_CREATED_BY_DISPLAY}
     if not ids:
-        return {}
+        return result
     rows = await db.execute(select(User.id, User.username).where(User.id.in_(ids)))
-    return {row.id: row.username for row in rows}
+    result.update({row.id: row.username for row in rows})
+    return result
 
 
 @router.get("", response_model=ApiResponse[PaginatedData[UserAdminRead]], summary="用户列表")

@@ -105,6 +105,8 @@ def _render_template(content: str, variables: dict[str, Any]) -> str:
 def _build_guidance_suffix(pack: ShotVideoPromptPackRead) -> str:
     """生成一段稳定的镜头执行约束，供模板渲染结果补强使用。"""
     lines: list[str] = []
+    if pack.style_profile_guidance:
+        lines.append(f"项目风格档案：{pack.style_profile_guidance}")
     if pack.action_beats:
         lines.append(f"动作节拍：{'；'.join(pack.action_beats)}")
     if pack.previous_shot_summary:
@@ -131,12 +133,12 @@ def enrich_rendered_video_prompt(
     避免这类信息只停留在 preview pack 中却没有真正进入最终 prompt。
     """
     text = str(rendered_prompt or "").strip()
-    suffix = _build_guidance_suffix(pack)
-    if not suffix:
-        return text
-
+    guidance_lines: list[str] = []
     normalized = text.replace(" ", "")
-    if any(
+    if pack.style_profile_guidance and "项目风格档案：" not in normalized:
+        guidance_lines.append(f"项目风格档案：{pack.style_profile_guidance}")
+
+    has_execution_guidance = any(
         marker in normalized
         for marker in (
             "动作节拍：",
@@ -145,7 +147,25 @@ def enrich_rendered_video_prompt(
             "构图锚点：",
             "朝向与视线：",
         )
-    ):
+    )
+    if not has_execution_guidance:
+        execution_lines: list[str] = []
+        if pack.action_beats:
+            execution_lines.append(f"动作节拍：{'；'.join(pack.action_beats)}")
+        if pack.previous_shot_summary:
+            execution_lines.append(f"上一镜头承接：{pack.previous_shot_summary}")
+        if pack.next_shot_goal:
+            execution_lines.append(f"下一镜头目标：{pack.next_shot_goal}")
+        if pack.continuity_guidance:
+            execution_lines.append(f"连续性要求：{pack.continuity_guidance}")
+        if pack.composition_anchor:
+            execution_lines.append(f"构图锚点：{pack.composition_anchor}")
+        if pack.screen_direction_guidance:
+            execution_lines.append(f"朝向与视线：{pack.screen_direction_guidance}")
+        guidance_lines.extend(execution_lines)
+
+    suffix = "\n".join(guidance_lines).strip()
+    if not suffix:
         return text
 
     if not text:
@@ -344,6 +364,7 @@ def _fallback_video_prompt(pack: ShotVideoPromptPackRead) -> str:
         f"剧本摘录：{pack.script_excerpt}",
         f"动作节拍：{'；'.join(pack.action_beats)}" if pack.action_beats else "",
         f"画面风格：{style_text}",
+        f"项目风格档案：{pack.style_profile_guidance}" if pack.style_profile_guidance else "",
         f"镜头语言：{camera_text}",
         f"时长：{pack.camera.duration} 秒" if pack.camera.duration else "",
         f"场景：{pack.scene.name if pack.scene else ''}",

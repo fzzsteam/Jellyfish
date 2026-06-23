@@ -418,7 +418,7 @@ async def create_image_task_and_link(
         if billing_id:
             from app.services.points import unfreeze_frozen
 
-            await unfreeze_frozen(db, user_id=user_id, billing_id=billing_id)
+            await unfreeze_frozen(db, user_id=user_id, billing_id=billing_id, created_by="system")
         raise
 
     db.add(

@@ -133,7 +133,7 @@ async def _unfreeze_script_task(db: AsyncSession, *, user_id: str, billing_id: s
         return
     from app.services.points import unfreeze_frozen
 
-    await unfreeze_frozen(db, user_id=user_id, billing_id=billing_id)
+    await unfreeze_frozen(db, user_id=user_id, billing_id=billing_id, created_by="system")
 
 
 async def find_active_divide_task(

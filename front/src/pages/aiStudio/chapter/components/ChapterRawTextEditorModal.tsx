@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Button, Card, Collapse, Empty, Input, List, Modal, Space, Spin, Tag, message } from 'antd'
+import { Button, Card, Collapse, Dropdown, Empty, Input, List, Modal, Space, Spin, Tag, message } from 'antd'
 import {
   CloseCircleOutlined,
   DiffOutlined,
+  DownOutlined,
   FileTextOutlined,
   HistoryOutlined,
   ReloadOutlined,
@@ -536,19 +537,12 @@ export function ChapterRawTextEditorModal({
               <Tag color="blue">{plainWordCount} 字</Tag>
               <Tag color="default">{paragraphCount} 段</Tag>
             </div>
-            <Space size="small">
-              <Button size="small" type="primary" icon={<SaveOutlined />} loading={actionsLoading || saving} disabled={actionsLoading} onClick={() => void handleSave()}>
+            <Space size="small" wrap>
+              <Button size="small" type="primary" icon={<SaveOutlined />} loading={saving} disabled={actionsLoading} onClick={() => void handleSave()}>
                 保存
               </Button>
-              <Button
-                size="small"
-                icon={<ReloadOutlined />}
-                loading={checkingConsistency || !!consistencyTask}
-                disabled={actionsLoading || !!consistencyTask || !consistencyQuote.canSubmit}
-                onClick={() => void handleCheckConsistency()}
-              >
-                {consistencyTask ? '检查中' : '角色混淆检查'}
-              </Button>
+
+              {/* 角色混淆检查：运行时变为取消 */}
               {consistencyTask ? (
                 <Button
                   size="small"
@@ -559,16 +553,22 @@ export function ChapterRawTextEditorModal({
                 >
                   {consistencyTask.cancelRequested ? '正在取消' : '取消检查'}
                 </Button>
-              ) : null}
-              <Button
-                size="small"
-                icon={<ThunderboltOutlined />}
-                loading={extracting || !!simplifyTask}
-                disabled={actionsLoading || !!simplifyTask || !simplifyQuote.canSubmit}
-                onClick={() => void handleSmartSimplify()}
-              >
-                {simplifyTask ? '精简中' : '智能精简'}
-              </Button>
+              ) : (
+                <>
+                  <Button
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    loading={checkingConsistency}
+                    disabled={actionsLoading || !consistencyQuote.canSubmit}
+                    onClick={() => void handleCheckConsistency()}
+                  >
+                    角色混淆检查
+                  </Button>
+                  <PointsCostHint quote={consistencyQuote.quote} loading={consistencyQuote.loading} error={consistencyQuote.error} />
+                </>
+              )}
+
+              {/* 智能精简：运行时变为取消 */}
               {simplifyTask ? (
                 <Button
                   size="small"
@@ -579,49 +579,61 @@ export function ChapterRawTextEditorModal({
                 >
                   {simplifyTask.cancelRequested ? '正在取消' : '取消精简'}
                 </Button>
-              ) : null}
-              {mode === 'condensed' ? (
-                <Button size="small" icon={<ReloadOutlined />} loading={actionsLoading} disabled={actionsLoading} onClick={handleBackToRaw}>
-                  回到原文
-                </Button>
               ) : (
-                <Button
-                  size="small"
-                  icon={<ReloadOutlined />}
-                  loading={actionsLoading}
-                  disabled={actionsLoading || !condensedText.trim()}
-                  onClick={handleViewCondensed}
-                >
-                  查看精简
-                </Button>
+                <>
+                  <Button
+                    size="small"
+                    icon={<ThunderboltOutlined />}
+                    loading={extracting}
+                    disabled={actionsLoading || !simplifyQuote.canSubmit}
+                    onClick={() => void handleSmartSimplify()}
+                  >
+                    智能精简
+                  </Button>
+                  <PointsCostHint quote={simplifyQuote.quote} loading={simplifyQuote.loading} error={simplifyQuote.error} />
+                </>
               )}
-              <Button
-                size="small"
-                icon={<DiffOutlined />}
-                loading={actionsLoading}
+
+              {/* 次要操作收进下拉菜单 */}
+              <Dropdown
                 disabled={actionsLoading}
-                type={mode === 'compare' ? 'primary' : 'default'}
-                onClick={() => {
-                  if (mode === 'compare') {
-                    setMode('raw')
-                    setEditorText(rawText)
-                    return
-                  }
-                  setCompareRaw(rawText)
-                  setCompareCondensed(condensedText)
-                  setMode('compare')
+                menu={{
+                  items: [
+                    {
+                      key: 'toggle-condensed',
+                      icon: <ReloadOutlined />,
+                      label: mode === 'condensed' ? '回到原文' : '查看精简',
+                      disabled: mode !== 'condensed' && !condensedText.trim(),
+                      onClick: mode === 'condensed' ? handleBackToRaw : handleViewCondensed,
+                    },
+                    {
+                      key: 'compare',
+                      icon: <DiffOutlined />,
+                      label: mode === 'compare' ? '退出对比' : '对比模式',
+                      onClick: () => {
+                        if (mode === 'compare') {
+                          setMode('raw')
+                          setEditorText(rawText)
+                        } else {
+                          setCompareRaw(rawText)
+                          setCompareCondensed(condensedText)
+                          setMode('compare')
+                        }
+                      },
+                    },
+                    {
+                      key: 'history',
+                      icon: <HistoryOutlined />,
+                      label: '版本历史',
+                      onClick: () => setHistoryOpen(true),
+                    },
+                  ],
                 }}
               >
-                对比模式
-              </Button>
-              <Button size="small" icon={<HistoryOutlined />} loading={actionsLoading} disabled={actionsLoading} onClick={() => setHistoryOpen(true)}>
-                版本历史
-              </Button>
-              <PointsCostHint
-                quote={simplifyQuote.quote || consistencyQuote.quote || optimizeQuote.quote}
-                loading={simplifyQuote.loading || consistencyQuote.loading || optimizeQuote.loading}
-                error={simplifyQuote.error || consistencyQuote.error || optimizeQuote.error}
-              />
+                <Button size="small">
+                  更多 <DownOutlined />
+                </Button>
+              </Dropdown>
             </Space>
           </div>
         }
@@ -692,16 +704,6 @@ export function ChapterRawTextEditorModal({
                       {consistencyResult.has_issues ? '发现问题' : '无问题'}
                     </Tag>
                     <Tag>issues：{consistencyIssues.length}</Tag>
-                    <Button
-                      size="small"
-                      type="primary"
-                      icon={<ThunderboltOutlined />}
-                      loading={optimizingScript || !!optimizeTask}
-                      disabled={actionsLoading || !!optimizeTask || !optimizeQuote.canSubmit}
-                      onClick={() => void handleOneClickOptimize()}
-                    >
-                      {optimizeTask ? '优化中' : '一键优化'}
-                    </Button>
                     {optimizeTask ? (
                       <Button
                         size="small"
@@ -712,7 +714,21 @@ export function ChapterRawTextEditorModal({
                       >
                         {optimizeTask.cancelRequested ? '正在取消' : '取消优化'}
                       </Button>
-                    ) : null}
+                    ) : (
+                      <>
+                        <Button
+                          size="small"
+                          type="primary"
+                          icon={<ThunderboltOutlined />}
+                          loading={optimizingScript}
+                          disabled={actionsLoading || !optimizeQuote.canSubmit}
+                          onClick={() => void handleOneClickOptimize()}
+                        >
+                          一键优化
+                        </Button>
+                        <PointsCostHint quote={optimizeQuote.quote} loading={optimizeQuote.loading} error={optimizeQuote.error} />
+                      </>
+                    )}
                   </Space>
                 }
               >

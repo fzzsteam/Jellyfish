@@ -7,18 +7,18 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Table,
+  Tabs,
   Tag,
   message,
 } from 'antd'
-import type { TableColumnsType } from 'antd'
 import { useParams } from 'react-router-dom'
 import { PointsAccountCard } from '../../components/points/PointsAccountCard'
-import { PointsBadge } from '../../components/points/PointsBadge'
+import { PointTransactionTable } from '../../components/points/PointTransactionTable'
 import { AdminService } from '../../services/generated'
 import type {
   PointTransactionRead,
-  PointTransactionType,
   PointsSummaryRead,
   UserAdminRead,
   UserProjectBrief,
@@ -26,38 +26,6 @@ import type {
 
 /** 充值快捷金额选项。 */
 const RECHARGE_PRESETS = [100, 500, 1000, 5000]
-
-/** 积分流水类型 → 标签颜色映射，便于一眼区分充值/冻结/扣减/解冻。 */
-const TX_TYPE_COLOR: Record<PointTransactionType, string> = {
-  recharge: 'green',
-  freeze: 'orange',
-  consume: 'red',
-  unfreeze: 'blue',
-}
-
-const TX_TYPE_LABEL: Record<PointTransactionType, string> = {
-  recharge: '充值',
-  freeze: '冻结',
-  consume: '扣减',
-  unfreeze: '解冻',
-}
-
-/**
- * 流水时间格式化：沿用项目内 Intl.DateTimeFormat 的既定约定
- * （见 taskNotificationHelpers.tsx），避免引入 dayjs 依赖。
- */
-const formatTxTime = (v?: string | null): string => {
-  if (!v) return '—'
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(new Date(v))
-}
 
 /**
  * 管理员用户详情页：展示用户信息、积分账户、积分充值与积分流水，
@@ -74,7 +42,10 @@ const AdminUserDetailPage: React.FC = () => {
   const [txPage, setTxPage] = useState(1)
   const [txPageSize, setTxPageSize] = useState(10)
   const [recharging, setRecharging] = useState(false)
-  const [form] = Form.useForm()
+  const [rechargeOpen, setRechargeOpen] = useState(false)
+  const [resetPwdOpen, setResetPwdOpen] = useState(false)
+  const [resetPwdLoading, setResetPwdLoading] = useState(false)
+  const [pwdForm] = Form.useForm()
   const [rechargeForm] = Form.useForm()
 
   /** 一次性加载用户基础信息 + 项目 + 积分摘要（首屏）。 */
@@ -119,39 +90,34 @@ const AdminUserDetailPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
-  const resetPassword = async () => {
-    const { password } = await form.validateFields()
+  /** 提交密码重置。 */
+  const handleResetPassword = async () => {
+    const { password } = await pwdForm.validateFields()
+    setResetPwdLoading(true)
     try {
       await AdminService.updateUserApiV1AdminUsersUserIdPatch({ userId: id, requestBody: { password } })
       message.success('密码已重置，该用户需重新登录')
-      form.resetFields()
+      setResetPwdOpen(false)
+      pwdForm.resetFields()
     } catch {
       message.error('重置失败')
+    } finally {
+      setResetPwdLoading(false)
     }
   }
 
-  /**
-   * 提交积分充值：正数为充值，负数为扣减。
-   * 前端校验：负数时备注必填；金额为非零整数。
-   */
+  /** 提交积分充值：校验由 Form rules 承担，此处直接调接口。 */
   const handleRecharge = async () => {
     const values = await rechargeForm.validateFields()
     const amount = Number(values.amount)
-    if (!Number.isInteger(amount) || amount === 0) {
-      message.error('金额必须是非零整数')
-      return
-    }
-    if (amount < 0 && !values.remark?.trim()) {
-      message.error('扣减（负数）时备注必填')
-      return
-    }
     setRecharging(true)
     try {
       await AdminService.rechargeUserPointsApiV1AdminUsersUserIdPointsRechargePost({
         userId: id,
-        requestBody: { amount, remark: values.remark?.trim() ? values.remark.trim() : null },
+        requestBody: { amount, remark: values.remark?.trim() || null },
       })
       message.success(amount > 0 ? '充值成功' : '扣减成功')
+      setRechargeOpen(false)
       rechargeForm.resetFields()
       // 充值后刷新摘要与流水。
       const pts = await AdminService.getUserPointsApiV1AdminUsersUserIdPointsGet({ userId: id })
@@ -165,165 +131,153 @@ const AdminUserDetailPage: React.FC = () => {
     }
   }
 
-  /** 积分流水表格列定义。 */
-  const txColumns: TableColumnsType<PointTransactionRead> = [
-    {
-      title: '时间',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 180,
-      render: (v?: string | null) => formatTxTime(v),
-    },
-    {
-      title: '类型',
-      dataIndex: 'type',
-      width: 90,
-      render: (t: PointTransactionType) => <Tag color={TX_TYPE_COLOR[t]}>{TX_TYPE_LABEL[t]}</Tag>,
-    },
-    {
-      title: '金额',
-      dataIndex: 'amount',
-      width: 100,
-      render: (v: number) => <PointsBadge value={v} size="sm" insufficient={v < 0} />,
-    },
-    { title: '业务类型', dataIndex: 'business_type', render: (v) => v || '—' },
-    { title: '模型', dataIndex: 'model_id', ellipsis: true, render: (v) => v || '—' },
-    {
-      title: '余额',
-      dataIndex: 'balance_after',
-      width: 100,
-      render: (v: number) => <PointsBadge value={v} size="sm" />,
-    },
-    { title: '备注', dataIndex: 'remark', ellipsis: true, render: (v) => v || '—' },
-    {
-      title: '操作人',
-      dataIndex: 'created_by_username',
-      width: 120,
-      render: (v: string | null) => v || '—',
-    },
-  ]
-
   return (
-    <div className="flex flex-col gap-4">
-      <Card title="用户信息">
-        <Descriptions column={2}>
-          <Descriptions.Item label="用户名">{user?.username}</Descriptions.Item>
-          <Descriptions.Item label="角色">
-            {user?.is_admin ? <Tag color="gold">管理员</Tag> : <Tag>成员</Tag>}
-          </Descriptions.Item>
-          <Descriptions.Item label="状态">
-            {user?.is_active ? <Tag color="green">启用</Tag> : <Tag color="red">禁用</Tag>}
-          </Descriptions.Item>
-        </Descriptions>
-      </Card>
-
-      {/* 积分账户摘要 */}
-      <Card title="积分账户">
-        <PointsAccountCard summary={points ?? null} />
-      </Card>
-
-      {/* 积分充值 / 扣减表单 */}
-      <Card title="积分充值">
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-sm text-gray-500">快捷：</span>
-          {RECHARGE_PRESETS.map((preset) => (
-            <Button
-              key={preset}
-              size="small"
-              onClick={() => rechargeForm.setFieldValue('amount', preset)}
-            >
-              +{preset}
-            </Button>
-          ))}
+    <div className="flex flex-col gap-4 p-4 h-full overflow-y-auto">
+      {/* 用户信息 + 积分账户，header 右侧放操作按钮 */}
+      <Card
+        title="用户信息"
+        extra={
+          <div className="flex gap-2">
+            <Button onClick={() => setResetPwdOpen(true)}>重置密码</Button>
+            <Button type="primary" onClick={() => setRechargeOpen(true)}>充值积分</Button>
+          </div>
+        }
+      >
+        <div className="grid grid-cols-2 gap-6">
+          <Descriptions column={1}>
+            <Descriptions.Item label="用户名">{user?.username}</Descriptions.Item>
+            <Descriptions.Item label="角色">
+              {user?.is_admin ? <Tag color="gold">管理员</Tag> : <Tag>成员</Tag>}
+            </Descriptions.Item>
+            <Descriptions.Item label="状态">
+              {user?.is_active ? <Tag color="green">启用</Tag> : <Tag color="red">禁用</Tag>}
+            </Descriptions.Item>
+          </Descriptions>
+          <PointsAccountCard summary={points ?? null} />
         </div>
-        <Form form={rechargeForm} layout="inline">
+      </Card>
+
+      {/* 积分流水 + 关联项目 Tab */}
+      <Card>
+        <Tabs
+          defaultActiveKey="transactions"
+          items={[
+            {
+              key: 'transactions',
+              label: '积分流水',
+              children: (
+                <PointTransactionTable
+                  dataSource={transactions}
+                  loading={txLoading}
+                  total={txTotal}
+                  page={txPage}
+                  pageSize={txPageSize}
+                  onChange={(page, pageSize) => {
+                    setTxPage(page)
+                    setTxPageSize(pageSize)
+                    void loadTransactions(page, pageSize)
+                  }}
+                />
+              ),
+            },
+            {
+              key: 'projects',
+              label: `关联项目${projects.length ? `（${projects.length}）` : ''}`,
+              children: (
+                <Table
+                  rowKey="id"
+                  dataSource={projects}
+                  pagination={false}
+                  size="small"
+                  columns={[
+                    { title: '项目名', dataIndex: 'name' },
+                    { title: '项目 ID', dataIndex: 'id', ellipsis: true },
+                  ]}
+                />
+              ),
+            },
+          ]}
+        />
+      </Card>
+
+      {/* 充值积分弹窗 */}
+      <Modal
+        title={`充值积分 — ${user?.username ?? ''}`}
+        open={rechargeOpen}
+        onOk={() => void handleRecharge()}
+        onCancel={() => { setRechargeOpen(false); rechargeForm.resetFields() }}
+        okText="确认"
+        cancelText="取消"
+        confirmLoading={recharging}
+        destroyOnClose
+      >
+        <Form form={rechargeForm} layout="vertical" className="mt-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-sm text-gray-500">快捷：</span>
+            {RECHARGE_PRESETS.map((preset) => (
+              <Button
+                key={preset}
+                size="small"
+                onClick={() => rechargeForm.setFieldValue('amount', preset)}
+              >
+                +{preset}
+              </Button>
+            ))}
+          </div>
           <Form.Item
             name="amount"
-            label="金额"
+            label="积分数量（正数充值，负数扣减）"
             rules={[
-              { required: true, message: '请输入金额' },
+              { required: true, message: '请输入积分数量' },
+              { type: 'integer', message: '请输入整数' },
               {
-                validator: (_, value) => {
-                  if (value === null || value === undefined) return Promise.resolve()
-                  if (!Number.isInteger(Number(value))) return Promise.reject(new Error('必须为整数'))
-                  if (Number(value) === 0) return Promise.reject(new Error('不可为 0'))
-                  return Promise.resolve()
-                },
+                validator: (_, value) => value !== 0 ? Promise.resolve() : Promise.reject(new Error('不能为 0')),
               },
             ]}
           >
-            <InputNumber min={undefined} step={1} precision={0} placeholder="正数充值/负数扣减" style={{ width: 180 }} />
+            <InputNumber style={{ width: '100%' }} placeholder="如：100 或 -50" />
           </Form.Item>
           <Form.Item
             name="remark"
             label="备注"
             rules={[
-              {
-                validator: (_, value) => {
-                  const amount = rechargeForm.getFieldValue('amount')
-                  // 仅当金额为负整数时强制备注，正数可留空。
-                  if (Number.isInteger(Number(amount)) && Number(amount) < 0 && !String(value ?? '').trim()) {
-                    return Promise.reject(new Error('扣减（负数）时备注必填'))
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  const amount = getFieldValue('amount') as number
+                  if (amount < 0 && !value?.trim()) {
+                    return Promise.reject(new Error('扣减积分必须填写备注'))
                   }
                   return Promise.resolve()
                 },
-              },
+              }),
             ]}
           >
-            <Input.TextArea rows={1} placeholder="扣减时必填" className="w-64" />
+            <Input placeholder="说明充值/扣减原因（扣减时必填）" />
           </Form.Item>
-          <Button type="primary" loading={recharging} onClick={() => void handleRecharge()}>
-            提交
-          </Button>
         </Form>
-        <div className="text-xs text-gray-400 mt-2">
-          正数为充值，负数为扣减；扣减时备注必填且不得侵蚀冻结额。
-        </div>
-      </Card>
+      </Modal>
 
-      {/* 积分流水，服务端分页 */}
-      <Card title="积分流水">
-        <Table<PointTransactionRead>
-          rowKey="id"
-          loading={txLoading}
-          dataSource={transactions}
-          columns={txColumns}
-          size="small"
-          scroll={{ x: 900, y: 400 }}
-          pagination={{
-            current: txPage,
-            pageSize: txPageSize,
-            total: txTotal,
-            showSizeChanger: true,
-            onChange: (page, pageSize) => {
-              setTxPage(page)
-              setTxPageSize(pageSize)
-              void loadTransactions(page, pageSize)
-            },
-          }}
-        />
-      </Card>
-
-      <Card title="重置密码">
-        <Form form={form} layout="inline" onFinish={() => void resetPassword()}>
-          <Form.Item name="password" rules={[{ required: true, min: 6, message: '至少 6 位' }]}>
-            <Input.Password placeholder="新密码" />
+      {/* 重置密码弹窗 */}
+      <Modal
+        title={`重置密码 — ${user?.username ?? ''}`}
+        open={resetPwdOpen}
+        onOk={() => void handleResetPassword()}
+        onCancel={() => { setResetPwdOpen(false); pwdForm.resetFields() }}
+        okText="确认重置"
+        cancelText="取消"
+        confirmLoading={resetPwdLoading}
+        destroyOnClose
+      >
+        <Form form={pwdForm} layout="vertical" className="mt-4">
+          <Form.Item
+            name="password"
+            label="新密码"
+            rules={[{ required: true, min: 6, message: '至少 6 位' }]}
+          >
+            <Input.Password placeholder="请输入新密码（至少 6 位）" />
           </Form.Item>
-          <Button type="primary" htmlType="submit">重置</Button>
         </Form>
-      </Card>
-
-      <Card title="该用户的项目">
-        <Table
-          rowKey="id"
-          dataSource={projects}
-          pagination={false}
-          columns={[
-            { title: '项目 ID', dataIndex: 'id' },
-            { title: '项目名', dataIndex: 'name' },
-          ]}
-        />
-      </Card>
+      </Modal>
     </div>
   )
 }

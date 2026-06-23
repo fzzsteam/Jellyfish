@@ -1,30 +1,10 @@
 import { useEffect, useState } from 'react'
 import type React from 'react'
-import { Card, Select, Table, Tag, message } from 'antd'
-import type { TableColumnsType } from 'antd'
+import { Card, Select, message } from 'antd'
 import { PointsService } from '../../services/generated'
-import type {
-  PointTransactionRead,
-  PointTransactionType,
-  PointsSummaryRead,
-} from '../../services/generated'
+import type { PointTransactionRead, PointTransactionType, PointsSummaryRead } from '../../services/generated'
 import { PointsAccountCard } from '../../components/points/PointsAccountCard'
-import { PointsBadge } from '../../components/points/PointsBadge'
-
-/** 积分流水类型 → 标签颜色与中文标签，便于一眼区分充值/冻结/扣减/解冻。 */
-const TX_TYPE_COLOR: Record<PointTransactionType, string> = {
-  recharge: 'green',
-  freeze: 'orange',
-  consume: 'red',
-  unfreeze: 'blue',
-}
-
-const TX_TYPE_LABEL: Record<PointTransactionType, string> = {
-  recharge: '充值',
-  freeze: '冻结',
-  consume: '扣减',
-  unfreeze: '解冻',
-}
+import { PointTransactionTable } from '../../components/points/PointTransactionTable'
 
 /** 流水类型筛选项。 */
 const TYPE_FILTER_OPTIONS: { label: string; value: PointTransactionType }[] = [
@@ -33,23 +13,6 @@ const TYPE_FILTER_OPTIONS: { label: string; value: PointTransactionType }[] = [
   { label: '扣减', value: 'consume' },
   { label: '解冻', value: 'unfreeze' },
 ]
-
-/**
- * 流水时间格式化：沿用项目内 Intl.DateTimeFormat 的既定约定
- * （见 taskNotificationHelpers.tsx），避免引入 dayjs 依赖。
- */
-const formatTxTime = (v?: string | null): string => {
-  if (!v) return '—'
-  return new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(new Date(v))
-}
 
 /**
  * 用户积分页：展示当前用户积分账户摘要与积分流水。
@@ -102,41 +65,8 @@ const PointsPage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  /** 流水列定义：时间/类型/金额/业务类型/模型/余额/备注/操作人。 */
-  const columns: TableColumnsType<PointTransactionRead> = [
-    {
-      title: '时间',
-      dataIndex: 'created_at',
-      key: 'created_at',
-      width: 180,
-      render: (v?: string | null) => formatTxTime(v),
-    },
-    {
-      title: '类型',
-      dataIndex: 'type',
-      width: 90,
-      render: (t: PointTransactionType) => <Tag color={TX_TYPE_COLOR[t]}>{TX_TYPE_LABEL[t]}</Tag>,
-    },
-    {
-      title: '金额',
-      dataIndex: 'amount',
-      width: 100,
-      render: (v: number) => <PointsBadge value={v} size="sm" insufficient={v < 0} />,
-    },
-    { title: '业务类型', dataIndex: 'business_type', render: (v) => v || '—' },
-    { title: '模型', dataIndex: 'model_id', ellipsis: true, render: (v) => v || '—' },
-    {
-      title: '余额',
-      dataIndex: 'balance_after',
-      width: 100,
-      render: (v: number) => <PointsBadge value={v} size="sm" />,
-    },
-    { title: '备注', dataIndex: 'remark', ellipsis: true, render: (v) => v || '—' },
-    { title: '操作人', dataIndex: 'created_by_username', width: 120, render: (v) => v || '—' },
-  ]
-
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex flex-col gap-4 p-4 h-full overflow-y-auto">
       <Card title="积分账户">
         <PointsAccountCard summary={summary} loading={loading} />
       </Card>
@@ -158,23 +88,16 @@ const PointsPage: React.FC = () => {
           />
         }
       >
-        <Table<PointTransactionRead>
-          rowKey="id"
-          loading={txLoading}
+        <PointTransactionTable
           dataSource={transactions}
-          columns={columns}
-          size="small"
-          scroll={{ x: 900, y: 400 }}
-          pagination={{
-            current: page,
-            pageSize,
-            total,
-            showSizeChanger: true,
-            onChange: (p, ps) => {
-              setPage(p)
-              setPageSize(ps)
-              void loadTransactions(p, ps, typeFilter)
-            },
+          loading={txLoading}
+          total={total}
+          page={page}
+          pageSize={pageSize}
+          onChange={(p, ps) => {
+            setPage(p)
+            setPageSize(ps)
+            void loadTransactions(p, ps, typeFilter)
           }}
         />
       </Card>

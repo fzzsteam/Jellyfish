@@ -80,7 +80,7 @@ async def create_shot_frame_prompt_task(
         await db.commit()
     except Exception:
         # 任务创建/入库失败：按 5a 契约回滚冻结，避免冻结悬挂。
-        await unfreeze_frozen(db, user_id=current_user.id, billing_id=frozen.billing_id)
+        await unfreeze_frozen(db, user_id=current_user.id, billing_id=frozen.billing_id, created_by=current_user.id)
         raise
 
     enqueue_task_execution(task_record.id)

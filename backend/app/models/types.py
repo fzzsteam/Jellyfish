@@ -17,6 +17,10 @@ class ProjectStyle(str, Enum):
     anime_xianxia = "动漫仙侠"
     anime_cyberpunk = "动漫赛博"
     anime_healing = "动漫治愈"
+    two_d_japanese_anime = "2D日漫"
+    two_d_guochao = "2D国潮"
+    two_d_flat = "2D扁平"
+    two_d_urban_romance = "2D都市恋爱"
     guoman = "国漫"
     ink_wash = "水墨画"
     guofeng_fantasy = "国风玄幻"
@@ -31,6 +35,7 @@ class ProjectVisualStyle(str, Enum):
     live_action = "现实"
     anime = "动漫"
     guofeng = "国风"
+    two_dimensional = "2D"
     stylized_3d = "3D"
 
 

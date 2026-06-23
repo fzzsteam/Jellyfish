@@ -505,6 +505,7 @@ async def _freeze_text_call_async(
                 "generation_count": 1,
                 "source": "auto_extract",
             },
+            created_by=user_id,
         )
 
 
@@ -515,7 +516,7 @@ async def _consume_text_call_async(*, user_id: str, billing_id: str) -> None:
 
     async with async_session_maker() as async_db:
         try:
-            await consume_frozen(async_db, user_id=user_id, billing_id=billing_id)
+            await consume_frozen(async_db, user_id=user_id, billing_id=billing_id, created_by="system")
         except BillingStateError:
             logger.warning(
                 "auto_extract: consume benign race for billing_id=%s", billing_id
@@ -534,6 +535,7 @@ async def _unfreeze_text_call_async(*, user_id: str, billing_id: str) -> None:
                 user_id=user_id,
                 billing_id=billing_id,
                 remark="auto_extract cache hit or extraction error",
+                created_by="system",
             )
         except BillingStateError:
             logger.warning(

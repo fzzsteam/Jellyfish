@@ -36,7 +36,7 @@ const VideoEditor: React.FC = () => {
   }, [projectId])
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-4 h-full overflow-y-auto">
       <div className="mb-2">
         <Link
           to={projectId ? `/projects/${projectId}/chapters` : '/projects'}

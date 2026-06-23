@@ -347,7 +347,7 @@ const PromptTemplateManager: FC = () => {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 p-4 h-full overflow-y-auto">
       <Card
         title="提示词模板管理"
         loading={loading && templates.length === 0}

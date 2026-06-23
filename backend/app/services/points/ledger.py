@@ -165,6 +165,7 @@ async def freeze_points(
     business_type: str,
     business_id: str | None,
     snapshot: dict[str, Any] | None,
+    created_by: str | None = None,
 ) -> PointTransaction:
     """冻结积分：下单时预占额度，余额不变，冻结额增加。
 
@@ -212,6 +213,7 @@ async def freeze_points(
             business_id=business_id,
             model_id=model_id,
             pricing_snapshot=snapshot,
+            created_by=created_by,
         )
         db.add(tx)
         pts.frozen = new_frozen
@@ -233,7 +235,7 @@ async def freeze_points(
 
 
 async def consume_frozen(
-    db: AsyncSession, *, user_id: str, billing_id: str
+    db: AsyncSession, *, user_id: str, billing_id: str, created_by: str | None = None
 ) -> PointTransaction:
     """扣减冻结额：任务成功后从冻结额度结算扣出，余额与冻结额同步减少。
 
@@ -287,6 +289,7 @@ async def consume_frozen(
             business_id=freeze_tx.business_id,
             model_id=freeze_tx.model_id,
             pricing_snapshot=freeze_tx.pricing_snapshot,
+            created_by=created_by,
         )
         db.add(tx)
         pts.balance = new_balance
@@ -308,7 +311,12 @@ async def consume_frozen(
 
 
 async def unfreeze_frozen(
-    db: AsyncSession, *, user_id: str, billing_id: str, remark: str | None = None
+    db: AsyncSession,
+    *,
+    user_id: str,
+    billing_id: str,
+    remark: str | None = None,
+    created_by: str | None = None,
 ) -> PointTransaction:
     """解冻：任务失败/取消时把冻结额度退回可用，余额不变。
 
@@ -362,6 +370,7 @@ async def unfreeze_frozen(
             model_id=freeze_tx.model_id,
             pricing_snapshot=freeze_tx.pricing_snapshot,
             remark=remark,
+            created_by=created_by,
         )
         db.add(tx)
         pts.frozen = new_frozen

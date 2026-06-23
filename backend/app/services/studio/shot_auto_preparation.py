@@ -778,6 +778,7 @@ async def _freeze_image_task_async(
                 "generation_count": 1,
                 "source": "auto_prepare",
             },
+            created_by=user_id,
         )
 
 
@@ -797,6 +798,7 @@ async def _unfreeze_image_task_async(*, user_id: str, billing_id: str) -> None:
                 user_id=user_id,
                 billing_id=billing_id,
                 remark="auto_prepare image task creation failed",
+                created_by="system",
             )
         except BillingStateError:
             _logger.warning(
