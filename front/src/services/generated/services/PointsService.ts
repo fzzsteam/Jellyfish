@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ApiResponse_GroupedTransactionResponse_ } from '../models/ApiResponse_GroupedTransactionResponse_';
 import type { ApiResponse_PaginatedData_PointTransactionRead__ } from '../models/ApiResponse_PaginatedData_PointTransactionRead__';
 import type { ApiResponse_PointsQuoteResponse_ } from '../models/ApiResponse_PointsQuoteResponse_';
 import type { ApiResponse_PointsSummaryRead_ } from '../models/ApiResponse_PointsSummaryRead_';
@@ -74,6 +75,36 @@ export class PointsService {
                 'type': type,
                 'business_type': businessType,
                 'billing_id': billingId,
+                'page': page,
+                'page_size': pageSize,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 按操作组聚合的积分流水
+     * 按 cascade_group_id 聚合展示流水。同一操作级联的多个 billing_id 归为一组。
+     * @returns ApiResponse_GroupedTransactionResponse_ Successful Response
+     * @throws ApiError
+     */
+    public static listGroupedTransactionsApiV1PointsTransactionsGroupedGet({
+        page = 1,
+        pageSize = 20,
+        authorization,
+    }: {
+        page?: number,
+        pageSize?: number,
+        authorization?: (string | null),
+    }): CancelablePromise<ApiResponse_GroupedTransactionResponse_> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/points/transactions/grouped',
+            headers: {
+                'authorization': authorization,
+            },
+            query: {
                 'page': page,
                 'page_size': pageSize,
             },

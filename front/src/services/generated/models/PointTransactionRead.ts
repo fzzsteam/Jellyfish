@@ -59,6 +59,10 @@ export type PointTransactionRead = {
      */
     pricing_snapshot?: (Record<string, any> | null);
     /**
+     * 级联分组键
+     */
+    cascade_group_id?: (string | null);
+    /**
      * 备注
      */
     remark?: (string | null);

@@ -98,6 +98,7 @@ async def _freeze_for_script_task(
     user_id: str,
     quote_token: str | None,
     business_type: str,
+    cascade_group_id: str | None = None,
 ) -> str | None:
     """脚本类异步任务冻结积分的统一入口（Task 5b）。
 
@@ -123,6 +124,7 @@ async def _freeze_for_script_task(
         business_type=business_type,
         category=ModelCategoryKey.text,
         model_id=None,
+        cascade_group_id=cascade_group_id,
     )
     return frozen.billing_id
 

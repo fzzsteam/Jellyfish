@@ -124,6 +124,12 @@ class PointTransaction(Base, TimestampMixin):
         nullable=True,
         comment="下单时计价快照（JSON），用于历史对账不受调价影响",
     )
+    cascade_group_id: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+        comment="级联分组键：同一次操作的 root billing_id；充值/手动调整为 NULL",
+    )
     remark: Mapped[str | None] = mapped_column(Text, nullable=True, comment="备注")
     created_by: Mapped[str | None] = mapped_column(
         String(64),

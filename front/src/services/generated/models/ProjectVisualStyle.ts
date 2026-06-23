@@ -5,4 +5,4 @@
 /**
  * 画面表现形式维度：用于区分现实/动漫等。
  */
-export type ProjectVisualStyle = '现实';
+export type ProjectVisualStyle = '现实' | '2D' | '3D';

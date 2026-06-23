@@ -86,6 +86,10 @@ export type ShotVideoPromptPackRead = {
      */
     style?: string;
     /**
+     * 项目风格档案生成指导词
+     */
+    style_profile_guidance?: string;
+    /**
      * 默认负面提示词
      */
     negative_prompt?: string;

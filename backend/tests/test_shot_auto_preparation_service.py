@@ -786,7 +786,7 @@ def test_divide_task_apply_runs_extraction_and_auto_preparation(monkeypatch) -> 
         )
 
         DivideTaskExecutor().apply_result(
-            SimpleNamespace(db=db, task=SimpleNamespace(user_id="test-user")),
+            SimpleNamespace(db=db, task=SimpleNamespace(user_id="test-user", billing_id="divide-billing-1")),
             {"chapter_id": "chapter-1"},
             _division_result(),
         )

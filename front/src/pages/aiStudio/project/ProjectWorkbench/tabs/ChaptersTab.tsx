@@ -76,6 +76,16 @@ export function ChaptersTab() {
     enabled: chapters.length > 0,
   })
 
+  // 积分试算：资产图生成（image_generation），仅用于在分镜拆解提示中展示单张资产图单价，
+  // 不参与提交门控（图片实际生成发生在工作室阶段，按真实新建数量计费）。
+  const imageQuote = usePointsQuote({
+    businessType: 'image_generation',
+    category: 'image',
+    modelId: null,
+    resolutionProfile: 'standard',
+    enabled: chapters.length > 0,
+  })
+
   const createParam = searchParams.get(CREATE_PARAM)
   const editParam = searchParams.get(EDIT_PARAM)
   useEffect(() => {
@@ -530,7 +540,20 @@ export function ChaptersTab() {
             </Dropdown>
             </Space>
             {state.key === 'extract_shots' && !activeTask ? (
-              <PointsCostHint quote={divideQuote.quote} loading={divideQuote.loading} error={divideQuote.error} />
+              <>
+                <PointsCostHint
+                  quote={divideQuote.quote}
+                  loading={divideQuote.loading}
+                  error={divideQuote.error}
+                  textMultiplier={2}
+                  perImagePoints={imageQuote.quote?.required_points ?? null}
+                />
+                {imageQuote.quote && (
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    分镜拆解为必执行项；若积分不足以覆盖资产图生成，对应资产将建档但不生成图片。
+                  </div>
+                )}
+              </>
             ) : null}
           </Space>
         )

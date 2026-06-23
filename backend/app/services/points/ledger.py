@@ -166,6 +166,7 @@ async def freeze_points(
     business_id: str | None,
     snapshot: dict[str, Any] | None,
     created_by: str | None = None,
+    cascade_group_id: str | None = None,
 ) -> PointTransaction:
     """冻结积分：下单时预占额度，余额不变，冻结额增加。
 
@@ -200,6 +201,10 @@ async def freeze_points(
             )
 
         new_frozen = pts.frozen + amount
+        # 未显式指定 cascade_group_id 时默认为自己 root（freeze_points 只服务于 billing 源；
+        # 充值/管理员调整走独立的 recharge() 函数，不会走到这里，故无需区分 source）。
+        if cascade_group_id is None:
+            cascade_group_id = billing_id
         tx = PointTransaction(
             id=_new_tx_id(),
             user_id=user_id,
@@ -213,6 +218,7 @@ async def freeze_points(
             business_id=business_id,
             model_id=model_id,
             pricing_snapshot=snapshot,
+            cascade_group_id=cascade_group_id,
             created_by=created_by,
         )
         db.add(tx)
@@ -289,6 +295,7 @@ async def consume_frozen(
             business_id=freeze_tx.business_id,
             model_id=freeze_tx.model_id,
             pricing_snapshot=freeze_tx.pricing_snapshot,
+            cascade_group_id=freeze_tx.cascade_group_id,
             created_by=created_by,
         )
         db.add(tx)
@@ -369,6 +376,7 @@ async def unfreeze_frozen(
             business_id=freeze_tx.business_id,
             model_id=freeze_tx.model_id,
             pricing_snapshot=freeze_tx.pricing_snapshot,
+            cascade_group_id=freeze_tx.cascade_group_id,
             remark=remark,
             created_by=created_by,
         )

@@ -755,6 +755,7 @@ async def _freeze_image_task_async(
     amount: int,
     model_id: str,
     unit_points: int,
+    cascade_group_id: str | None = None,
 ) -> None:
     """异步冻结一笔图片生成积分。账本内部 COMMIT，返回时冻结已落库。
 
@@ -772,6 +773,7 @@ async def _freeze_image_task_async(
             model_id=model_id,
             business_type="image_generation",
             business_id=None,
+            cascade_group_id=cascade_group_id,
             snapshot={
                 "category": "image",
                 "unit_points": unit_points,
@@ -829,6 +831,7 @@ def _schedule_image_task_sync(
     summary: AutoPreparationSummary,
     model_id: str,
     unit_points: int,
+    cascade_root_billing_id: str | None = None,
 ) -> None:
     """在当前事务的 SAVEPOINT 中创建归属 user_id 的图片生成任务记录；失败则静默回滚并跳过。
 
@@ -861,6 +864,7 @@ def _schedule_image_task_sync(
                 amount=required,
                 model_id=model_id,
                 unit_points=unit_points,
+                cascade_group_id=cascade_root_billing_id,
             )
         )
     except InsufficientPointsError as e:
@@ -924,6 +928,7 @@ def _auto_create_and_link_sync(
     style: ProjectStyle,
     visual_style: ProjectVisualStyle,
     summary: AutoPreparationSummary,
+    cascade_root_billing_id: str | None = None,
     batch_pending_names: list[str] | None = None,
 ) -> bool:
     """为无匹配候选自动创建资产实体、调度图片生成，并完成候选关联。返回是否成功关联。
@@ -1008,6 +1013,7 @@ def _auto_create_and_link_sync(
                             summary=summary,
                             model_id=model_id,
                             unit_points=unit_points,
+                            cascade_root_billing_id=cascade_root_billing_id,
                         )
             except Exception:  # noqa: BLE001
                 _logger.warning("auto_prep: 图片生成调度失败，候选 '%s' 仍将完成关联", candidate_name)
@@ -1029,6 +1035,7 @@ def auto_prepare_chapter_shots_sync(
     user_id: str,
     project_id: str,
     chapter_id: str,
+    cascade_root_billing_id: str | None = None,
 ) -> AutoPreparationSummary:
     """批量自动准备章节镜头的资产与对白候选。
 
@@ -1109,6 +1116,7 @@ def auto_prepare_chapter_shots_sync(
                             summary=summary,
                             model_id=model_id,
                             unit_points=unit_points,
+                            cascade_root_billing_id=cascade_root_billing_id,
                         )
             except Exception:  # noqa: BLE001
                 _logger.warning(
@@ -1152,6 +1160,7 @@ def auto_prepare_chapter_shots_sync(
             style=proj_style,
             visual_style=proj_visual_style,
             summary=summary,
+            cascade_root_billing_id=cascade_root_billing_id,
             batch_pending_names=pending_names_by_type.get(candidate_type, []),
         )
         if not succeeded:

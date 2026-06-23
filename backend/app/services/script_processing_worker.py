@@ -172,7 +172,8 @@ class DivideTaskExecutor(AbstractWorkerTaskExecutor):
             raise HTTPException(status_code=400, detail="chapter_id is required for write_to_db=true")
         apply_division_result(ctx.db, chapter_id=chapter_id, result=result)
         summary = apply_auto_extraction_after_division(
-            ctx.db, user_id=ctx.task.user_id, chapter_id=chapter_id, result=result
+            ctx.db, user_id=ctx.task.user_id, chapter_id=chapter_id, result=result,
+            cascade_root_billing_id=ctx.task.billing_id,
         )
         self._pending_image_task_ids = summary.image_task_ids if summary is not None else []
 
@@ -215,7 +216,8 @@ class ExtractTaskExecutor(AbstractWorkerTaskExecutor):
         project_id = str(run_args.get("project_id") or "")
         if project_id and chapter_id:
             summary = auto_prepare_chapter_shots_sync(
-                ctx.db, user_id=ctx.task.user_id, project_id=project_id, chapter_id=chapter_id
+                ctx.db, user_id=ctx.task.user_id, project_id=project_id, chapter_id=chapter_id,
+                cascade_root_billing_id=ctx.task.billing_id,
             )
             self._pending_image_task_ids = summary.image_task_ids
 
@@ -361,6 +363,7 @@ def apply_auto_extraction_after_division(
     user_id: str,
     chapter_id: str,
     result: ScriptDivisionResult,
+    cascade_root_billing_id: str | None = None,
 ) -> AutoPreparationSummary:
     """在分镜拆分写库后，串行提取每个镜头的资产/对白并执行自动准备。返回自动准备摘要。
 
@@ -412,6 +415,7 @@ def apply_auto_extraction_after_division(
                 amount=required,
                 model_id=str(text_model.id),
                 unit_points=int(text_model.unit_points),
+                cascade_group_id=cascade_root_billing_id,
             ))
         except InsufficientPointsError as e:
             logger.warning(
@@ -419,14 +423,16 @@ def apply_auto_extraction_after_division(
                 chapter_id, e.available, e.required, e.shortfall,
             )
             return auto_prepare_chapter_shots_sync(
-                db, user_id=user_id, project_id=chapter.project_id, chapter_id=chapter_id
+                db, user_id=user_id, project_id=chapter.project_id, chapter_id=chapter_id,
+                cascade_root_billing_id=cascade_root_billing_id,
             )
         except Exception:  # noqa: BLE001
             logger.exception(
                 "auto_extract: 文本积分冻结失败，跳过自动提取 chapter_id=%s", chapter_id
             )
             return auto_prepare_chapter_shots_sync(
-                db, user_id=user_id, project_id=chapter.project_id, chapter_id=chapter_id
+                db, user_id=user_id, project_id=chapter.project_id, chapter_id=chapter_id,
+                cascade_root_billing_id=cascade_root_billing_id,
             )
 
     # 2. 执行提取（可能缓存命中也可能真正调用 LLM）。
@@ -467,7 +473,8 @@ def apply_auto_extraction_after_division(
 
     apply_extraction_result(db, chapter_id=chapter_id, draft=draft)
     return auto_prepare_chapter_shots_sync(
-        db, user_id=user_id, project_id=chapter.project_id, chapter_id=chapter_id
+        db, user_id=user_id, project_id=chapter.project_id, chapter_id=chapter_id,
+        cascade_root_billing_id=cascade_root_billing_id,
     )
 
 
@@ -485,6 +492,7 @@ async def _freeze_text_call_async(
     amount: int,
     model_id: str,
     unit_points: int,
+    cascade_group_id: str | None = None,
 ) -> None:
     """异步冻结一笔文本提取积分。抛 InsufficientPointsError 给调用方决策。"""
     from app.core.db import async_session_maker
@@ -499,6 +507,7 @@ async def _freeze_text_call_async(
             model_id=model_id,
             business_type="script_extract",
             business_id=None,
+            cascade_group_id=cascade_group_id,
             snapshot={
                 "category": "text",
                 "unit_points": unit_points,

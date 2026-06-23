@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react'
 import type React from 'react'
-import { Card, Select, message } from 'antd'
+import { Card, Radio, Select, Space, message } from 'antd'
 import { PointsService } from '../../services/generated'
-import type { PointTransactionRead, PointTransactionType, PointsSummaryRead } from '../../services/generated'
+import type {
+  OperationGroupRead,
+  PointTransactionRead,
+  PointTransactionType,
+  PointsSummaryRead,
+} from '../../services/generated'
 import { PointsAccountCard } from '../../components/points/PointsAccountCard'
 import { PointTransactionTable } from '../../components/points/PointTransactionTable'
 
@@ -27,6 +32,11 @@ const PointsPage: React.FC = () => {
   const [pageSize, setPageSize] = useState(10)
   const [total, setTotal] = useState(0)
   const [typeFilter, setTypeFilter] = useState<PointTransactionType | undefined>(undefined)
+  // 分组视图（按操作组聚合）相关状态
+  const [groupedView, setGroupedView] = useState(false)
+  const [groupedData, setGroupedData] = useState<OperationGroupRead[]>([])
+  const [groupedTotal, setGroupedTotal] = useState(0)
+  const [groupedLoading, setGroupedLoading] = useState(false)
 
   /** 加载积分摘要。 */
   const loadSummary = async () => {
@@ -59,6 +69,23 @@ const PointsPage: React.FC = () => {
     }
   }
 
+  /** 加载分组流水（按操作组聚合），按页拉取。 */
+  const loadGrouped = async (p: number, ps: number) => {
+    setGroupedLoading(true)
+    try {
+      const res = await PointsService.listGroupedTransactionsApiV1PointsTransactionsGroupedGet({
+        page: p,
+        pageSize: ps,
+      })
+      setGroupedData(res.data?.items ?? [])
+      setGroupedTotal(res.data?.pagination?.total ?? 0)
+    } catch {
+      message.error('分组流水加载失败')
+    } finally {
+      setGroupedLoading(false)
+    }
+  }
+
   useEffect(() => {
     void loadSummary()
     void loadTransactions(1, pageSize, typeFilter)
@@ -74,30 +101,56 @@ const PointsPage: React.FC = () => {
       <Card
         title="积分流水"
         extra={
-          <Select<PointTransactionType>
-            allowClear
-            placeholder="按类型筛选"
-            style={{ width: 160 }}
-            value={typeFilter}
-            options={TYPE_FILTER_OPTIONS}
-            onChange={(v) => {
-              setTypeFilter(v)
-              setPage(1)
-              void loadTransactions(1, pageSize, v)
-            }}
-          />
+          <Space>
+            <Radio.Group
+              size="small"
+              value={groupedView ? 'grouped' : 'flat'}
+              onChange={(e) => {
+                const next = e.target.value === 'grouped'
+                setGroupedView(next)
+                setPage(1)
+                if (next) {
+                  void loadGrouped(1, pageSize)
+                } else {
+                  void loadTransactions(1, pageSize, typeFilter)
+                }
+              }}
+            >
+              <Radio.Button value="flat">明细</Radio.Button>
+              <Radio.Button value="grouped">按操作</Radio.Button>
+            </Radio.Group>
+            {!groupedView && (
+              <Select<PointTransactionType>
+                allowClear
+                placeholder="按类型筛选"
+                style={{ width: 160 }}
+                value={typeFilter}
+                options={TYPE_FILTER_OPTIONS}
+                onChange={(v) => {
+                  setTypeFilter(v)
+                  setPage(1)
+                  void loadTransactions(1, pageSize, v)
+                }}
+              />
+            )}
+          </Space>
         }
       >
         <PointTransactionTable
-          dataSource={transactions}
-          loading={txLoading}
-          total={total}
+          dataSource={groupedView ? groupedData : transactions}
+          loading={groupedView ? groupedLoading : txLoading}
+          total={groupedView ? groupedTotal : total}
           page={page}
           pageSize={pageSize}
+          viewMode={groupedView ? 'grouped' : 'flat'}
           onChange={(p, ps) => {
             setPage(p)
             setPageSize(ps)
-            void loadTransactions(p, ps, typeFilter)
+            if (groupedView) {
+              void loadGrouped(p, ps)
+            } else {
+              void loadTransactions(p, ps, typeFilter)
+            }
           }}
         />
       </Card>

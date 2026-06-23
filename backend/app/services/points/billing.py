@@ -20,7 +20,9 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, TypeVar
 
-from sqlalchemy import func, select
+from collections import OrderedDict
+
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import async_session_maker
@@ -148,6 +150,7 @@ async def freeze_for_task(
     business_type: str,
     category: ModelCategoryKey,
     model_id: str | None,
+    cascade_group_id: str | None = None,
     duration_seconds: int | None = None,
     resolution: str | None = None,
     resolution_profile: str | None = None,
@@ -287,6 +290,7 @@ async def freeze_for_task(
             model_id=model.id,
             business_type=business_type,
             business_id=None,
+            cascade_group_id=cascade_group_id,
             snapshot=snapshot,
             created_by=user_id,
         )
@@ -654,3 +658,135 @@ async def list_user_transactions(
     )
     items = list((await db.execute(stmt)).scalars().all())
     return items, total
+
+
+async def list_grouped_transactions(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[dict], int]:
+    """按 cascade_group_id 聚合分组，按组最早 created_at 倒序，按组分页。
+
+    返回 (groups, total_groups)，每组包含多个 billing_id 生命周期。
+    业务逻辑：
+    - 同一 cascade_group_id 的所有 point_transactions 归为一组
+    - 组内按 billing_id 再分组（即单据生命周期）
+    - 每个单据的 status 由该 billing_id 下的事件推断：
+      - 有 consume → "settled"
+      - 有 unfreeze → "refunded"
+      - 仅 freeze → "frozen"
+    - total_net = 组内所有 consume 金额之和（实际从余额扣出的净额）
+    """
+    # 1) 查询当前页的 cascade_group_id 列表（去重、按最早时间倒序）
+    group_subq = (
+        select(
+            PointTransaction.cascade_group_id,
+            func.min(PointTransaction.created_at).label("group_created_at"),
+        )
+        .where(
+            PointTransaction.user_id == user_id,
+            PointTransaction.cascade_group_id.isnot(None),
+        )
+        .group_by(PointTransaction.cascade_group_id)
+        .order_by(text("group_created_at desc"))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .subquery()
+    )
+
+    total = await db.scalar(
+        select(func.count(func.distinct(PointTransaction.cascade_group_id)))
+        .where(
+            PointTransaction.user_id == user_id,
+            PointTransaction.cascade_group_id.isnot(None),
+        )
+    ) or 0
+    # 未分组（NULL）流水独立成组
+    null_count = await db.scalar(
+        select(func.count(func.distinct(PointTransaction.billing_id)))
+        .where(
+            PointTransaction.user_id == user_id,
+            PointTransaction.cascade_group_id.is_(None),
+        )
+    ) or 0
+    total += null_count
+
+    group_ids = [r[0] for r in (await db.execute(select(group_subq.c.cascade_group_id))).all()]
+
+    # 2) 一次性拉取所有匹配流水
+    all_txs: list[PointTransaction] = []
+    if group_ids:
+        txs = (
+            (await db.execute(
+                select(PointTransaction)
+                .where(
+                    PointTransaction.user_id == user_id,
+                    PointTransaction.cascade_group_id.in_(group_ids),
+                )
+                .order_by(PointTransaction.created_at.asc())
+            ))
+            .scalars()
+            .all()
+        )
+        all_txs.extend(txs)
+
+    # NULL 组（仅第1页展示）
+    if page == 1 and null_count > 0:
+        null_txs = (
+            (await db.execute(
+                select(PointTransaction)
+                .where(
+                    PointTransaction.user_id == user_id,
+                    PointTransaction.cascade_group_id.is_(None),
+                )
+                .order_by(PointTransaction.created_at.desc())
+                .limit(page_size)
+            ))
+            .scalars()
+            .all()
+        )
+        all_txs.extend(null_txs)
+
+    # 3) 组装分组结构
+    groups_map: dict[str, list[PointTransaction]] = OrderedDict()
+    for tx in all_txs:
+        key = tx.cascade_group_id or tx.billing_id or tx.id
+        groups_map.setdefault(key, []).append(tx)
+
+    result = []
+    for gid, txs in groups_map.items():
+        billings_map: dict[str, list[PointTransaction]] = OrderedDict()
+        for tx in txs:
+            bid = tx.billing_id or tx.id
+            billings_map.setdefault(bid, []).append(tx)
+
+        billings = []
+        for bid, events in billings_map.items():
+            freeze_amt = sum(e.amount for e in events if e.type == PointTransactionType.freeze)
+            consume_amt = sum(e.amount for e in events if e.type == PointTransactionType.consume)
+            has_consume = any(e.type == PointTransactionType.consume for e in events)
+            has_unfreeze = any(e.type == PointTransactionType.unfreeze for e in events)
+            status = "settled" if has_consume else ("refunded" if has_unfreeze else "frozen")
+            model_id = next((e.model_id for e in events if e.model_id), None)
+            bt = next((e.business_type for e in events if e.business_type), None)
+            billings.append(dict(
+                billing_id=bid, business_type=bt, model_id=model_id,
+                status=status, frozen_amount=freeze_amt, net_amount=consume_amt,
+                events=[dict(id=e.id, type=e.type, amount=e.amount,
+                             created_at=e.created_at, balance_after=e.balance_after,
+                             frozen_after=e.frozen_after) for e in events],
+            ))
+
+        root_txs = [t for t in txs if t.cascade_group_id == t.billing_id] or txs
+        bt = next((b["business_type"] for b in billings if b["business_type"]), None)
+        result.append(dict(
+            cascade_group_id=gid,
+            business_type=bt,
+            created_at=min(t.created_at for t in txs),
+            total_net=sum(b["net_amount"] for b in billings),
+            billings=billings,
+        ))
+
+    return result, total

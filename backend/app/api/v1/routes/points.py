@@ -19,6 +19,8 @@ from app.schemas.points import (
     PointsQuoteRequest,
     PointsQuoteResponse,
     PointsSummaryRead,
+    GroupedTransactionResponse,
+    OperationGroupRead,
 )
 from app.services.points import UnsupportedResolutionError
 from app.services.points.billing import list_user_transactions, quote_points, to_summary
@@ -97,6 +99,43 @@ async def list_my_transactions(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.get(
+    "/transactions/grouped",
+    response_model=ApiResponse[GroupedTransactionResponse],
+    summary="按操作组聚合的积分流水",
+)
+async def list_grouped_transactions(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[GroupedTransactionResponse]:
+    """按 cascade_group_id 聚合展示流水。同一操作级联的多个 billing_id 归为一组。"""
+    from app.services.points.billing import list_grouped_transactions
+
+    groups, total = await list_grouped_transactions(
+        db,
+        user_id=current_user.id,
+        page=page,
+        page_size=page_size,
+    )
+    from app.schemas.common import Pagination
+
+    max_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1
+    pagination = Pagination(
+        page=page,
+        page_size=page_size,
+        total=total,
+        max_page=max_page,
+    )
+    return success_response(
+        GroupedTransactionResponse(
+            items=[OperationGroupRead(**g) for g in groups],
+            pagination=pagination,
+        )
     )
 
 

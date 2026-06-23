@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.llm import ModelCategoryKey
 from app.models.points import PointTransactionType
+from app.schemas.common import Pagination
 
 
 class PointsQuoteRequest(BaseModel):
@@ -109,10 +110,46 @@ class PointTransactionRead(BaseModel):
     business_id: str | None = Field(None, description="业务实体 ID")
     model_id: str | None = Field(None, description="涉及的模型 ID")
     pricing_snapshot: dict[str, Any] | None = Field(None, description="计价快照")
+    cascade_group_id: str | None = Field(None, description="级联分组键")
     remark: str | None = Field(None, description="备注")
     created_by: str | None = Field(None, description="操作人 ID")
     created_by_username: str | None = Field(None, description="操作人用户名")
     created_at: datetime = Field(..., description="流水发生时间")
+
+
+class BillingEventRead(BaseModel):
+    """同 billing_id 生命周期内的一条事件（freeze/consume/unfreeze 明细）。"""
+    id: str
+    type: PointTransactionType
+    amount: int
+    created_at: datetime | None = None
+    balance_after: int | None = None
+    frozen_after: int | None = None
+
+
+class BillingLifecycleRead(BaseModel):
+    """按 billing_id 聚合的单据生命周期。"""
+    billing_id: str
+    business_type: str | None = None
+    model_id: str | None = None
+    status: str = Field(..., description="frozen/settled/refunded")
+    frozen_amount: int = 0
+    net_amount: int = 0  # consume 金额
+    events: list[BillingEventRead] = []
+
+
+class OperationGroupRead(BaseModel):
+    """按 cascade_group_id 聚合的操作组。"""
+    cascade_group_id: str | None = None
+    business_type: str | None = None
+    created_at: datetime | None = None
+    total_net: int = 0  # 该组对余额的净消耗 = Σ consume
+    billings: list[BillingLifecycleRead] = []
+
+
+class GroupedTransactionResponse(BaseModel):
+    items: list[OperationGroupRead]
+    pagination: Pagination
 
 
 class PointsRechargeRequest(BaseModel):

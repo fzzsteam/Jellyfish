@@ -43,6 +43,7 @@ CHECK 约束：
 | `business_type` / `business_id` | 业务上下文 |
 | `model_id` | FK `models.id` ON DELETE SET NULL |
 | `pricing_snapshot` | JSON，冻结时的定价快照 |
+| `cascade_group_id` | `VARCHAR(64) NULL`，带索引 `ix_point_transactions_cascade_group_id`。级联分组键：同一次操作的 root `billing_id`；充值/手动调整为 NULL（见下文"级联计费与分组视图"） |
 | `remark` / `created_by` / `created_at` | 审计字段 |
 
 幂等保证：`UniqueConstraint(billing_id, type)`。同一 `billing_id` 的 `freeze` 只能落一次，`consume` 与 `unfreeze` 互斥（同一 `billing_id` 只能命中其一）。
@@ -129,7 +130,8 @@ CHECK 约束：
 | --- | --- |
 | `POST /api/v1/points/quote` | 报价；解析模型（显式传入否则取用户默认模型，做归属校验），返回 `required_points` / `available_points` / `sufficient` / `quote_token` |
 | `GET /api/v1/points/me` | 当前用户积分摘要 |
-| `GET /api/v1/points/transactions` | 当前用户流水，支持过滤与分页 |
+| `GET /api/v1/points/transactions` | 当前用户流水，支持过滤与分页（扁平视图） |
+| `GET /api/v1/points/transactions/grouped` | 当前用户流水，按 `cascade_group_id` 聚合为操作组，组内按 `billing_id` 折叠为单据生命周期，按组分页 |
 | `GET /api/v1/admin/users/{id}/points` | 管理员查看指定用户积分摘要 |
 | `GET /api/v1/admin/users/{id}/points/transactions` | 管理员查看指定用户流水 |
 | `POST /api/v1/admin/users/{id}/points/recharge` | 管理员充值 |
@@ -222,6 +224,28 @@ divide（`write_to_db=true`）与 extract 两个异步任务在 `apply_result` �
 5. 提取异常 → 解冻已落库的冻结后上抛。
 
 默认文本模型未配置时跳过计费但仍尝试提取（可能命中缓存）；缓存未命中则提取在 LLM 构建处抛 503，与历史行为一致。
+
+### 级联分组键 `cascade_group_id`
+
+上述级联会让一次"一键提取分镜"产生多个互不关联的 `billing_id`（divide 文本 + auto-extract 文本 + N 张图片），用户在扁平流水里无法看出"这次操作总共花了多少"。`cascade_group_id` 把它们归到一组：
+
+- **写入规则**：`freeze_points` 默认把 `cascade_group_id` 设为自身的 `billing_id`（root 任务自动成组）。级联调用方显式传入 root 的 `billing_id`，让子单据归入父组。
+  - divide / extract 自身冻结 → `cascade_group_id = 自己的 billing_id`（root）。
+  - auto-extract 文本冻结 → `cascade_group_id = divide 的 billing_id`。
+  - auto-prep 图片冻结 → `cascade_group_id = 当前操作 root billing_id`（divide 或 extract）。
+  - 充值 / 管理员调整 → `NULL`（`recharge()` 不经过 `freeze_points`）。
+- **复制规则**：`consume_frozen` / `unfreeze_frozen` 从对应 freeze 行复制 `cascade_group_id`（与复制 `business_type` 同款），保证同一单据生命周期的 freeze/consume/unfreeze 始终同组。
+- **透传链路**：`auto_prepare_chapter_shots_sync` / `_schedule_image_task_sync` / `apply_auto_extraction_after_division` 均新增 `cascade_root_billing_id` 参数；两个 executor（`DivideTaskExecutor` / `ExtractTaskExecutor`）在 `apply_result` 传入 `ctx.task.billing_id` 作为 root。
+
+### 分组查询 `GET /transactions/grouped`
+
+`list_grouped_transactions` 按 `cascade_group_id` 聚合，**按组分页**（组时间 = 组内最早 `created_at`），避免组跨页切断。返回结构：
+
+- `OperationGroup`：一个操作组，含 `cascade_group_id` / `business_type` / `created_at` / `total_net`（= 组内 Σ consume，反映对余额的实际净消耗）/ `billings[]`。
+- `BillingLifecycle`：按 `billing_id` 折叠的单据生命周期，`status` 由该 `billing_id` 下的事件推断（有 consume → `settled`；有 unfreeze → `refunded`；仅 freeze → `frozen`），`net_amount` = consume 金额。
+- `cascade_group_id IS NULL` 的流水（充值等）按 `billing_id` 兜底成单成员组。
+
+前端积分流水页提供"明细 / 按操作"视图切换：明细视图走扁平 `/transactions`，按操作视图走 `/transactions/grouped`，单据生命周期可展开查看 freeze/consume/unfreeze 明细。`total_net` 天然揭示"预估总额 vs 实际净消耗"的差额（部分子任务因积分不足被跳过时净消耗会小于预估）。
 
 
 
