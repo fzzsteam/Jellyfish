@@ -78,6 +78,9 @@ _R2V_MODEL_PREFIXES = ("happyhorse-1.0-r2v", "r2v")
 #: video-edit 模型名称标识
 _VIDEO_EDIT_PREFIXES = ("happyhorse-1.0-video-edit", "video-edit")
 
+HAPPYHORSE_MIN_DURATION_SECONDS = 3
+HAPPYHORSE_MAX_DURATION_SECONDS = 15
+
 
 class BailianVideoApiAdapter:
     """阿里百炼视频生成适配器（DashScope 原生异步任务模式）。
@@ -280,17 +283,7 @@ class BailianVideoApiAdapter:
 
             # r2v 支持 duration
             if input_.seconds is not None:
-                valid_durations = [2, 3, 5, 10]
-                duration = int(input_.seconds)
-                if duration not in valid_durations:
-                    duration = min(valid_durations, key=lambda x: abs(x - duration))
-                    logger.warning(
-                        "[BailianVideo] Duration %s not in %s, using closest value: %d",
-                        input_.seconds,
-                        valid_durations,
-                        duration,
-                    )
-                payload["parameters"]["duration"] = duration
+                payload["parameters"]["duration"] = self._resolve_duration(input_)
 
             return payload
 
@@ -326,17 +319,7 @@ class BailianVideoApiAdapter:
 
             # i2v 支持 duration
             if input_.seconds is not None:
-                valid_durations = [2, 3, 5, 10]
-                duration = int(input_.seconds)
-                if duration not in valid_durations:
-                    duration = min(valid_durations, key=lambda x: abs(x - duration))
-                    logger.warning(
-                        "[BailianVideo] Duration %s not in %s, using closest value: %d",
-                        input_.seconds,
-                        valid_durations,
-                        duration,
-                    )
-                payload["parameters"]["duration"] = duration
+                payload["parameters"]["duration"] = self._resolve_duration(input_)
 
             return payload
 
@@ -352,19 +335,15 @@ class BailianVideoApiAdapter:
 
         # t2v 支持 duration
         if input_.seconds is not None:
-            valid_durations = [2, 3, 5, 10]
-            duration = int(input_.seconds)
-            if duration not in valid_durations:
-                duration = min(valid_durations, key=lambda x: abs(x - duration))
-                logger.warning(
-                    "[BailianVideo] Duration %s not in %s, using closest value: %d",
-                    input_.seconds,
-                    valid_durations,
-                    duration,
-                )
-            payload["parameters"]["duration"] = duration
+            payload["parameters"]["duration"] = self._resolve_duration(input_)
 
         return payload
+
+    @staticmethod
+    def _resolve_duration(input_: VideoGenerationInput) -> int:
+        """Resolve HappyHorse duration using the official 3-15 second integer range."""
+        duration = int(round(input_.seconds or HAPPYHORSE_MIN_DURATION_SECONDS))
+        return max(HAPPYHORSE_MIN_DURATION_SECONDS, min(HAPPYHORSE_MAX_DURATION_SECONDS, duration))
 
     @staticmethod
     def _is_i2v_model(model_name: str | None) -> bool:

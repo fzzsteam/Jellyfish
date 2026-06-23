@@ -48,11 +48,31 @@ def test_bailian_r2v_payload_uses_asset_reference_images() -> None:
 
     assert payload["model"] == "happyhorse-1.0-r2v"
     assert payload["parameters"]["ratio"] == "9:16"
+    assert payload["parameters"]["duration"] == 5
     assert payload["input"]["media"] == [
         {"type": "reference_image", "url": "data:image/png;base64,character"},
         {"type": "reference_image", "url": "data:image/png;base64,scene"},
         {"type": "reference_image", "url": "data:image/png;base64,prop"},
     ]
+
+
+def test_bailian_happyhorse_duration_keeps_official_integer_range() -> None:
+    adapter = BailianVideoApiAdapter(
+        provider_config=ProviderConfig(provider="aliyun_bailian", api_key="bailian-key"),
+    )
+    inp = VideoGenerationInput.model_validate(
+        {
+            "model": "happyhorse-1.0-r2v",
+            "prompt": "test",
+            "ratio": "16:9",
+            "seconds": 15,
+            "reference_image_base64s": ["data:image/png;base64,ref"],
+        }
+    )
+
+    payload = adapter._build_payload(inp)
+
+    assert payload["parameters"]["duration"] == 15
 
 
 @pytest.mark.asyncio

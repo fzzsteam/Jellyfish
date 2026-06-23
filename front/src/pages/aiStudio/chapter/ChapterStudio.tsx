@@ -549,6 +549,15 @@ const CAMERA_MOVEMENT_OPTIONS: { value: CameraMovement; label: string }[] = [
   { value: 'ZOOM_OUT', label: '变焦拉' },
 ]
 
+const VIDEO_DURATION_MIN_SECONDS = 3
+const VIDEO_DURATION_MAX_SECONDS = 15
+
+function normalizeVideoDurationSeconds(value: number | null | undefined): number {
+  // Keep the studio duration aligned with HappyHorse's official 3-15s integer range.
+  const rounded = Number.isFinite(Number(value)) ? Math.round(Number(value)) : VIDEO_DURATION_MIN_SECONDS
+  return Math.max(VIDEO_DURATION_MIN_SECONDS, Math.min(VIDEO_DURATION_MAX_SECONDS, rounded))
+}
+
 function useLocalStoragePrefs() {
   const [prefs, setPrefs] = useState<LayoutPrefs>(() => {
     try {
@@ -4468,25 +4477,25 @@ function Inspector(props: {
                             />
                           </div>
                           <div>
-                            <div className="text-gray-500 text-xs mb-1">时长（3–30s，整数）</div>
+                            <div className="text-gray-500 text-xs mb-1">时长（3–15s，整数）</div>
                             <div className="flex items-center gap-2">
                               <Slider
-                                min={3}
-                                max={30}
+                                min={VIDEO_DURATION_MIN_SECONDS}
+                                max={VIDEO_DURATION_MAX_SECONDS}
                                 step={1}
-                                value={Math.max(3, Math.min(30, Math.round(shotDetail.duration ?? 3)))}
+                                value={normalizeVideoDurationSeconds(shotDetail.duration)}
                                 style={{ flex: 1 }}
-                                onChange={(v) => void onPatchShotDetailImmediate({ duration: Math.round(Number(v)) })}
+                                onChange={(v) => void onPatchShotDetailImmediate({ duration: normalizeVideoDurationSeconds(Number(v)) })}
                                 disabled={cameraUpdating}
                               />
                               <Input
                                 size="small"
-                                value={`${Math.max(3, Math.min(30, Math.round(shotDetail.duration ?? 3)))}`}
+                                value={`${normalizeVideoDurationSeconds(shotDetail.duration)}`}
                                 style={{ width: 72 }}
                                 onChange={(e) => {
                                   const raw = Number(e.target.value)
                                   if (!Number.isFinite(raw)) return
-                                  const n = Math.max(3, Math.min(30, Math.round(raw)))
+                                  const n = normalizeVideoDurationSeconds(raw)
                                   void onPatchShotDetailImmediate({ duration: n })
                                 }}
                                 disabled={cameraUpdating}
