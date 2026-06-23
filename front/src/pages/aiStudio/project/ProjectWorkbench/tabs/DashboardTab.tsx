@@ -27,8 +27,11 @@ export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => vo
   const [flowStats, setFlowStats] = useState<ProjectFlowStats>({
     totalShots: 0,
     pendingConfirmShots: 0,
+    preparedShots: 0,
     readyShots: 0,
     generatingShots: 0,
+    activeVideoTasks: 0,
+    videoCompletedShots: 0,
   })
   const [chapterFlowStats, setChapterFlowStats] = useState<ChapterFlowStats[]>([])
   const [flowStatsLoading, setFlowStatsLoading] = useState(false)
@@ -50,8 +53,11 @@ export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => vo
       setFlowStats({
         totalShots: 0,
         pendingConfirmShots: 0,
+        preparedShots: 0,
         readyShots: 0,
         generatingShots: 0,
+        activeVideoTasks: 0,
+        videoCompletedShots: 0,
       })
       setChapterFlowStats([])
       return () => {
@@ -73,8 +79,11 @@ export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => vo
           setFlowStats({
             totalShots: 0,
             pendingConfirmShots: 0,
+            preparedShots: 0,
             readyShots: 0,
             generatingShots: 0,
+            activeVideoTasks: 0,
+            videoCompletedShots: 0,
           })
           setChapterFlowStats([])
         }

@@ -4034,7 +4034,9 @@ function Inspector(props: {
     void (async () => {
       try {
         let finalTaskState: RelationTaskState | null = null
-        for (let i = 0; i < 60; i += 1) {
+        // Video generation can legitimately run for longer than two minutes, so poll until
+        // the backend reports a terminal task status or this component starts a new task.
+        while (!cancelled) {
           await sleep(2000)
           if (cancelled) return
           const statusRes = await FilmService.getTaskStatusApiV1FilmTasksTaskIdStatusGet({ taskId: videoTaskId })

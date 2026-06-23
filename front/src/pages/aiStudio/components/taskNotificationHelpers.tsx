@@ -78,6 +78,7 @@ export function useRelationTaskNotification({
 }: RelationTaskNotificationOptions) {
   const previousTaskIdRef = useRef<string | null>(null)
   const previousSettledKeyRef = useRef<string | null>(null)
+  const dismissedTaskIdsRef = useRef<Set<string>>(new Set())
   const settledRemoveTimersRef = useRef<Record<string, number>>({})
   const upsertTask = useTaskUiStore((state) => state.upsertTask)
   const removeTask = useTaskUiStore((state) => state.removeTask)
@@ -119,12 +120,18 @@ export function useRelationTaskNotification({
       onCancel,
       onNavigate,
     })
+    if (dismissedTaskIdsRef.current.has(task.taskId)) {
+      return
+    }
     notification.open({
       key: task.taskId,
       message: task.cancelRequested ? `${title}正在取消` : `${title}进行中`,
       description,
       duration: 0,
       placement: 'topRight',
+      onClose: () => {
+        dismissedTaskIdsRef.current.add(task.taskId)
+      },
       btn:
         onNavigate || (onCancel && !task.cancelRequested) ? (
           <Space size={8}>
@@ -148,6 +155,7 @@ export function useRelationTaskNotification({
     const settledKey = `${settledTask.taskId}:${settledTask.status}:${settledTask.finishedAtTs ?? ''}`
     if (previousSettledKeyRef.current === settledKey) return
     previousSettledKeyRef.current = settledKey
+    dismissedTaskIdsRef.current.delete(settledTask.taskId)
 
     const elapsedLabel = formatElapsedMs(settledTask.elapsedMs)
     const startedAtLabel = formatStartedAt(settledTask.startedAtTs)
