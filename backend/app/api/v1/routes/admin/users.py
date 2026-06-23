@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db, require_admin
@@ -37,6 +38,15 @@ from app.services.points.billing import (
 from app.services.studio import projects as project_service
 
 router = APIRouter()
+
+
+async def _resolve_usernames(db: AsyncSession, items: list) -> dict[str, str]:
+    """从流水列表中取出 created_by ID 集合，批量查一次 users 表，返回 id→username 映射。"""
+    ids = {tx.created_by for tx in items if tx.created_by}
+    if not ids:
+        return {}
+    rows = await db.execute(select(User.id, User.username).where(User.id.in_(ids)))
+    return {row.id: row.username for row in rows}
 
 
 @router.get("", response_model=ApiResponse[PaginatedData[UserAdminRead]], summary="用户列表")
@@ -190,8 +200,14 @@ async def list_user_points_transactions(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
+    user_map = await _resolve_usernames(db, items)
     return paginated_response(
-        [PointTransactionRead.model_validate(tx) for tx in items],
+        [
+            PointTransactionRead.model_validate(tx).model_copy(
+                update={"created_by_username": user_map.get(tx.created_by) if tx.created_by else None}
+            )
+            for tx in items
+        ],
         total=total,
         page=page,
         page_size=page_size,
@@ -230,4 +246,7 @@ async def recharge_user_points(
     except ValueError as exc:
         # amount=0 / 负充值无备注等参数错误 → 400。
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    return success_response(PointTransactionRead.model_validate(tx))
+    read = PointTransactionRead.model_validate(tx).model_copy(
+        update={"created_by_username": current_user.username}
+    )
+    return success_response(read)

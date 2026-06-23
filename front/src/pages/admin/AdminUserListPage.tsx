@@ -1,10 +1,14 @@
 import { useEffect, useState } from 'react'
 import type React from 'react'
-import { Button, Card, Form, Input, Modal, Space, Switch, Table, Tag, message } from 'antd'
+import { Button, Card, Form, Input, InputNumber, Modal, Space, Switch, Table, Tag, message } from 'antd'
 import { Link } from 'react-router-dom'
 import { AdminService } from '../../services/generated'
 import type { PointsSummaryRead, UserAdminRead } from '../../services/generated'
 import { useAuthStore } from '../../store/useAuthStore'
+import { PointsBadge } from '../../components/points/PointsBadge'
+
+/** 充值快捷金额选项。 */
+const RECHARGE_PRESETS = [100, 500, 1000, 5000]
 
 /** 管理员用户列表页：展示全部用户，支持创建、启用/禁用、重置密码。 */
 const AdminUserListPage: React.FC = () => {
@@ -21,6 +25,11 @@ const AdminUserListPage: React.FC = () => {
   const [resetResult, setResetResult] = useState<{ username: string; temporary_password: string } | null>(null)
   // 正在重置中的用户 id，用于按钮 loading
   const [resettingId, setResettingId] = useState<string | null>(null)
+  // 充值弹窗目标用户
+  const [rechargeTarget, setRechargeTarget] = useState<UserAdminRead | null>(null)
+  const [rechargeForm] = Form.useForm<{ amount: number; remark: string }>()
+  // 充值提交中
+  const [recharging, setRecharging] = useState(false)
 
   const load = async () => {
     setLoading(true)
@@ -101,6 +110,30 @@ const AdminUserListPage: React.FC = () => {
     })
   }
 
+  const handleRecharge = async () => {
+    const values = await rechargeForm.validateFields()
+    setRecharging(true)
+    try {
+      await AdminService.rechargeUserPointsApiV1AdminUsersUserIdPointsRechargePost({
+        userId: rechargeTarget!.id,
+        requestBody: { amount: values.amount, remark: values.remark ?? null },
+      })
+      message.success(`已为「${rechargeTarget!.username}」${values.amount >= 0 ? '充值' : '扣减'} ${Math.abs(values.amount)} 积分`)
+      // 刷新该用户积分摘要
+      const res = await AdminService.getUserPointsApiV1AdminUsersUserIdPointsGet({ userId: rechargeTarget!.id }).catch(() => null)
+      if (res?.data) {
+        setPointsMap((prev) => ({ ...prev, [rechargeTarget!.id]: res.data! }))
+      }
+      setRechargeTarget(null)
+      rechargeForm.resetFields()
+    } catch (err: unknown) {
+      const detail = (err as { body?: { detail?: string } })?.body?.detail
+      message.error(typeof detail === 'string' ? detail : '操作失败')
+    } finally {
+      setRecharging(false)
+    }
+  }
+
   const copyTempPassword = async () => {
     if (!resetResult) return
     try {
@@ -133,7 +166,16 @@ const AdminUserListPage: React.FC = () => {
       key: 'points',
       render: (_: unknown, u: UserAdminRead) => {
         const p = pointsMap[u.id]
-        return p ? `${p.available} / ${p.frozen}` : '—'
+        if (!p) return <span className="text-gray-400">—</span>
+        return (
+          <span className="inline-flex items-center gap-1.5">
+            <PointsBadge value={p.available} size="sm" />
+            <span className="text-gray-300">/</span>
+            <span className={`text-xs font-medium ${p.frozen > 0 ? 'text-orange-400' : 'text-gray-400'}`}>
+              {p.frozen.toLocaleString()}
+            </span>
+          </span>
+        )
       },
     },
     {
@@ -160,6 +202,9 @@ const AdminUserListPage: React.FC = () => {
             >
               重置密码
             </Button>
+            <Button size="small" onClick={() => { setRechargeTarget(u); rechargeForm.resetFields() }}>
+              充值积分
+            </Button>
           </Space>
         )
       },
@@ -185,6 +230,63 @@ const AdminUserListPage: React.FC = () => {
           </Form.Item>
           <Form.Item name="is_admin" label="管理员" valuePropName="checked" initialValue={false}>
             <Switch />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 充值积分弹窗：允许正负整数，负数必须填备注 */}
+      <Modal
+        title={`充值积分 — ${rechargeTarget?.username ?? ''}`}
+        open={!!rechargeTarget}
+        onOk={() => void handleRecharge()}
+        onCancel={() => { setRechargeTarget(null); rechargeForm.resetFields() }}
+        okText="确认"
+        cancelText="取消"
+        confirmLoading={recharging}
+        destroyOnClose
+      >
+        <Form form={rechargeForm} layout="vertical" className="mt-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-sm text-gray-500">快捷：</span>
+            {RECHARGE_PRESETS.map((preset) => (
+              <Button
+                key={preset}
+                size="small"
+                onClick={() => rechargeForm.setFieldValue('amount', preset)}
+              >
+                +{preset}
+              </Button>
+            ))}
+          </div>
+          <Form.Item
+            name="amount"
+            label="积分数量（正数充值，负数扣减）"
+            rules={[
+              { required: true, message: '请输入积分数量' },
+              { type: 'integer', message: '请输入整数' },
+              {
+                validator: (_, value) => value !== 0 ? Promise.resolve() : Promise.reject(new Error('不能为 0')),
+              },
+            ]}
+          >
+            <InputNumber style={{ width: '100%' }} placeholder="如：100 或 -50" />
+          </Form.Item>
+          <Form.Item
+            name="remark"
+            label="备注"
+            rules={[
+              ({ getFieldValue }) => ({
+                validator(_, value) {
+                  const amount = getFieldValue('amount') as number
+                  if (amount < 0 && !value?.trim()) {
+                    return Promise.reject(new Error('扣减积分必须填写备注'))
+                  }
+                  return Promise.resolve()
+                },
+              }),
+            ]}
+          >
+            <Input placeholder="说明充值/扣减原因（扣减时必填）" />
           </Form.Item>
         </Form>
       </Modal>

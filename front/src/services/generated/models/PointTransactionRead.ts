@@ -63,9 +63,13 @@ export type PointTransactionRead = {
      */
     remark?: (string | null);
     /**
-     * 操作人
+     * 操作人 ID
      */
     created_by?: (string | null);
+    /**
+     * 操作人用户名
+     */
+    created_by_username?: (string | null);
     /**
      * 流水发生时间
      */

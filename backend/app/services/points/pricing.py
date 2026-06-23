@@ -16,8 +16,13 @@ from typing import Optional
 
 from app.models.llm import ModelCategoryKey
 
-# 图片分辨率系数（当前统一为 1.0；保留常量作为未来多档图片分辨率的扩展钩子）。
-IMAGE_RESOLUTION_FACTOR: Decimal = Decimal("1.0")
+# 图片分辨率档位系数表：standard=1K(1024×1024) 计 1.0；high=2K(2048×2048) 像素为 1K 的
+# 4 倍、生成成本更高，计 2.0。键统一小写存储，便于做大小写无关匹配。
+# 与视频分辨率系数一致地维护「按高档收费即按高档生成」不变式，杜绝 2K 白嫖。
+IMAGE_RESOLUTION_FACTORS: dict[str, Decimal] = {
+    "standard": Decimal("1.0"),
+    "high": Decimal("2.0"),
+}
 
 # 视频分辨率系数表：键统一小写存储，便于做大小写无关匹配。
 VIDEO_RESOLUTION_FACTORS: dict[str, Decimal] = {
@@ -43,6 +48,7 @@ def calculate_points(
     unit_points: int,
     duration_seconds: Optional[int],
     resolution: Optional[str],
+    resolution_profile: Optional[str] = None,
     generation_count: int = 1,
 ) -> int:
     """计算一次生成请求需扣减的积分总数。
@@ -51,14 +57,16 @@ def calculate_points(
     - `category`: 模型类别（text/image/video，可传 `ModelCategoryKey` 或字符串）。
     - `unit_points`: 单次生成的「基础单价」积分，必须为非负整数。
     - `duration_seconds`: 视频时长（秒），视频类别必填且必须为正整数；文本/图片忽略。
-    - `resolution`: 分辨率标签，视频必填（大小写不敏感）；文本/图片忽略。
+    - `resolution`: 视频分辨率标签（720p/1080p），视频必填（大小写不敏感）；文本/图片忽略。
+    - `resolution_profile`: 图片分辨率档位（standard/high），图片类别用于取系数；
+      为空按 standard。文本/视频忽略。
     - `generation_count`: 生成次数，当前仅支持 1（多轮生成能力后续任务再放开）。
 
     返回：扣减积分（Python int，向上取整）。
 
     异常：
     - `ValueError`: 单价/次数/时长非法。
-    - `UnsupportedResolutionError`: 视频分辨率未登记。
+    - `UnsupportedResolutionError`: 视频分辨率或图片分辨率档位未登记。
     """
     if not isinstance(unit_points, int) or isinstance(unit_points, bool):
         raise ValueError("unit_points must be an int")
@@ -69,9 +77,19 @@ def calculate_points(
 
     category_key = _to_category(category)
 
-    if category_key in ("text", "image"):
-        # 文本/图片：单价即总价，分辨率与时长不参与计价。
-        base = Decimal(unit_points) * IMAGE_RESOLUTION_FACTOR
+    if category_key == "text":
+        # 文本：单价即总价，分辨率与时长不参与计价。
+        return int(Decimal(unit_points).quantize(Decimal("1"), rounding=ROUND_CEILING))
+
+    if category_key == "image":
+        # 图片：单价 × 分辨率档位系数（standard=1.0 / high=2.0）；时长不参与。
+        profile = (resolution_profile or "standard").strip().lower()
+        factor = IMAGE_RESOLUTION_FACTORS.get(profile)
+        if factor is None:
+            raise UnsupportedResolutionError(
+                f"unsupported image resolution profile: {resolution_profile!r}"
+            )
+        base = Decimal(unit_points) * factor
         return int(base.quantize(Decimal("1"), rounding=ROUND_CEILING))
 
     if category_key == "video":

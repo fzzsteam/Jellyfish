@@ -9,6 +9,7 @@ import {
   TeamOutlined,
   WalletOutlined,
 } from '@ant-design/icons'
+import { PointsBadge } from '../components/points/PointsBadge'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
@@ -328,9 +329,9 @@ const MainLayout: React.FC = () => {
           <Space size="middle" className="px-4 shrink-0">
             {points && (
               <Tooltip title={`可用 ${points.available} / 冻结 ${points.frozen} / 余额 ${points.balance}`}>
-                <Link to="/points" className="flex items-center gap-1 text-sm text-gray-700 hover:text-primary">
-                  <WalletOutlined />
-                  <span>可用 {points.available}</span>
+                <Link to="/points" className="flex items-center gap-1.5 hover:opacity-80 transition-opacity">
+                  <WalletOutlined className="text-amber-400 text-sm" />
+                  <PointsBadge value={points.available} size="sm" />
                 </Link>
               </Tooltip>
             )}

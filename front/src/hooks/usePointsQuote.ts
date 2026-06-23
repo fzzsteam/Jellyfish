@@ -9,6 +9,9 @@ import type { PointsQuoteResponse } from '../services/generated'
  * - category: 模型类别，决定计价规则。
  * - modelId: 显式模型 ID；文本/图片场景通常传 null 由后端按用户默认模型解析。
  * - durationSeconds / resolution: 仅视频类别使用。
+ * - resolutionProfile: 仅图片类别使用（standard=1K/high=2K），决定图片计价系数；
+ *   必须与创建任务时提交的 resolution_profile 一致，否则 quote_token 的 params_hash
+ *   校验失败（POINTS_QUOTE_CHANGED）。
  * - enabled: 是否参与试算（例如资产智能检测在描述为空时不试算）。
  */
 export type UsePointsQuoteParams = {
@@ -17,6 +20,7 @@ export type UsePointsQuoteParams = {
   modelId?: string | null
   durationSeconds?: number | null
   resolution?: '720p' | '1080p' | null
+  resolutionProfile?: 'standard' | 'high' | null
   enabled?: boolean
 }
 
@@ -52,7 +56,7 @@ const DEBOUNCE_MS = 400
  * 更新参数触发了新请求），则直接丢弃，避免慢响应覆盖新报价。
  */
 export function usePointsQuote(params: UsePointsQuoteParams): UsePointsQuoteResult {
-  const { businessType, category, modelId, durationSeconds, resolution, enabled = true } = params
+  const { businessType, category, modelId, durationSeconds, resolution, resolutionProfile, enabled = true } = params
   const [quote, setQuote] = useState<PointsQuoteResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -95,6 +99,7 @@ export function usePointsQuote(params: UsePointsQuoteParams): UsePointsQuoteResu
           model_id: modelId ?? null,
           duration_seconds: durationSeconds ?? null,
           resolution: resolution ?? null,
+          resolution_profile: resolutionProfile ?? null,
           generation_count: 1,
         },
       })
@@ -132,7 +137,7 @@ export function usePointsQuote(params: UsePointsQuoteParams): UsePointsQuoteResu
     }
     // manualTick 用于 refresh 触发重排；不直接读取其值。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [businessType, category, modelId, durationSeconds, resolution, enabled, manualTick])
+  }, [businessType, category, modelId, durationSeconds, resolution, resolutionProfile, enabled, manualTick])
 
   // 组件卸载时废弃所有在途响应。
   useEffect(() => {

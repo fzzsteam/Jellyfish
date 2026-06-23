@@ -228,6 +228,7 @@ async def freeze_points(
                 f"freeze 幂等回读未找到 billing_id={billing_id} 的 freeze 流水"
             )
             return existing  # type: ignore[return-value]
+        await db.refresh(tx)
         return tx
 
 
@@ -302,6 +303,7 @@ async def consume_frozen(
                 f"consume 幂等回读未找到 billing_id={billing_id} 的 consume 流水"
             )
             return existing  # type: ignore[return-value]
+        await db.refresh(tx)
         return tx
 
 
@@ -375,6 +377,7 @@ async def unfreeze_frozen(
                 f"unfreeze 幂等回读未找到 billing_id={billing_id} 的 unfreeze 流水"
             )
             return existing  # type: ignore[return-value]
+        await db.refresh(tx)
         return tx
 
 
@@ -432,6 +435,8 @@ async def recharge(
         db.add(tx)
         pts.balance = new_balance
         await db.commit()
+        # commit 后属性过期，refresh 拿回 server_default 时间戳（避免 model_validate 触发懒加载）
+        await db.refresh(tx)
         return tx
 
 

@@ -5,7 +5,7 @@
 --   先用 information_schema 探测"列是否存在 / 约束是否存在 / 索引是否存在 / 表是否存在"，
 --   再用 IF(...) 决定执行真正的 DDL 还是空操作（'SELECT 1'），从而可重复执行不报错。
 -- 回填策略：
---   - models.unit_points：先加 NULL 列 → 回填 0 → 收紧 NOT NULL DEFAULT 0。
+--   - models.unit_points：先加 NULL 列 → 回填 1 → 收紧 NOT NULL DEFAULT 1。
 --   - user_points：建表后为存量用户补 0 余额行（排除已存在的）。
 
 -- ============================================================================
@@ -18,12 +18,12 @@ SET @sql = IF(@has_col = 0,
   'SELECT 1');
 PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
 
-UPDATE models SET unit_points = 0 WHERE unit_points IS NULL;
+UPDATE models SET unit_points = 1 WHERE unit_points IS NULL;
 
 SET @is_null = (SELECT IS_NULLABLE FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'models' AND COLUMN_NAME = 'unit_points');
 SET @sql = IF(@is_null = 'YES',
-  "ALTER TABLE models MODIFY COLUMN unit_points BIGINT NOT NULL DEFAULT 0 COMMENT '积分单价（单次调用消耗的积分数量，默认 0=免费）'",
+  "ALTER TABLE models MODIFY COLUMN unit_points BIGINT NOT NULL DEFAULT 1 COMMENT '积分单价（单次调用消耗的积分数量，默认 1）'",
   'SELECT 1');
 PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
 

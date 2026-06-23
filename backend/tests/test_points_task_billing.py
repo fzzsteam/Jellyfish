@@ -110,18 +110,21 @@ def _make_quote_token(
     required_points: int = 20,
     duration_seconds: int = 5,
     resolution: str = "1080p",
+    resolution_profile: str | None = None,
 ) -> str:
     """构造一个合法的 quote_token。
 
     计价基准（与 m1 一致）：unit_points=10、video、1080p(×2.0)、generation_count=1。
     因此 duration_seconds=5 → required_points = 10 * 5 * 2.0 = 100。`required_points`
     由调用方显式传入，用于构造 token 内的 claims.required_points（重算一致时通过校验）。
+    视频路径 resolution_profile 恒为 None（仅图片计价用），与 freeze_for_task 一致。
     """
     params_hash = hash_quote_params(
         {
             "category": str(ModelCategoryKey.video),
             "duration_seconds": duration_seconds,
             "resolution": resolution,
+            "resolution_profile": resolution_profile,
             "generation_count": 1,
         }
     )
@@ -975,6 +978,7 @@ def _make_text_quote_token(*, required_points: int = 7, model_id: str = "m_text"
             "category": str(ModelCategoryKey.text),
             "duration_seconds": None,
             "resolution": None,
+            "resolution_profile": None,
             "generation_count": 1,
         }
     )
@@ -996,6 +1000,7 @@ def _make_image_quote_token(*, required_points: int = 5, model_id: str = "m_img"
             "category": str(ModelCategoryKey.image),
             "duration_seconds": None,
             "resolution": None,
+            "resolution_profile": None,
             "generation_count": 1,
         }
     )
@@ -2410,6 +2415,7 @@ def _make_shot_frame_prompt_quote_token(*, required_points: int = 7, model_id: s
             "category": str(ModelCategoryKey.text),
             "duration_seconds": None,
             "resolution": None,
+            "resolution_profile": None,
             "generation_count": 1,
         }
     )

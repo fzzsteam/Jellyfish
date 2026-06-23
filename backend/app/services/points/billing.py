@@ -150,6 +150,7 @@ async def freeze_for_task(
     model_id: str | None,
     duration_seconds: int | None = None,
     resolution: str | None = None,
+    resolution_profile: str | None = None,
 ) -> FrozenBilling:
     """按 quote_token 冻结积分（异步任务下单入口）。
 
@@ -225,6 +226,7 @@ async def freeze_for_task(
         unit_points=model.unit_points,
         duration_seconds=duration_seconds,
         resolution=resolution,
+        resolution_profile=resolution_profile,
         generation_count=1,
     )
 
@@ -247,6 +249,7 @@ async def freeze_for_task(
             "category": str(category),
             "duration_seconds": duration_seconds,
             "resolution": resolution,
+            "resolution_profile": resolution_profile,
             "generation_count": 1,
         }
     )
@@ -270,6 +273,7 @@ async def freeze_for_task(
         "unit_points": model.unit_points,
         "duration_seconds": duration_seconds,
         "resolution": resolution,
+        "resolution_profile": resolution_profile,
         "required_points": required_points,
     }
     from app.services.points.ledger import InsufficientPointsError
@@ -513,6 +517,7 @@ async def quote_points(
     model_id: str | None = None,
     duration_seconds: int | None = None,
     resolution: str | None = None,
+    resolution_profile: str | None = None,
     generation_count: int = 1,
 ) -> PointsQuoteResponse:
     """试算：解析模型 → 计价 → 查余额 → 签发 quote_token。
@@ -555,6 +560,7 @@ async def quote_points(
         unit_points=model.unit_points,
         duration_seconds=duration_seconds,
         resolution=resolution,
+        resolution_profile=resolution_profile,
         generation_count=generation_count,
     )
 
@@ -569,6 +575,7 @@ async def quote_points(
             "category": str(category),
             "duration_seconds": duration_seconds,
             "resolution": resolution,
+            "resolution_profile": resolution_profile,
             "generation_count": generation_count,
         }
     )

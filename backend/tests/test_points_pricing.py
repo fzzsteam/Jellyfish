@@ -122,3 +122,56 @@ def test_text_category_ignores_resolution_and_duration():
         )
         == 7
     )
+
+
+def test_image_standard_profile_uses_factor_one():
+    """图片 standard 档（1K）按系数 1.0 计价：单价即总价。"""
+    assert (
+        calculate_points(
+            category="image",
+            unit_points=10,
+            duration_seconds=None,
+            resolution=None,
+            resolution_profile="standard",
+        )
+        == 10
+    )
+
+
+def test_image_high_profile_doubles_cost():
+    """图片 high 档（2K）按系数 2.0 翻倍计价（10 * 2.0 = 20）。"""
+    assert (
+        calculate_points(
+            category="image",
+            unit_points=10,
+            duration_seconds=None,
+            resolution=None,
+            resolution_profile="high",
+        )
+        == 20
+    )
+
+
+def test_image_profile_defaults_to_standard_when_missing():
+    """图片未传 resolution_profile 时按 standard（1.0）计价，兼容存量调用。"""
+    assert (
+        calculate_points(
+            category="image",
+            unit_points=10,
+            duration_seconds=None,
+            resolution=None,
+        )
+        == 10
+    )
+
+
+def test_unknown_image_profile_is_rejected():
+    """图片分辨率档位未登记时抛 UnsupportedResolutionError。"""
+    with pytest.raises(UnsupportedResolutionError):
+        calculate_points(
+            category="image",
+            unit_points=10,
+            duration_seconds=None,
+            resolution=None,
+            resolution_profile="ultra",
+        )

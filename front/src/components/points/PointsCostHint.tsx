@@ -1,4 +1,5 @@
 import type { PointsQuoteResponse } from '../../services/generated'
+import { PointsBadge } from './PointsBadge'
 
 /**
  * PointsCostHintProps。
@@ -17,13 +18,13 @@ export type PointsCostHintProps = {
  * - loading：正在试算。
  * - error：试算失败（不阻断渲染，给用户一个可感知的状态）。
  * - quote 不足：橙色高亮可用额度与所需积分。
- * - quote 充足：中性灰色展示将消耗积分。
+ * - quote 充足：金色积分徽标展示将消耗积分。
  *
  * 仅做展示，不参与提交控制（提交门控由调用方根据 canSubmit 决定按钮 disabled）。
  */
 export function PointsCostHint({ quote, loading, error }: PointsCostHintProps) {
   if (loading) {
-    return <span className="text-xs text-gray-500">正在计算积分…</span>
+    return <span className="text-xs text-gray-400">正在计算积分…</span>
   }
   if (error) {
     return <span className="text-xs text-red-500">{error}</span>
@@ -33,10 +34,18 @@ export function PointsCostHint({ quote, loading, error }: PointsCostHintProps) {
   }
   if (!quote.sufficient) {
     return (
-      <span className="text-xs text-orange-500">
-        可用 {quote.available_points}，本次需要 {quote.required_points}
+      <span className="inline-flex items-center gap-1.5 text-xs text-orange-500">
+        <span>可用</span>
+        <PointsBadge value={quote.available_points} size="sm" insufficient />
+        <span>，需要</span>
+        <PointsBadge value={quote.required_points} size="sm" insufficient />
       </span>
     )
   }
-  return <span className="text-xs text-gray-500">将消耗 {quote.required_points} 积分</span>
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-gray-400">
+      <span>将消耗</span>
+      <PointsBadge value={quote.required_points} size="sm" />
+    </span>
+  )
 }

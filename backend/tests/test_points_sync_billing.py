@@ -81,6 +81,7 @@ def _make_text_quote_token(*, required_points: int = REQUIRED_POINTS) -> str:
             "category": str(ModelCategoryKey.text),
             "duration_seconds": None,
             "resolution": None,
+            "resolution_profile": None,
             "generation_count": 1,
         }
     )

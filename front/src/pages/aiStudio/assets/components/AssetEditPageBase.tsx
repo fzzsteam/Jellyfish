@@ -327,6 +327,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     businessType: 'image_generation',
     category: 'image',
     modelId: selectedImageModelId,
+    resolutionProfile: assetImageResolutionProfile,
     enabled: !!selectedImageModelId,
   })
 

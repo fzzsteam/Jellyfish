@@ -651,10 +651,14 @@ const ChapterStudio: React.FC = () => {
   // 故 modelId 恒为 null。本报价服务于 ChapterStudio 内的两处调用点：
   // 批量生成（runBatchGenerate）与 Ctrl+Enter 生成（generateFrameImageTask）。
   // 关键帧预览弹窗位于 Inspector 子组件，独立持有自己的 imageQuote（见 Inspector 内）。
+  // 分镜帧分辨率档位（standard=1K/high=2K）：声明前置以供本 imageQuote 绑定，保证试算与
+  // 创建任务提交的 resolution_profile 一致（否则 quote_token params_hash 校验失败）。
+  const [keyframeResolutionProfile, setKeyframeResolutionProfile] = useState<KeyframeResolutionProfile>('standard')
   const imageQuote = usePointsQuote({
     businessType: 'image_generation',
     category: 'image',
     modelId: null,
+    resolutionProfile: keyframeResolutionProfile,
     enabled: true,
   })
   // 批量视频模型加载：与 Inspector 的视频模型选择一致，取 category=video 的启用模型。
@@ -730,7 +734,6 @@ const ChapterStudio: React.FC = () => {
   const [cameraUpdating, setCameraUpdating] = useState(false)
   const [promptAssetsUpdating, setPromptAssetsUpdating] = useState(false)
 
-  const [keyframeResolutionProfile, setKeyframeResolutionProfile] = useState<KeyframeResolutionProfile>('standard')
   const [videoResolutionProfile, setVideoResolutionProfile] = useState<'720p' | '1080p'>('720p')
   const [generatedVideos, setGeneratedVideos] = useState<GeneratedVideoItem[]>([])
   /** shotId → 该分镜被选中的视频 fileId */
@@ -2995,10 +2998,12 @@ function Inspector(props: {
   // 分镜帧图片生成的积分试算（Inspector 独立组件，内部独立持有报价）。
   // 关键帧提示词预览弹窗与 useGenerationDraft 的 submit 共用：图片单价稳定，
   // 同一报价可在弹窗存活期内复用；后端按 quote_token 逐次幂等校验。
+  // resolutionProfile 绑定关键帧档位，保证试算与创建任务的 resolution_profile 一致。
   const imageQuote = usePointsQuote({
     businessType: 'image_generation',
     category: 'image',
     modelId: null,
+    resolutionProfile: keyframeResolutionProfile,
     enabled: true,
   })
   const [selectedVideoModelId, setSelectedVideoModelId] = useState<string | null>(null)

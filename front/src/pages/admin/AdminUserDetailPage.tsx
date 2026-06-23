@@ -13,6 +13,8 @@ import {
 } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { useParams } from 'react-router-dom'
+import { PointsAccountCard } from '../../components/points/PointsAccountCard'
+import { PointsBadge } from '../../components/points/PointsBadge'
 import { AdminService } from '../../services/generated'
 import type {
   PointTransactionRead,
@@ -21,6 +23,9 @@ import type {
   UserAdminRead,
   UserProjectBrief,
 } from '../../services/generated'
+
+/** 充值快捷金额选项。 */
+const RECHARGE_PRESETS = [100, 500, 1000, 5000]
 
 /** 积分流水类型 → 标签颜色映射，便于一眼区分充值/冻结/扣减/解冻。 */
 const TX_TYPE_COLOR: Record<PointTransactionType, string> = {
@@ -175,12 +180,27 @@ const AdminUserDetailPage: React.FC = () => {
       width: 90,
       render: (t: PointTransactionType) => <Tag color={TX_TYPE_COLOR[t]}>{TX_TYPE_LABEL[t]}</Tag>,
     },
-    { title: '金额', dataIndex: 'amount', width: 80 },
+    {
+      title: '金额',
+      dataIndex: 'amount',
+      width: 100,
+      render: (v: number) => <PointsBadge value={v} size="sm" insufficient={v < 0} />,
+    },
     { title: '业务类型', dataIndex: 'business_type', render: (v) => v || '—' },
     { title: '模型', dataIndex: 'model_id', ellipsis: true, render: (v) => v || '—' },
-    { title: '余额', dataIndex: 'balance_after', width: 80 },
+    {
+      title: '余额',
+      dataIndex: 'balance_after',
+      width: 100,
+      render: (v: number) => <PointsBadge value={v} size="sm" />,
+    },
     { title: '备注', dataIndex: 'remark', ellipsis: true, render: (v) => v || '—' },
-    { title: '操作人', dataIndex: 'created_by', width: 100, render: (v) => v || '—' },
+    {
+      title: '操作人',
+      dataIndex: 'created_by_username',
+      width: 120,
+      render: (v: string | null) => v || '—',
+    },
   ]
 
   return (
@@ -199,15 +219,23 @@ const AdminUserDetailPage: React.FC = () => {
 
       {/* 积分账户摘要 */}
       <Card title="积分账户">
-        <Descriptions column={3}>
-          <Descriptions.Item label="可用积分">{points?.available ?? '—'}</Descriptions.Item>
-          <Descriptions.Item label="冻结积分">{points?.frozen ?? '—'}</Descriptions.Item>
-          <Descriptions.Item label="总余额">{points?.balance ?? '—'}</Descriptions.Item>
-        </Descriptions>
+        <PointsAccountCard summary={points ?? null} />
       </Card>
 
       {/* 积分充值 / 扣减表单 */}
       <Card title="积分充值">
+        <div className="flex items-center gap-2 mb-3">
+          <span className="text-sm text-gray-500">快捷：</span>
+          {RECHARGE_PRESETS.map((preset) => (
+            <Button
+              key={preset}
+              size="small"
+              onClick={() => rechargeForm.setFieldValue('amount', preset)}
+            >
+              +{preset}
+            </Button>
+          ))}
+        </div>
         <Form form={rechargeForm} layout="inline">
           <Form.Item
             name="amount"
@@ -224,7 +252,7 @@ const AdminUserDetailPage: React.FC = () => {
               },
             ]}
           >
-            <InputNumber min={undefined} step={1} precision={0} placeholder="正数充值/负数扣减" />
+            <InputNumber min={undefined} step={1} precision={0} placeholder="正数充值/负数扣减" style={{ width: 180 }} />
           </Form.Item>
           <Form.Item
             name="remark"
@@ -261,6 +289,7 @@ const AdminUserDetailPage: React.FC = () => {
           dataSource={transactions}
           columns={txColumns}
           size="small"
+          scroll={{ x: 900, y: 400 }}
           pagination={{
             current: txPage,
             pageSize: txPageSize,

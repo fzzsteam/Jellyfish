@@ -5,7 +5,7 @@ Jellyfish 是面向 AI 短剧生产的工作台。本文件覆盖两类部署：
 - **本地开发**：混合模式（MySQL/Redis/RustFS 跑 Docker，Backend/Celery/Frontend 跑宿主机），便于热更新与查看日志，见下文第 1–7 节。
 - **线上部署（SAE）**：单容器镜像（前端产物 + 后端 + Celery 由 supervisord 托管），见文末「线上部署（SAE）」一节。
 
-两类环境都需要执行 `backend/sql/` 下的数据库迁移，区别仅在执行方式：本地用 mysql 客户端、线上用仓库自带的 `backend/apply_migrations.py`（线上容器未安装 mysql 客户端）。
+两类环境都需要执行 `backend/sql/` 下的数据库迁移，统一使用仓库自带的 `backend/apply_migrations.py`：本地直接在宿主机运行，线上通过 SAE Webshell 在容器内运行。
 
 ## 服务与端口
 
@@ -140,40 +140,16 @@ curl http://127.0.0.1:8000/health
 
 迁移脚本位于 `backend/sql/`。全新环境和从旧版本升级的环境都应按文件名顺序执行当前脚本；执行 `009` 前必须确保 Backend 已至少成功启动一次，以便创建并播种初始管理员。`010-add-points-billing.sql`（用户积分计费）幂等，可在 `009` 之后的任意时机执行：新增 `user_points` / `point_transactions` 表，给 `models` 加 `unit_points` 列、给 `generation_tasks` 加 `billing_id` 列，并为存量用户回填 `balance=0, frozen=0`、存量模型回填 `unit_points=0`（即默认免费，由管理员按需调价）。
 
-建议先备份重要的本地数据，然后在仓库根目录执行：
+建议先备份重要的本地数据，然后执行：
 
 ```bash
-for migration in backend/sql/*.sql; do
-  echo "Applying ${migration}"
-  docker compose \
-    --env-file deploy/compose/.env.local \
-    -f deploy/compose/docker-compose.infra.yml \
-    exec -T mysql \
-    sh -c 'mysql --default-character-set=utf8mb4 -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"' \
-    < "${migration}" || exit 1
-done
+cd backend
+uv run python apply_migrations.py          # 执行全部迁移
+# uv run python apply_migrations.py 009    # 仅执行 009（用户隔离）
+# uv run python apply_migrations.py 010    # 仅执行 010（积分计费）
 ```
 
-迁移完成后重启 Backend。
-
-如果只需要修复以下错误：
-
-```text
-Unknown column 'generation_tasks.user_id' in 'where clause'
-```
-
-可以单独执行用户隔离迁移：
-
-```bash
-docker compose \
-  --env-file deploy/compose/.env.local \
-  -f deploy/compose/docker-compose.infra.yml \
-  exec -T mysql \
-  sh -c 'mysql --default-character-set=utf8mb4 -u"$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE"' \
-  < backend/sql/009-add-users-and-user-isolation.sql
-```
-
-这些命令不是交互式进入 MySQL，而是把宿主机上的 SQL 文件传给容器内的 MySQL 客户端执行。
+脚本从 `backend/.env` 的 `DATABASE_URL` 读取连接信息，幂等可重复执行。迁移完成后重启 Backend。
 
 ## 5. 启动 Backend
 
@@ -357,7 +333,7 @@ Unknown column 'generation_tasks.user_id'
 
 线上采用单容器部署：`deploy/docker/combined.Dockerfile` 构建一个镜像，包含前端静态产物 + 后端 + Celery，由 supervisord 统一托管（`web` = uvicorn，`worker` = celery）。适用于阿里云 SAE 等按容器镜像部署的 Serverless 平台。
 
-> 与本地不同：线上容器**未安装 mysql 命令行客户端**，数据库迁移只能用仓库自带的 Python 脚本 `backend/apply_migrations.py` 执行。
+> 线上容器未安装 mysql 命令行客户端，数据库迁移通过容器内的 `uv run python apply_migrations.py` 执行，与本地方式一致。
 
 ### 1. 构建并推送镜像
 

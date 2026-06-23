@@ -375,6 +375,7 @@ async def create_image_task_and_link(
             business_type="image_generation",
             category=ModelCategoryKey.image,
             model_id=model_id,
+            resolution_profile=resolution_profile,
         )
         billing_id = frozen.billing_id
 

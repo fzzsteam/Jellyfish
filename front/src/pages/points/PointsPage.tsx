@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type React from 'react'
-import { Card, Descriptions, Select, Table, Tag, message } from 'antd'
+import { Card, Select, Table, Tag, message } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { PointsService } from '../../services/generated'
 import type {
@@ -8,6 +8,8 @@ import type {
   PointTransactionType,
   PointsSummaryRead,
 } from '../../services/generated'
+import { PointsAccountCard } from '../../components/points/PointsAccountCard'
+import { PointsBadge } from '../../components/points/PointsBadge'
 
 /** 积分流水类型 → 标签颜色与中文标签，便于一眼区分充值/冻结/扣减/解冻。 */
 const TX_TYPE_COLOR: Record<PointTransactionType, string> = {
@@ -115,22 +117,28 @@ const PointsPage: React.FC = () => {
       width: 90,
       render: (t: PointTransactionType) => <Tag color={TX_TYPE_COLOR[t]}>{TX_TYPE_LABEL[t]}</Tag>,
     },
-    { title: '金额', dataIndex: 'amount', width: 80 },
+    {
+      title: '金额',
+      dataIndex: 'amount',
+      width: 100,
+      render: (v: number) => <PointsBadge value={v} size="sm" insufficient={v < 0} />,
+    },
     { title: '业务类型', dataIndex: 'business_type', render: (v) => v || '—' },
     { title: '模型', dataIndex: 'model_id', ellipsis: true, render: (v) => v || '—' },
-    { title: '余额', dataIndex: 'balance_after', width: 80 },
+    {
+      title: '余额',
+      dataIndex: 'balance_after',
+      width: 100,
+      render: (v: number) => <PointsBadge value={v} size="sm" />,
+    },
     { title: '备注', dataIndex: 'remark', ellipsis: true, render: (v) => v || '—' },
-    { title: '操作人', dataIndex: 'created_by', width: 100, render: (v) => v || '—' },
+    { title: '操作人', dataIndex: 'created_by_username', width: 120, render: (v) => v || '—' },
   ]
 
   return (
     <div className="flex flex-col gap-4 p-4">
-      <Card title="积分账户" loading={loading}>
-        <Descriptions column={3}>
-          <Descriptions.Item label="可用积分">{summary?.available ?? '—'}</Descriptions.Item>
-          <Descriptions.Item label="冻结积分">{summary?.frozen ?? '—'}</Descriptions.Item>
-          <Descriptions.Item label="总余额">{summary?.balance ?? '—'}</Descriptions.Item>
-        </Descriptions>
+      <Card title="积分账户">
+        <PointsAccountCard summary={summary} loading={loading} />
       </Card>
 
       <Card
@@ -156,6 +164,7 @@ const PointsPage: React.FC = () => {
           dataSource={transactions}
           columns={columns}
           size="small"
+          scroll={{ x: 900, y: 400 }}
           pagination={{
             current: page,
             pageSize,

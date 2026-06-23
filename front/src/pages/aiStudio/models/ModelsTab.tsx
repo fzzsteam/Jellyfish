@@ -50,6 +50,7 @@ import {
   SORT_OPTIONS,
 } from './constants'
 import { generateUUID } from '../../../utils'
+import { PointsBadge } from '../../../components/points/PointsBadge'
 
 export default function ModelsTab() {
   const [providers, setProviders] = useState<ProviderRead[]>([])
@@ -261,7 +262,7 @@ export default function ModelsTab() {
       })
     } else {
       form.resetFields()
-      form.setFieldsValue({ category: 'text', unit_points: 0 })
+      form.setFieldsValue({ category: 'text', unit_points: 1 })
     }
     setModelModalOpen(true)
   }
@@ -312,9 +313,9 @@ export default function ModelsTab() {
       key: 'unit_points',
       width: 110,
       render: (v: number | null | undefined, record: ModelRead) => {
-        if (v === null || v === undefined) return '—'
-        const suffix = record.category === 'text' ? '积分/次' : record.category === 'image' ? '积分/张' : record.category === 'video' ? '积分/秒' : ''
-        return suffix ? `${v} ${suffix}` : String(v)
+        if (v === null || v === undefined) return <span className="text-gray-400">—</span>
+        const suffix = record.category === 'text' ? '积分/次' : record.category === 'image' ? '积分/张' : record.category === 'video' ? '积分/秒' : undefined
+        return <PointsBadge value={v} size="sm" suffix={suffix} />
       },
     },
     {
@@ -647,8 +648,11 @@ export default function ModelsTab() {
               <div>
                 <div className="text-sm text-gray-500 mb-1">积分单价</div>
                 <div>
-                  {selectedModel.unit_points !== null && selectedModel.unit_points !== undefined
-                    ? `${selectedModel.unit_points} ${
+                  {selectedModel.unit_points !== null && selectedModel.unit_points !== undefined ? (
+                    <PointsBadge
+                      value={selectedModel.unit_points}
+                      size="md"
+                      suffix={
                         selectedModel.category === 'text'
                           ? '积分/次'
                           : selectedModel.category === 'image'
@@ -656,8 +660,11 @@ export default function ModelsTab() {
                             : selectedModel.category === 'video'
                               ? '积分/秒'
                               : '积分'
-                      }`
-                    : '—'}
+                      }
+                    />
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
                 </div>
               </div>
               <div>
@@ -704,8 +711,11 @@ export default function ModelsTab() {
               <div>
                 <div className="text-sm text-gray-500 mb-1">积分单价</div>
                 <div>
-                  {selectedModel.unit_points !== null && selectedModel.unit_points !== undefined
-                    ? `${selectedModel.unit_points} ${
+                  {selectedModel.unit_points !== null && selectedModel.unit_points !== undefined ? (
+                    <PointsBadge
+                      value={selectedModel.unit_points}
+                      size="md"
+                      suffix={
                         selectedModel.category === 'text'
                           ? '积分/次'
                           : selectedModel.category === 'image'
@@ -713,8 +723,11 @@ export default function ModelsTab() {
                             : selectedModel.category === 'video'
                               ? '积分/秒'
                               : '积分'
-                      }`
-                    : '—'}
+                      }
+                    />
+                  ) : (
+                    <span className="text-gray-400">—</span>
+                  )}
                 </div>
               </div>
               <Space>

@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.dependencies import get_current_user, get_db
+from app.models.points import PointTransaction
 from app.models.user import User
 from app.schemas.common import ApiResponse, PaginatedData, paginated_response, success_response
 from app.schemas.points import (
@@ -21,6 +23,15 @@ from app.schemas.points import (
 from app.services.points import UnsupportedResolutionError
 from app.services.points.billing import list_user_transactions, quote_points, to_summary
 from app.services.points.ledger import get_points
+
+
+async def _resolve_usernames(db: AsyncSession, items: list[PointTransaction]) -> dict[str, str]:
+    """从流水列表中取出 created_by ID 集合，批量查一次 users 表，返回 id→username 映射。"""
+    ids = {tx.created_by for tx in items if tx.created_by}
+    if not ids:
+        return {}
+    rows = await db.execute(select(User.id, User.username).where(User.id.in_(ids)))
+    return {row.id: row.username for row in rows}
 
 router = APIRouter()
 
@@ -67,8 +78,14 @@ async def list_my_transactions(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         ) from exc
+    user_map = await _resolve_usernames(db, items)
     return paginated_response(
-        [PointTransactionRead.model_validate(tx) for tx in items],
+        [
+            PointTransactionRead.model_validate(tx).model_copy(
+                update={"created_by_username": user_map.get(tx.created_by) if tx.created_by else None}
+            )
+            for tx in items
+        ],
         total=total,
         page=page,
         page_size=page_size,
@@ -96,6 +113,7 @@ async def quote_my_points(
             model_id=body.model_id,
             duration_seconds=body.duration_seconds,
             resolution=body.resolution,
+            resolution_profile=body.resolution_profile,
             generation_count=body.generation_count,
         )
     except UnsupportedResolutionError as exc:

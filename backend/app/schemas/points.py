@@ -23,6 +23,8 @@ class PointsQuoteRequest(BaseModel):
     - `category`: 模型类别，决定计价规则（文本/图片按单价；视频按时长×分辨率×单价）。
     - `model_id`: 显式模型 ID；为空时按当前用户默认模型解析。
     - `duration_seconds` / `resolution`: 视频类别的计价参数；文本/图片忽略。
+    - `resolution_profile`: 图片分辨率档位（standard=1K / high=2K），图片类别计价系数来源；
+      文本/视频忽略，为空按 standard。
     - `generation_count`: 当前固定为 1（多轮生成能力后续任务再放开）。
     """
 
@@ -31,6 +33,9 @@ class PointsQuoteRequest(BaseModel):
     model_id: str | None = Field(None, description="显式模型 ID；空则用用户默认模型")
     duration_seconds: int | None = Field(None, ge=1, description="视频时长（秒），仅 video 必填")
     resolution: Literal["720p", "1080p"] | None = Field(None, description="视频分辨率，仅 video 必填")
+    resolution_profile: Literal["standard", "high"] | None = Field(
+        None, description="图片分辨率档位（standard=1K/high=2K），仅 image 用于计价；空按 standard"
+    )
     generation_count: Literal[1] = Field(1, description="生成次数，当前仅支持 1")
 
     @model_validator(mode="after")
@@ -105,7 +110,8 @@ class PointTransactionRead(BaseModel):
     model_id: str | None = Field(None, description="涉及的模型 ID")
     pricing_snapshot: dict[str, Any] | None = Field(None, description="计价快照")
     remark: str | None = Field(None, description="备注")
-    created_by: str | None = Field(None, description="操作人")
+    created_by: str | None = Field(None, description="操作人 ID")
+    created_by_username: str | None = Field(None, description="操作人用户名")
     created_at: datetime = Field(..., description="流水发生时间")
 
 
