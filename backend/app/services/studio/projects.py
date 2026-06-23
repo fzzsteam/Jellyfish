@@ -26,6 +26,7 @@ from app.services.common import (
     flush_and_refresh,
     patch_model,
 )
+from app.services.studio.style_profiles import list_style_profiles
 
 PROJECT_ORDER_FIELDS = {"name", "created_at", "updated_at", "progress"}
 
@@ -33,16 +34,13 @@ PROJECT_ORDER_FIELDS = {"name", "created_at", "updated_at", "progress"}
 def build_project_style_options() -> tuple[dict[ProjectVisualStyle, list[ProjectStyle]], dict[ProjectVisualStyle, ProjectStyle]]:
     """构建"视觉风格 -> 可选题材风格"映射及各视觉风格的默认题材。
 
-    纯枚举派生逻辑，与用户无关，故不参与 user_id 隔离。
+    选项来自 Jellyfish 风格档案，与用户无关，故不参与 user_id 隔离。
     """
     mapping: dict[ProjectVisualStyle, list[ProjectStyle]] = {key: [] for key in ProjectVisualStyle}
-    for item in ProjectStyle:
-        if item.name.startswith("real_people_"):
-            mapping[ProjectVisualStyle.live_action].append(item)
-            continue
-        if item.name.startswith("anime_") or item.name in {"guoman", "ink_wash"}:
-            mapping[ProjectVisualStyle.anime].append(item)
-            continue
+    for profile in list_style_profiles():
+        styles = mapping.setdefault(profile.visual_style, [])
+        if profile.style not in styles:
+            styles.append(profile.style)
     defaults: dict[ProjectVisualStyle, ProjectStyle] = {
         visual: styles[0]
         for visual, styles in mapping.items()

@@ -57,7 +57,7 @@ export type AssetUpdate = {
   description: string
   tags: string[]
   view_count: number
-  visual_style: '现实' | '动漫'
+  visual_style: string
   style?: string
 }
 
@@ -69,7 +69,7 @@ export type BaseAsset = {
   description?: string
   tags?: string[]
   view_count?: number
-  visual_style?: '现实' | '动漫'
+  visual_style?: string
   style?: string
 }
 
@@ -496,7 +496,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       description: formDesc.trim(),
       tags: normalizeTags(formTags),
       view_count: clampViewCount(asset?.view_count),
-      visual_style: (asset?.visual_style ?? '现实') as '现实' | '动漫',
+      visual_style: asset?.visual_style ?? '现实',
       style: asset?.style,
     }
   }, [asset?.style, asset?.view_count, asset?.visual_style, formDesc, formName, formTags])

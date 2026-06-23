@@ -191,6 +191,14 @@ def test_project_style_options_returns_grouped_choices(client: TestClient) -> No
     assert "视觉" in body["data"]["visual_styles"][0]["label"] or body["data"]["visual_styles"][0]["value"] in {"现实", "动漫"}
     assert "现实" in body["data"]["styles_by_visual_style"]
     assert "动漫" in body["data"]["styles_by_visual_style"]
+    assert "国风" in body["data"]["styles_by_visual_style"]
+    assert "3D" in body["data"]["styles_by_visual_style"]
+    assert {"真人悬疑", "真人甜宠", "真人热血"} <= {
+        item["value"] for item in body["data"]["styles_by_visual_style"]["现实"]
+    }
+    assert {"国风玄幻", "国风古韵"} <= {
+        item["value"] for item in body["data"]["styles_by_visual_style"]["国风"]
+    }
     assert "video_ratios" not in body["data"]
     assert "default_video_ratio" not in body["data"]
 

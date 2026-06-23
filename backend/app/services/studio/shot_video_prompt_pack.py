@@ -29,6 +29,7 @@ from app.schemas.studio.shots import (
 from app.services.common import entity_not_found
 from app.services.studio.action_beats import infer_action_beat_sequence
 from app.services.studio.shot_assets_overview import get_shot_assets_overview
+from app.services.studio.style_profiles import find_style_profile, style_profile_guidance_text
 
 
 DEFAULT_VIDEO_NEGATIVE_PROMPT = (
@@ -90,6 +91,7 @@ def _pack_variables(pack: ShotVideoPromptPackRead) -> dict[str, Any]:
         "atmosphere": pack.atmosphere,
         "visual_style": pack.visual_style,
         "style": pack.style,
+        "style_profile_guidance": pack.style_profile_guidance,
         "negative_prompt": pack.negative_prompt,
     }
 
@@ -451,6 +453,10 @@ async def build_shot_video_prompt_pack(
         dialogue_summary=dialogue_summary,
     )
 
+    visual_style = getattr(project, "visual_style", None)
+    style = getattr(project, "style", None)
+    style_profile = find_style_profile(visual_style, style) if visual_style is not None and style is not None else None
+
     return ShotVideoPromptPackRead(
         shot_id=shot.id,
         title=shot.title or "",
@@ -493,7 +499,8 @@ async def build_shot_video_prompt_pack(
             duration=getattr(detail, "duration", None),
         ),
         atmosphere=str(getattr(detail, "atmosphere", "") or ""),
-        visual_style=_enum_value(getattr(project, "visual_style", None)),
-        style=_enum_value(getattr(project, "style", None)),
+        visual_style=_enum_value(visual_style),
+        style=_enum_value(style),
+        style_profile_guidance=style_profile_guidance_text(style_profile),
         negative_prompt=DEFAULT_VIDEO_NEGATIVE_PROMPT,
     )

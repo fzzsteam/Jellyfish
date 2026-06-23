@@ -1,6 +1,6 @@
 import { Form, Select } from 'antd'
 
-export type ProjectVisualStyleChoice = '现实' | '动漫'
+export type ProjectVisualStyleChoice = string
 
 export type OptionItem = { value: string; label: string }
 export type ProjectStyleOptionsByVisual = Record<string, OptionItem[]>
@@ -15,17 +15,34 @@ export const PROJECT_STYLE_OPTIONS_BY_VISUAL: ProjectStyleOptionsByVisual = {
     { value: '真人都市', label: '真人都市' },
     { value: '真人科幻', label: '真人科幻' },
     { value: '真人古装', label: '真人古装' },
+    { value: '真人悬疑', label: '真人悬疑' },
+    { value: '真人甜宠', label: '真人甜宠' },
+    { value: '真人热血', label: '真人热血' },
   ],
   动漫: [
     { value: '动漫科幻', label: '动漫科幻' },
     { value: '动漫3D', label: '动漫3D' },
+    { value: '动漫仙侠', label: '动漫仙侠' },
+    { value: '动漫赛博', label: '动漫赛博' },
+    { value: '动漫治愈', label: '动漫治愈' },
+  ],
+  国风: [
     { value: '国漫', label: '国漫' },
     { value: '水墨画', label: '水墨画' },
+    { value: '国风玄幻', label: '国风玄幻' },
+    { value: '国风古韵', label: '国风古韵' },
+  ],
+  '3D': [
+    { value: '动漫3D', label: '动漫3D' },
+    { value: '3D少儿', label: '3D少儿' },
+    { value: '3D奇幻', label: '3D奇幻' },
   ],
 }
 const DEFAULT_VISUAL_STYLE_OPTIONS: OptionItem[] = [
   { value: '现实', label: '现实' },
   { value: '动漫', label: '动漫' },
+  { value: '国风', label: '国风' },
+  { value: '3D', label: '3D' },
 ]
 const DEFAULT_STYLE_BY_VISUAL: Record<string, string> = {
   现实: PROJECT_STYLE_OPTIONS_BY_VISUAL['现实']?.[0]?.value ?? '',
@@ -134,4 +151,3 @@ export function ProjectVisualStyleAndStyleFields(props: FormModeProps | Controll
     </div>
   )
 }
-
