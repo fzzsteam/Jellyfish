@@ -31,6 +31,7 @@ from app.models.studio import (
 from app.services.llm.runtime import build_default_text_llm_sync
 from app.services.common import entity_not_found, invalid_choice
 from app.services.studio.action_beats import infer_action_beat_sequence, pick_action_beat_for_frame
+from app.services.studio.style_profiles import find_style_profile, style_profile_guidance_text
 from app.services.studio.shot_status import recompute_shot_status
 from app.services.worker.async_task_support import cancel_if_requested_async
 from app.services.worker.task_logging import log_task_event, log_task_failure
@@ -654,9 +655,16 @@ async def build_run_args(
     next_title, next_excerpt, next_goal = _summarize_neighbor_shot(next_shot)
     dialog_summary = "\n".join(line.text for line in (detail.dialog_lines or []) if line.text)
     project = getattr(getattr(shot, "chapter", None), "project", None)
-    visual_style = _enum_value(getattr(project, "visual_style", None))
-    style = _enum_value(getattr(project, "style", None))
+    project_visual_style = getattr(project, "visual_style", None)
+    project_style = getattr(project, "style", None)
+    visual_style = _enum_value(project_visual_style)
+    style = _enum_value(project_style)
     unify_style = bool(getattr(project, "unify_style", True)) if project is not None else True
+    style_profile = (
+        find_style_profile(project_visual_style, project_style)
+        if project_visual_style is not None and project_style is not None
+        else None
+    )
 
     characters = [
         link.character
@@ -722,6 +730,7 @@ async def build_run_args(
             "visual_style": visual_style,
             "style": style,
             "unify_style": unify_style,
+            "style_profile_guidance": style_profile_guidance_text(style_profile),
             "camera_shot": _enum_value(detail.camera_shot),
             "angle": _enum_value(detail.angle),
             "movement": _enum_value(detail.movement),

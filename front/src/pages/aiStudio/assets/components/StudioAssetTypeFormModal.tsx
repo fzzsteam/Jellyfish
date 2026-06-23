@@ -102,7 +102,7 @@ export function StudioAssetTypeFormModal({
   seedCreateForm?: {
     name?: string
     description?: string
-    visual_style?: '现实' | '动漫'
+    visual_style?: string
     style?: string
   } | null
   onSeedConsumed?: () => void
@@ -113,7 +113,7 @@ export function StudioAssetTypeFormModal({
   const [formDesc, setFormDesc] = useState('')
   const [formTags, setFormTags] = useState('')
   const [formViewCount, setFormViewCount] = useState<number | null>(null)
-  const [formVisualStyle, setFormVisualStyle] = useState<'现实' | '动漫'>(defaultVisualStyle as '现实' | '动漫')
+  const [formVisualStyle, setFormVisualStyle] = useState<string>(defaultVisualStyle)
   const [formStyle, setFormStyle] = useState<string>(getDefaultStyle(defaultVisualStyle))
   const createFormInitializedRef = useRef(false)
 
@@ -127,7 +127,7 @@ export function StudioAssetTypeFormModal({
       setFormDesc(editing.description ?? '')
       setFormTags((editing.tags ?? []).join(', '))
       setFormViewCount(editing.view_count ?? null)
-      const nextVisual = (((editing as { visual_style?: '现实' | '动漫' }).visual_style ?? defaultVisualStyle) as '现实' | '动漫')
+      const nextVisual = (editing as { visual_style?: string }).visual_style ?? defaultVisualStyle
       setFormVisualStyle(nextVisual)
       setFormStyle(
         ((editing as { style?: string }).style as string | undefined) ??
@@ -141,14 +141,14 @@ export function StudioAssetTypeFormModal({
       if (seedCreateForm) {
         setFormName(seedCreateForm.name ?? '')
         setFormDesc(seedCreateForm.description ?? '')
-        const nextVisual = seedCreateForm.visual_style ?? (defaultVisualStyle as '现实' | '动漫')
+        const nextVisual = seedCreateForm.visual_style ?? defaultVisualStyle
         setFormVisualStyle(nextVisual)
         setFormStyle(seedCreateForm.style ?? getDefaultStyle(nextVisual))
         onSeedConsumed?.()
       } else {
         setFormName('')
         setFormDesc('')
-        setFormVisualStyle(defaultVisualStyle as '现实' | '动漫')
+        setFormVisualStyle(defaultVisualStyle)
         setFormStyle(getDefaultStyle(defaultVisualStyle))
       }
       setFormTags('')

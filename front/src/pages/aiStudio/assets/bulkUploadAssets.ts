@@ -7,7 +7,7 @@ type EntityType = 'actor' | 'character' | 'scene' | 'prop' | 'costume'
 type BulkUploadOptions = {
   entityType: EntityType
   files: File[]
-  visualStyle: '现实' | '动漫'
+  visualStyle: string
   style: string
 }
 

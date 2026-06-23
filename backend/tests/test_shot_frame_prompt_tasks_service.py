@@ -295,6 +295,20 @@ async def test_build_run_args_aggregates_dialog_and_project_style() -> None:
 
 
 @pytest.mark.asyncio
+async def test_build_run_args_includes_style_profile_guidance() -> None:
+    db, engine = await _build_session()
+    async with db:
+        await _seed_shot_graph(db)
+
+        run_args = await build_run_args(db, shot_id="s1", frame_type="first")
+
+        assert "style_profile_guidance" in run_args["input"]
+        assert "镜头画面" in run_args["input"]["style_profile_guidance"]
+        assert "导演执行" in run_args["input"]["style_profile_guidance"]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_build_run_args_provides_different_guidance_for_key_and_last_frames() -> None:
     db, engine = await _build_session()
     async with db:

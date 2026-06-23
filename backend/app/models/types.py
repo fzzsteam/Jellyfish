@@ -6,14 +6,23 @@ from enum import Enum
 class ProjectStyle(str, Enum):
     """项目题材/风格维度（不用于区分真人/动漫）。"""
 
-    # 真人：都市、科幻、古装；动漫：科幻、古装、3D、国漫、水墨画
     real_people_city = "真人都市"
     real_people_scifi = "真人科幻"
     real_people_ancient = "真人古装"
+    real_people_suspense = "真人悬疑"
+    real_people_romance = "真人甜宠"
+    real_people_hotblood = "真人热血"
     anime_scifi = "动漫科幻"
     anime_3d = "动漫3D"
+    anime_xianxia = "动漫仙侠"
+    anime_cyberpunk = "动漫赛博"
+    anime_healing = "动漫治愈"
     guoman = "国漫"
     ink_wash = "水墨画"
+    guofeng_fantasy = "国风玄幻"
+    guofeng_ancient = "国风古韵"
+    stylized_3d_children = "3D少儿"
+    stylized_3d_fantasy = "3D奇幻"
 
 
 class ProjectVisualStyle(str, Enum):
@@ -21,6 +30,8 @@ class ProjectVisualStyle(str, Enum):
 
     live_action = "现实"
     anime = "动漫"
+    guofeng = "国风"
+    stylized_3d = "3D"
 
 
 class ChapterStatus(str, Enum):

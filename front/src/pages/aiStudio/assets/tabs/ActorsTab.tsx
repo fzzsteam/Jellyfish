@@ -131,7 +131,7 @@ export function ActorsTab() {
       const result = await bulkUploadAssetImages({
         entityType: 'actor',
         files,
-        visualStyle: defaultVisualStyle as '现实' | '动漫',
+        visualStyle: defaultVisualStyle,
         style: getDefaultStyle(defaultVisualStyle),
       })
       if (result.createdCount > 0) {
