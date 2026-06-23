@@ -276,6 +276,9 @@ export function ChaptersTab() {
       message.warning('请先补章节原文')
       return
     }
+    if (imageQuote.quote) {
+      message.info('分镜拆解为必执行项；若积分不足以覆盖资产图生成，对应资产将建档但不生成图片。')
+    }
     setChapterDivisionActionId(record.id)
     try {
       await executeAsyncTaskCreate({
@@ -548,11 +551,6 @@ export function ChaptersTab() {
                   textMultiplier={2}
                   perImagePoints={imageQuote.quote?.required_points ?? null}
                 />
-                {imageQuote.quote && (
-                  <div className="text-xs text-gray-400 mt-0.5">
-                    分镜拆解为必执行项；若积分不足以覆盖资产图生成，对应资产将建档但不生成图片。
-                  </div>
-                )}
               </>
             ) : null}
           </Space>

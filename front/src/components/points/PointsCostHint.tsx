@@ -5,8 +5,7 @@ import { PointsBadge } from './PointsBadge'
  * PointsCostHintProps。
  * 直接接收 usePointsQuote 的试算状态字段，保持无状态、零副作用。
  *
- * - textMultiplier: 文本类业务的计量倍数（如分镜拆解 = 单价 × 章节数），展示为 [X×Y] 形式；
- *   未传或 <=1 时回退到仅展示 required_points。
+ * - textMultiplier: 文本类业务的计量倍数（如分镜拆解分镜+提取=单价×2），徽标直接展示计算后总价。
  * - perImagePoints: 单张资产图积分；非空时追加「每张资产图 Z」说明，为空表示图片模型未配置。
  */
 export type PointsCostHintProps = {
@@ -26,6 +25,9 @@ export type PointsCostHintProps = {
  * - quote 不足：橙色高亮可用额度与所需积分。
  * - quote 充足：金色积分徽标展示将消耗积分。
  *
+ * textMultiplier 时徽标直接展示总价（如 required_points=2, multiplier=2 → 徽标显示 4），
+ * 不额外追加 ×N 文字（避免用户混淆「乘数」与「总价」）。
+ *
  * 仅做展示，不参与提交控制（提交门控由调用方根据 canSubmit 决定按钮 disabled）。
  */
 export function PointsCostHint({ quote, loading, error, textMultiplier, perImagePoints }: PointsCostHintProps) {
@@ -38,9 +40,7 @@ export function PointsCostHint({ quote, loading, error, textMultiplier, perImage
   if (!quote) {
     return null
   }
-  // 计量倍数展示：仅当显式传入且 >1 时按 [单价×倍数] 形式呈现，否则回退为纯数值。
   const showMultiplier = typeof textMultiplier === 'number' && textMultiplier > 1
-  // 倍数生效时徽标展示「单价 × 倍数 = 总积分」，并追加 ×倍数文字提示。
   const totalPoints = showMultiplier ? quote.required_points * textMultiplier! : quote.required_points
   if (!quote.sufficient) {
     return (
@@ -56,7 +56,6 @@ export function PointsCostHint({ quote, loading, error, textMultiplier, perImage
     <span className="inline-flex items-center gap-1 text-xs text-gray-400">
       <span>将消耗</span>
       <PointsBadge value={totalPoints} size="sm" />
-      {showMultiplier && <span>×{textMultiplier}</span>}
       {perImagePoints != null ? (
         <span>，每张资产图 <PointsBadge value={perImagePoints} size="sm" />（按实际新建数量另计）</span>
       ) : (
