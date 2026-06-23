@@ -540,6 +540,63 @@ const ProjectLobby: React.FC = () => {
     return gradients[index]
   }
 
+  const buildProjectStageProgress = (
+    stageSummary: ProjectStageSummary | undefined,
+    flowStats: ProjectFlowStats | undefined,
+  ) => {
+    const totalShots = flowStats?.totalShots ?? 0
+    const scriptDone = Boolean(
+      stageSummary &&
+        stageSummary.key !== 'create_first_chapter' &&
+        stageSummary.key !== 'edit_raw',
+    )
+    const storyboardDone = totalShots > 0
+    const assetsDone = totalShots > 0 && (flowStats?.preparedShots ?? 0) >= totalShots
+    const videoDone =
+      totalShots > 0 &&
+      (flowStats?.videoCompletedShots ?? 0) >= totalShots &&
+      (flowStats?.activeVideoTasks ?? 0) === 0
+
+    return [
+      { key: 'script', label: '剧本', done: scriptDone },
+      { key: 'storyboard', label: '分镜', done: storyboardDone },
+      { key: 'assets', label: '资产', done: assetsDone },
+      { key: 'video', label: '视频', done: videoDone },
+    ]
+  }
+
+  const renderProjectStageProgress = (
+    stageSummary: ProjectStageSummary | undefined,
+    flowStats: ProjectFlowStats | undefined,
+  ) => {
+    const stages = buildProjectStageProgress(stageSummary, flowStats)
+    return (
+      <div className="mb-1.5">
+        <div className="flex justify-between text-[11px] mb-1 text-gray-500">
+          <span>进度</span>
+        </div>
+        <div className="grid grid-cols-4 gap-1">
+          {stages.map((stage) => (
+            <div key={stage.key} className="min-w-0">
+              <div
+                className={`h-1.5 rounded-full transition-colors ${
+                  stage.done ? 'bg-emerald-500' : 'bg-gray-200'
+                }`}
+              />
+              <div
+                className={`mt-0.5 truncate text-center text-[10px] ${
+                  stage.done ? 'text-emerald-600' : 'text-gray-400'
+                }`}
+              >
+                {stage.label}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   const selectedProject = filteredSorted.find((p) => p.id === selectedProjectId) ?? filteredSorted[0]
 
   const renderCard = (p: ProjectView) => {
@@ -639,20 +696,7 @@ const ProjectLobby: React.FC = () => {
           )}
         </div>
 
-        {!isCompact && (
-          <div className="mb-1.5">
-            <div className="flex justify-between text-[11px] mb-0.5 text-gray-500">
-              <span>进度</span>
-              <span>{p.progress}%</span>
-            </div>
-            <Progress
-              percent={p.progress}
-              size="small"
-              showInfo={false}
-              strokeColor={{ from: '#6366f1', to: '#a855f7' }}
-            />
-          </div>
-        )}
+        {renderProjectStageProgress(stageSummary, flowStats)}
 
         {isLarge ? (
           <Row gutter={6} className="mb-1.5">
@@ -921,6 +965,7 @@ const ProjectLobby: React.FC = () => {
                     <Progress
                       percent={selectedProject.progress}
                       size="small"
+                      showInfo={false}
                       strokeColor={{ from: '#6366f1', to: '#22c55e' }}
                     />
                   </div>

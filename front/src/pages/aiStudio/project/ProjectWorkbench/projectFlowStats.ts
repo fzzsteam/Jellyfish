@@ -10,8 +10,11 @@ type ChapterLike = {
 export type ProjectFlowStats = {
   totalShots: number
   pendingConfirmShots: number
+  preparedShots: number
   readyShots: number
   generatingShots: number
+  activeVideoTasks: number
+  videoCompletedShots: number
 }
 
 export type ChapterFlowStats = ProjectFlowStats & {
@@ -39,8 +42,11 @@ async function loadFlowStatsForChapter(chapter: ChapterLike): Promise<ChapterFlo
 
   const totalShots = shots.length
   const generatingShots = shots.filter((shot) => Boolean(runtimeMap[shot.id]?.has_active_tasks)).length
+  const activeVideoTasks = shots.filter((shot) => Boolean(runtimeMap[shot.id]?.has_active_video_tasks)).length
+  const preparedShots = shots.filter((shot) => shot.status === 'ready').length
   const readyShots = shots.filter((shot) => shot.status === 'ready' && !runtimeMap[shot.id]?.has_active_tasks).length
   const pendingConfirmShots = shots.filter((shot) => shot.status !== 'ready' && !runtimeMap[shot.id]?.has_active_tasks).length
+  const videoCompletedShots = shots.filter((shot) => Boolean(shot.generated_video_file_id)).length
 
   return {
     chapterId: chapter.id,
@@ -48,8 +54,11 @@ async function loadFlowStatsForChapter(chapter: ChapterLike): Promise<ChapterFlo
     chapterTitle: chapter.title,
     totalShots,
     pendingConfirmShots,
+    preparedShots,
     readyShots,
     generatingShots,
+    activeVideoTasks,
+    videoCompletedShots,
   }
 }
 
@@ -67,8 +76,11 @@ export async function loadProjectFlowStatsForChapters(
     return {
       totalShots: 0,
       pendingConfirmShots: 0,
+      preparedShots: 0,
       readyShots: 0,
       generatingShots: 0,
+      activeVideoTasks: 0,
+      videoCompletedShots: 0,
     }
   }
 
@@ -78,14 +90,20 @@ export async function loadProjectFlowStatsForChapters(
     (acc, item) => ({
       totalShots: acc.totalShots + item.totalShots,
       pendingConfirmShots: acc.pendingConfirmShots + item.pendingConfirmShots,
+      preparedShots: acc.preparedShots + item.preparedShots,
       readyShots: acc.readyShots + item.readyShots,
       generatingShots: acc.generatingShots + item.generatingShots,
+      activeVideoTasks: acc.activeVideoTasks + item.activeVideoTasks,
+      videoCompletedShots: acc.videoCompletedShots + item.videoCompletedShots,
     }),
     {
       totalShots: 0,
       pendingConfirmShots: 0,
+      preparedShots: 0,
       readyShots: 0,
       generatingShots: 0,
+      activeVideoTasks: 0,
+      videoCompletedShots: 0,
     },
   )
 }

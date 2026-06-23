@@ -6,7 +6,7 @@ import {
   PushpinOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons'
-import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { TaskUiItem } from './taskUiStore'
 import {
@@ -18,67 +18,15 @@ import {
 import { useResolvedTaskCenterTasks } from './taskCenterMeta'
 
 const TASK_CENTER_OPEN_STORAGE_KEY = 'jellyfish_task_center_open_v1'
-const TASK_CENTER_POSITION_STORAGE_KEY = 'jellyfish_task_center_position_v2'
 const TASK_CENTER_EDGE_PADDING = 24
+const TASK_CENTER_NAV_LEFT = 18
 const TASK_CENTER_BUTTON_WIDTH = 132
 const TASK_CENTER_BUTTON_HEIGHT = 40
+const TASK_CENTER_BOTTOM = 24
 const TASK_CENTER_PANEL_WIDTH = 360
 const TASK_CENTER_PANEL_HEIGHT = 420
 const TASK_CENTER_PANEL_GAP = 12
 const TASK_CENTER_PAGE_SIZE = 3
-
-function getDefaultButtonPosition() {
-  if (typeof window === 'undefined') {
-    return { x: TASK_CENTER_EDGE_PADDING, y: 520 }
-  }
-  return {
-    x: TASK_CENTER_EDGE_PADDING,
-    y: Math.max(
-      TASK_CENTER_EDGE_PADDING,
-      window.innerHeight - TASK_CENTER_BUTTON_HEIGHT - TASK_CENTER_EDGE_PADDING,
-    ),
-  }
-}
-
-function getButtonBounds() {
-  if (typeof window === 'undefined') {
-    return {
-      minX: TASK_CENTER_EDGE_PADDING,
-      maxX: TASK_CENTER_EDGE_PADDING,
-      minY: TASK_CENTER_EDGE_PADDING,
-      maxY: 520,
-    }
-  }
-  return {
-    minX: TASK_CENTER_EDGE_PADDING,
-    maxX: Math.max(
-      TASK_CENTER_EDGE_PADDING,
-      window.innerWidth - TASK_CENTER_BUTTON_WIDTH - TASK_CENTER_EDGE_PADDING,
-    ),
-    minY: TASK_CENTER_EDGE_PADDING,
-    maxY: Math.max(
-      TASK_CENTER_EDGE_PADDING,
-      window.innerHeight - TASK_CENTER_BUTTON_HEIGHT - TASK_CENTER_EDGE_PADDING,
-    ),
-  }
-}
-
-function clampButtonPosition(position: { x: number; y: number }) {
-  const bounds = getButtonBounds()
-  return {
-    x: Math.max(bounds.minX, Math.min(position.x, bounds.maxX)),
-    y: Math.max(bounds.minY, Math.min(position.y, bounds.maxY)),
-  }
-}
-
-function snapButtonPosition(position: { x: number; y: number }) {
-  const bounds = getButtonBounds()
-  const middleX = (bounds.minX + bounds.maxX) / 2
-  return {
-    x: position.x <= middleX ? bounds.minX : bounds.maxX,
-    y: Math.max(bounds.minY, Math.min(position.y, bounds.maxY)),
-  }
-}
 
 function formatElapsedMs(elapsedMs?: number | null): string | null {
   if (elapsedMs == null || elapsedMs < 0) return null
@@ -119,8 +67,6 @@ export function TaskCenter() {
   const [scopeFilter, setScopeFilter] = useState<'auto' | 'all' | 'current' | 'active' | 'settled'>('auto')
   const [taskKindFilter, setTaskKindFilter] = useState<string | undefined>(undefined)
   const [page, setPage] = useState(1)
-  const [buttonPosition, setButtonPosition] = useState(getDefaultButtonPosition)
-  const [dragging, setDragging] = useState(false)
   const open = useTaskUiStore((state) => state.open)
   const setOpen = useTaskUiStore((state) => state.setOpen)
   const toggleOpen = useTaskUiStore((state) => state.toggleOpen)
@@ -128,30 +74,13 @@ export function TaskCenter() {
   const optimisticItems = useTaskUiStore((state) => state.optimisticItems)
   const contextScopes = useTaskUiStore((state) => state.contextScopes)
   const cancelTask = useTaskUiStore((state) => state.cancelTask)
-  const dragStateRef = useRef<{
-    pointerId: number
-    offsetX: number
-    offsetY: number
-    moved: boolean
-  } | null>(null)
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const defaultPosition = getDefaultButtonPosition()
     try {
       setOpen(window.localStorage.getItem(TASK_CENTER_OPEN_STORAGE_KEY) === '1')
-      const rawPosition = window.localStorage.getItem(TASK_CENTER_POSITION_STORAGE_KEY)
-      if (!rawPosition) {
-        setButtonPosition(defaultPosition)
-        return
-      }
-      const parsed = JSON.parse(rawPosition) as { x?: number; y?: number }
-      const x = Number.isFinite(parsed?.x) ? Number(parsed.x) : defaultPosition.x
-      // y 始终从当前视口底部计算，避免跨会话或视口尺寸变化后位置向上漂移
-      setButtonPosition({ x, y: defaultPosition.y })
     } catch {
       setOpen(false)
-      setButtonPosition(defaultPosition)
     }
   }, [setOpen])
 
@@ -159,32 +88,6 @@ export function TaskCenter() {
     if (typeof window === 'undefined') return
     window.localStorage.setItem(TASK_CENTER_OPEN_STORAGE_KEY, open ? '1' : '0')
   }, [open])
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return
-    window.localStorage.setItem(TASK_CENTER_POSITION_STORAGE_KEY, JSON.stringify(buttonPosition))
-  }, [buttonPosition])
-
-  useEffect(() => {
-    const clampPosition = () => {
-      if (typeof window === 'undefined') return
-      // 视口大小变化时：x 保持左右吸附边缘，y 始终贴回底部
-      // 避免 DevTools 开关等导致 maxY 缩小后按钮被夹住在偏上位置，关闭后无法自动回底
-      setButtonPosition((prev) => {
-        const bounds = getButtonBounds()
-        const middleX = (bounds.minX + bounds.maxX) / 2
-        return {
-          x: prev.x <= middleX ? bounds.minX : bounds.maxX,
-          y: bounds.maxY,
-        }
-      })
-    }
-    clampPosition()
-    window.addEventListener('resize', clampPosition)
-    return () => {
-      window.removeEventListener('resize', clampPosition)
-    }
-  }, [])
 
   const tasks = useMemo(
     () =>
@@ -283,8 +186,13 @@ export function TaskCenter() {
     const viewportWidth = window.innerWidth
     const viewportHeight = window.innerHeight
     const panelWidth = Math.min(TASK_CENTER_PANEL_WIDTH, viewportWidth - TASK_CENTER_EDGE_PADDING * 2)
-    const preferTop = buttonPosition.y - TASK_CENTER_PANEL_GAP - TASK_CENTER_PANEL_HEIGHT
-    const preferBottom = buttonPosition.y + TASK_CENTER_BUTTON_HEIGHT + TASK_CENTER_PANEL_GAP
+    const estimatedPanelHeight = filteredTasks.length === 0 ? 240 : TASK_CENTER_PANEL_HEIGHT
+    const panelHeight = Math.min(estimatedPanelHeight, viewportHeight - TASK_CENTER_EDGE_PADDING * 2)
+    const preferredFloatingHeight = filteredTasks.length === 0 ? Math.min(panelHeight, 300) : panelHeight
+    const buttonX = TASK_CENTER_NAV_LEFT
+    const buttonY = viewportHeight - TASK_CENTER_BOTTOM - TASK_CENTER_BUTTON_HEIGHT
+    const preferTop = buttonY - TASK_CENTER_PANEL_GAP - preferredFloatingHeight
+    const preferBottom = buttonY + TASK_CENTER_BUTTON_HEIGHT + TASK_CENTER_PANEL_GAP
     const hasSpaceAbove = preferTop >= TASK_CENTER_EDGE_PADDING
     const rawTop = hasSpaceAbove
       ? preferTop
@@ -292,8 +200,8 @@ export function TaskCenter() {
           preferBottom,
           Math.max(TASK_CENTER_EDGE_PADDING, viewportHeight - TASK_CENTER_PANEL_HEIGHT - TASK_CENTER_EDGE_PADDING),
         )
-    const alignedLeft = buttonPosition.x
-    const alignedRight = buttonPosition.x + TASK_CENTER_BUTTON_WIDTH - panelWidth
+    const alignedLeft = buttonX
+    const alignedRight = buttonX + TASK_CENTER_BUTTON_WIDTH - panelWidth
     const rawLeft = alignedLeft + panelWidth <= viewportWidth - TASK_CENTER_EDGE_PADDING ? alignedLeft : alignedRight
     return {
       left: Math.max(
@@ -302,59 +210,24 @@ export function TaskCenter() {
       ),
       top: Math.max(
         TASK_CENTER_EDGE_PADDING,
-        Math.min(rawTop, viewportHeight - TASK_CENTER_PANEL_HEIGHT - TASK_CENTER_EDGE_PADDING),
+        Math.min(rawTop, viewportHeight - preferredFloatingHeight - TASK_CENTER_EDGE_PADDING),
       ),
       width: panelWidth,
     }
-  }, [buttonPosition.x, buttonPosition.y])
-
-  const handleButtonPointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    const rect = event.currentTarget.getBoundingClientRect()
-    dragStateRef.current = {
-      pointerId: event.pointerId,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
-      moved: false,
-    }
-    setDragging(true)
-    event.currentTarget.setPointerCapture(event.pointerId)
-  }
-
-  const handleButtonPointerMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    const drag = dragStateRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    const nextX = event.clientX - drag.offsetX
-    const nextY = event.clientY - drag.offsetY
-    drag.moved = true
-    setButtonPosition(clampButtonPosition({ x: nextX, y: nextY }))
-  }
-
-  const handleButtonPointerUp = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    const drag = dragStateRef.current
-    if (!drag || drag.pointerId !== event.pointerId) return
-    event.currentTarget.releasePointerCapture(event.pointerId)
-    setButtonPosition((prev) => snapButtonPosition(prev))
-    setDragging(false)
-  }
+  }, [filteredTasks.length])
 
   const handleButtonClick = () => {
-    const drag = dragStateRef.current
-    if (drag?.moved) {
-      dragStateRef.current = null
-      return
-    }
-    dragStateRef.current = null
     toggleOpen()
   }
 
   return (
     <div
-      className={`fixed z-[1200] pointer-events-none ${dragging ? '' : 'transition-[left,top] duration-200 ease-out'}`}
-      style={{ left: buttonPosition.x, top: buttonPosition.y }}
+      className="fixed z-[1200] pointer-events-none"
+      style={{ left: TASK_CENTER_NAV_LEFT, bottom: TASK_CENTER_BOTTOM }}
     >
       {open ? (
         <div
-          className={`fixed pointer-events-auto ${dragging ? '' : 'transition-[left,top] duration-200 ease-out'}`}
+          className="fixed pointer-events-auto transition-[left,top] duration-200 ease-out"
           style={{ left: panelStyle.left, top: panelStyle.top, width: panelStyle.width }}
         >
           <Card
@@ -518,11 +391,7 @@ export function TaskCenter() {
           shape="round"
           icon={<UnorderedListOutlined />}
           onClick={handleButtonClick}
-          onPointerDown={handleButtonPointerDown}
-          onPointerMove={handleButtonPointerMove}
-          onPointerUp={handleButtonPointerUp}
-          onPointerCancel={handleButtonPointerUp}
-          className="shadow-lg pointer-events-auto touch-none select-none"
+          className="shadow-lg pointer-events-auto select-none"
         >
           <span className="inline-flex items-center gap-1">
             <span>{open ? '收起任务' : '任务中心'}</span>

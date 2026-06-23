@@ -11,6 +11,8 @@ The task center is the durable task surface. It merges recent server tasks with 
 
 Closing or collapsing the task center only changes the panel visibility. It does not cancel tasks and does not remove task records.
 
+The task-center button is fixed near the bottom of the left navigation rail and is not draggable. Only the open or collapsed state is persisted locally.
+
 ## Top-Right Notifications
 
 Top-right notifications are transient progress hints for the current page workflow.

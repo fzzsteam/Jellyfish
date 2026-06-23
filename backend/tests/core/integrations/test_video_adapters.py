@@ -209,6 +209,65 @@ async def test_vidu_video_reference2video_uses_subject_payload(monkeypatch: pyte
 
 
 @pytest.mark.asyncio
+async def test_vidu_video_reference2video_uses_asset_reference_images(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def no_sleep(_seconds: float) -> None:
+        return None
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST":
+            body = json.loads(request.content.decode())
+            captured["body"] = body
+            assert request.url.path.endswith("/ent/v2/reference2video")
+            assert body["subjects"] == [
+                {
+                    "name": "subject_1",
+                    "images": [
+                        "data:image/png;base64,character",
+                        "data:image/png;base64,scene",
+                        "https://cdn.example.com/prop.png",
+                    ],
+                    "voice_id": "",
+                }
+            ]
+            return httpx.Response(200, json={"task_id": "vidu-task-assets", "state": "created"})
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "task_id": "vidu-task-assets",
+                    "state": "success",
+                    "creations": [{"url": "https://cdn.example.com/out.mp4"}],
+                },
+            )
+        return httpx.Response(500)
+
+    monkeypatch.setattr("asyncio.sleep", no_sleep)
+    _patch_httpx_client(monkeypatch, httpx.MockTransport(handler))
+    cfg = ProviderConfig(provider="vidu", api_key="vidu-key", base_url="https://api.vidu.cn")
+    inp = VideoGenerationInput.model_validate(
+        {
+            "model": "viduq3",
+            "prompt": "@subject_1 runs through the courtyard.",
+            "ratio": "3:4",
+            "seconds": 8,
+            "reference_image_base64s": [
+                "data:image/png;base64,character",
+                "scene",
+                "https://cdn.example.com/prop.png",
+            ],
+        }
+    )
+
+    result = await ViduVideoApiAdapter().generate(cfg=cfg, inp=inp, timeout_s=30.0)
+
+    assert captured["body"]
+    assert result.provider == "vidu"
+    assert result.provider_task_id == "vidu-task-assets"
+
+
+@pytest.mark.asyncio
 async def test_vidu_video_reference2video_mix_uses_images_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 

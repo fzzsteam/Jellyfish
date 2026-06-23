@@ -262,7 +262,7 @@ front/src/pages/aiStudio/hooks/useGenerationDraft.ts
 - `openai`、`volcengine`、`aliyun_bailian`、`vidu` 均已注册 `video_generation` 任务适配器。
 - 阿里百炼 `happyhorse-1.0-r2v` 在单镜头视频生成时会自动收集当前分镜已关联的角色、场景、道具图片，作为多张 `reference_image` 传入；服装图片不再作为 r2v 视频参考图传入。
 - `vidu` 视频生成走 `app/core/integrations/vidu/video.py`，使用 Vidu 官方 `POST /ent/v2/reference2video` 创建任务，并轮询 `GET /ent/v2/tasks/{task_id}/creations` 获取结果。
-- Vidu 视频请求使用 `Authorization: Token {api_key}`，默认模型为 `viduq3`，参考帧会映射为默认主题 `subject_1` 的 `subjects[0].images`。
+- Vidu 视频请求使用 `Authorization: Token {api_key}`，默认模型为 `viduq3`，参考帧与 r2v 资产参考图会映射为默认主题 `subject_1` 的 `subjects[0].images`。
 - Vidu 非主体模型 `viduq3-mix` 使用同一接口，但请求体改为顶层 `images` 列表，不传 `subjects` 与 `audio`，默认分辨率映射为 `720p`。
 - Vidu 文生视频模型 `viduq3-pro` 在无参考帧时走 `POST /ent/v2/text2video`，请求体包含 `style=general`、`movement_amplitude=auto`、`off_peak=false`，默认分辨率映射为 `540p`。
 - Vidu 图生视频模型 `viduq3-pro` 在存在参考帧时走 `POST /ent/v2/img2video`，只使用第一张参考图作为 `images[0]`，请求体包含 `audio=true`、`voice_id=professional_host`、`movement_amplitude=auto`、`off_peak=false`，分辨率为 `1080p`。
