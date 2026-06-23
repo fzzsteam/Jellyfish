@@ -7,23 +7,50 @@ const FALLBACK_OPTIONS: ProjectStyleFieldOptions = {
   visualStyles: [
     { value: '现实', label: '现实' },
     { value: '动漫', label: '动漫' },
+    { value: '国风', label: '国风' },
+    { value: '2D', label: '2D' },
+    { value: '3D', label: '3D' },
   ],
   stylesByVisual: {
     现实: [
       { value: '真人都市', label: '真人都市' },
       { value: '真人科幻', label: '真人科幻' },
       { value: '真人古装', label: '真人古装' },
+      { value: '真人悬疑', label: '真人悬疑' },
+      { value: '真人甜宠', label: '真人甜宠' },
+      { value: '真人热血', label: '真人热血' },
     ],
     动漫: [
       { value: '动漫科幻', label: '动漫科幻' },
       { value: '动漫3D', label: '动漫3D' },
+      { value: '动漫仙侠', label: '动漫仙侠' },
+      { value: '动漫赛博', label: '动漫赛博' },
+      { value: '动漫治愈', label: '动漫治愈' },
+    ],
+    '2D': [
+      { value: '2D日漫', label: '2D日漫' },
+      { value: '2D国潮', label: '2D国潮' },
+      { value: '2D扁平', label: '2D扁平' },
+      { value: '2D都市恋爱', label: '2D都市恋爱' },
+    ],
+    国风: [
       { value: '国漫', label: '国漫' },
       { value: '水墨画', label: '水墨画' },
+      { value: '国风玄幻', label: '国风玄幻' },
+      { value: '国风古韵', label: '国风古韵' },
+    ],
+    '3D': [
+      { value: '动漫3D', label: '动漫3D' },
+      { value: '3D少儿', label: '3D少儿' },
+      { value: '3D奇幻', label: '3D奇幻' },
     ],
   },
   defaultStyleByVisual: {
     现实: '真人都市',
-    动漫: '动漫3D',
+    动漫: '动漫科幻',
+    '2D': '2D日漫',
+    国风: '国漫',
+    '3D': '动漫3D',
   },
 }
 

@@ -195,7 +195,7 @@ export function ChapterShotEditPage() {
 
   const [chapterTitle, setChapterTitle] = useState('')
   const [chapterIndex, setChapterIndex] = useState<number | null>(null)
-  const [projectVisualStyle, setProjectVisualStyle] = useState<'现实' | '动漫'>('现实')
+  const [projectVisualStyle, setProjectVisualStyle] = useState<string>('现实')
   const [projectStyle, setProjectStyle] = useState<string>('真人都市')
   const [shots, setShots] = useState<ShotRead[]>([])
   const [shot, setShot] = useState<ShotRead | null>(null)
@@ -370,7 +370,7 @@ export function ChapterShotEditPage() {
       ])
       const nextVisualStyle = projectRes.data?.visual_style
       const nextStyle = projectRes.data?.style
-      if (nextVisualStyle === '现实' || nextVisualStyle === '动漫') {
+      if (typeof nextVisualStyle === 'string' && nextVisualStyle.trim()) {
         setProjectVisualStyle(nextVisualStyle)
       }
       if (typeof nextStyle === 'string' && nextStyle.trim()) {

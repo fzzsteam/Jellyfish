@@ -505,6 +505,7 @@ class ShotVideoPromptPackRead(BaseModel):
     atmosphere: str = Field("", description="氛围描述")
     visual_style: str = Field("", description="项目视觉风格")
     style: str = Field("", description="项目题材/风格")
+    style_profile_guidance: str = Field("", description="项目风格档案生成指导词")
     negative_prompt: str = Field("", description="默认负面提示词")
 
 

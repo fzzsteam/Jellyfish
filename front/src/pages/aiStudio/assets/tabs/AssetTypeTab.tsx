@@ -66,7 +66,7 @@ export function AssetTypeTab({
   const [createSeed, setCreateSeed] = useState<{
     name: string
     desc: string
-    visualStyle?: '现实' | '动漫'
+    visualStyle?: string
     style?: string
   } | null>(null)
   const [fromShotCreateContext, setFromShotCreateContext] = useState<{
@@ -149,7 +149,7 @@ export function AssetTypeTab({
     const projectId = searchParams.get('projectId')?.trim() ?? ''
     const chapterId = searchParams.get('chapterId')?.trim() ?? ''
     const shotId = searchParams.get('shotId')?.trim() ?? ''
-    const visualStyle = (searchParams.get('visualStyle')?.trim() || '') as '现实' | '动漫' | ''
+    const visualStyle = searchParams.get('visualStyle')?.trim() || ''
     const style = searchParams.get('style')?.trim() ?? ''
     if (create === '1' && tab === tabKey) {
       setEditing(null)
@@ -242,7 +242,7 @@ export function AssetTypeTab({
       const result = await bulkUploadAssetImages({
         entityType: tabKey,
         files,
-        visualStyle: defaultVisualStyle as '现实' | '动漫',
+        visualStyle: defaultVisualStyle,
         style: getDefaultStyle(defaultVisualStyle),
       })
       if (result.createdCount > 0) {
