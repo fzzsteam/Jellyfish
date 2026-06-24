@@ -55,4 +55,34 @@ pgrep -af 'uvicorn app.main|celery -A|celery worker' | rg -v 'pgrep|/bin/(zsh|ba
 
 > 本机 `docker compose -f ...` 子命令不可用，统一用 `docker ps` / `docker logs`。
 
+## Step 1 · 症状分流（用户贴错误/描述问题 → 归类 → 决定先取证哪个）
+
+| 症状 | 先取证 |
+|---|---|
+| 报错 / 异常 / 5xx / 堆栈 | 日志（按 Step 0 方式） |
+| 数据对不上（积分 / 状态 / 数量） | 数据库只读查表 |
+| 任务卡住 / 一直 pending | `generation_tasks` 表 + Celery 队列 + Redis 锁 |
+| 连不上 / 配置 / 环境 | `backend/.env` + compose + `app/config.py` |
+| 行为异常无报错 | 读对应 service/chain 源码理解逻辑 |
+| 前端异常 | chrome-devtools MCP 看 console/network |
+
+## Step 2 · 取证命令（复用 Step 0 上下文）
+
+- **数据库（只读，端口取自 0.1，密码用 MYSQL_PWD 不进进程列表）**：
+
+```bash
+PASS=$(python3 -c "import re,pathlib;u=next(l for l in pathlib.Path('backend/.env').read_text().splitlines() if l.startswith('DATABASE_URL='));print(re.match(r'[^:]+://[^:]+:([^@]+)@',u).group(1))")
+MYSQL_PWD="$PASS" mysql -h 127.0.0.1 -P 3307 -u jellyfish jellyfish -e "SELECT ... LIMIT 50;"
+```
+
+- **日志**：
+  - 方式 B：`docker logs --tail 200 <backend容器名>` 或 celery-worker 容器，`| rg -i '<关键词>'`
+  - 方式 A：宿主机进程日志（需用户贴报错，或复现时重定向 `uv run uvicorn ... 2>&1 | tee /tmp/jf-api.log` 后再读）
+
+- **Redis**：`redis-cli -h localhost -p 6379 KEYS 'points:user:*'`、`GET points:user:<uid>`
+
+- **Celery**：
+  - 方式 A：`cd backend && uv run celery -A app.core.celery_app:celery_app inspect active`
+  - 方式 B：`docker exec <celery-worker容器> celery -A app.core.celery_app:celery_app inspect active`
+
 <!-- BUILD ANCHOR -->
