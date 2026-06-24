@@ -114,7 +114,21 @@ WHERE status IN ('pending','running','streaming')
 ORDER BY updated_at DESC LIMIT 20;
 ```
 
-- **日志关键词**：`[BailianVideo]` / `[BailianImage]`（logger `bailian.images` / `bailian.video`）、openai、volcengine、vidu；常见信号 `Task submitted` / `Failed to get task_id` / `Unknown status` / `429`。
-- **编排逻辑**：`app/core/task_manager/{stores,strategies,manager}.py`、`app/services/film/*`、`app/core/integrations/*`、`http_logging.py`（供应商请求/响应脱敏日志）。
+- **日志关键词**：`[BailianVideo]` / `[BailianImage]`（logger `app.core.integrations.bailian.video` / `app.core.integrations.bailian.images`）、openai、volcengine、vidu；常见信号 `Task submitted` / `Failed to get task_id` / `Unknown status` / `429`。
+- **编排逻辑**：`app/core/task_manager/{stores,strategies,manager}.py`、`app/services/film/*`、`app/core/integrations/*`、`app/core/integrations/http_logging.py`（供应商请求/响应脱敏日志）。
 
-<!-- BUILD ANCHOR -->
+## Step 4 · 根因定位 → 结论 + 修复建议
+
+按 `systematic-debugging`：取证 → 形成假设 → 验证（必要时再取证下钻）→ 给出**根因 + 修复建议**，或明确「证据不足，需继续查 X」。禁止在取证前下结论；多假设时优先验证可证伪的那个。
+
+## 常见问题速查
+
+| 现象 | 根因方向 |
+|---|---|
+| 任务一直 pending / 不推进 | celery 未启动（`pgrep` 无 celery）/ 队列堆积 / provider 卡住或 429 |
+| 积分冻结不结算 / 余额对不上 | 429 零重试致生成失败未结算 / 对账 beat 未跑 / `point_transactions` 漏记 |
+| 连不上数据库 | 端口非 3306（看 `.env` 的 DATABASE_URL）/ scheme 错 / infra 容器没起 |
+| 方式 A 抓不到日志 | 进程在宿主机，需复现重定向 `tee` 或让用户贴报错 |
+| `docker compose -f ...` 报错 | 本机无 compose 子命令，改用 `docker ps` / `docker logs` |
+| 前端报错但后端正常 | 用 chrome-devtools MCP 查 console / network 请求与响应 |
+| mysql 连接失败 `-h localhost` | localhost 走 Unix socket，改用 `-h 127.0.0.1` 强制 TCP |
