@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type React from 'react'
-import { Card, message } from 'antd'
+import { Card, Input, Select, Space, message } from 'antd'
 import { PointsService } from '../../services/generated'
 import type {
   OperationGroupRead,
@@ -21,6 +21,9 @@ const PointsPage: React.FC = () => {
   const [groupedData, setGroupedData] = useState<OperationGroupRead[]>([])
   const [groupedTotal, setGroupedTotal] = useState(0)
   const [groupedLoading, setGroupedLoading] = useState(false)
+  const [searchIdType, setSearchIdType] = useState<'cascade_group_id' | 'billing_id' | 'transaction_id'>('cascade_group_id')
+  const [searchIdValue, setSearchIdValue] = useState<string | undefined>(undefined)
+  const [highlightTransactionId, setHighlightTransactionId] = useState<string | undefined>(undefined)
 
   /** 加载积分摘要。 */
   const loadSummary = async () => {
@@ -35,18 +38,31 @@ const PointsPage: React.FC = () => {
     }
   }
 
-  /** 加载分组流水（按操作组聚合），按页拉取。 */
-  const loadGrouped = async (p: number, ps: number) => {
+  /**
+   * 加载分组流水（按操作组聚合），按页拉取。
+   * 支持三种 ID 过滤：操作ID(cascade_group_id)、账单ID(billing_id)、流水ID(transaction_id)。
+   * 当按 transaction_id 搜索时，后端会返回 matched_transaction_id 用于高亮命中行。
+   */
+  const loadGrouped = async (
+    p: number,
+    ps: number,
+    idType?: 'cascade_group_id' | 'billing_id' | 'transaction_id',
+    idValue?: string,
+  ) => {
     setGroupedLoading(true)
     try {
       const res = await PointsService.listGroupedTransactionsApiV1PointsTransactionsGroupedGet({
         page: p,
         pageSize: ps,
+        cascadeGroupId: idType === 'cascade_group_id' ? idValue : undefined,
+        billingId: idType === 'billing_id' ? idValue : undefined,
+        transactionId: idType === 'transaction_id' ? idValue : undefined,
       })
       setGroupedData(res.data?.items ?? [])
       setGroupedTotal(res.data?.pagination?.total ?? 0)
+      setHighlightTransactionId(res.data?.matched_transaction_id ?? undefined)
     } catch {
-      message.error('分组流水加载失败')
+      message.error('流水加载失败')
     } finally {
       setGroupedLoading(false)
     }
@@ -64,17 +80,55 @@ const PointsPage: React.FC = () => {
         <PointsAccountCard summary={summary} loading={loading} />
       </Card>
 
-      <Card title="积分流水">
+      <Card
+        title="积分流水"
+        extra={
+          <Space>
+            <Select<'cascade_group_id' | 'billing_id' | 'transaction_id'>
+              size="small"
+              value={searchIdType}
+              style={{ width: 88 }}
+              options={[
+                { label: '操作ID', value: 'cascade_group_id' },
+                { label: '账单ID', value: 'billing_id' },
+                { label: '流水ID', value: 'transaction_id' },
+              ]}
+              onChange={(v) => {
+                setSearchIdType(v)
+                setSearchIdValue(undefined)
+                setHighlightTransactionId(undefined)
+              }}
+            />
+            <Input.Search
+              allowClear
+              placeholder="输入搜索值"
+              size="small"
+              style={{ width: 200 }}
+              value={searchIdValue}
+              onChange={(e) => setSearchIdValue(e.target.value || undefined)}
+              onSearch={(v) => {
+                const val = v.trim() || undefined
+                setSearchIdValue(val)
+                setPage(1)
+                void loadGrouped(1, pageSize, searchIdType, val)
+                if (!val) setHighlightTransactionId(undefined)
+              }}
+            />
+          </Space>
+        }
+      >
         <PointTransactionTable
           dataSource={groupedData}
           loading={groupedLoading}
           total={groupedTotal}
           page={page}
           pageSize={pageSize}
+          highlightTransactionId={highlightTransactionId}
+          highlightBillingId={searchIdType === 'billing_id' ? searchIdValue : undefined}
           onChange={(p, ps) => {
             setPage(p)
             setPageSize(ps)
-            void loadGrouped(p, ps)
+            void loadGrouped(p, ps, searchIdType, searchIdValue)
           }}
         />
       </Card>
