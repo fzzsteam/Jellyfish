@@ -18,7 +18,7 @@ import { PointsAccountCard } from '../../components/points/PointsAccountCard'
 import { PointTransactionTable } from '../../components/points/PointTransactionTable'
 import { AdminService } from '../../services/generated'
 import type {
-  PointTransactionRead,
+  OperationGroupRead,
   PointsSummaryRead,
   UserAdminRead,
   UserProjectBrief,
@@ -36,11 +36,11 @@ const AdminUserDetailPage: React.FC = () => {
   const [user, setUser] = useState<UserAdminRead | null>(null)
   const [projects, setProjects] = useState<UserProjectBrief[]>([])
   const [points, setPoints] = useState<PointsSummaryRead | null>(null)
-  const [transactions, setTransactions] = useState<PointTransactionRead[]>([])
-  const [txLoading, setTxLoading] = useState(false)
-  const [txTotal, setTxTotal] = useState(0)
-  const [txPage, setTxPage] = useState(1)
-  const [txPageSize, setTxPageSize] = useState(10)
+  const [groupedData, setGroupedData] = useState<OperationGroupRead[]>([])
+  const [groupedTotal, setGroupedTotal] = useState(0)
+  const [groupedLoading, setGroupedLoading] = useState(false)
+  const [groupedPage, setGroupedPage] = useState(1)
+  const [groupedPageSize, setGroupedPageSize] = useState(10)
   const [recharging, setRecharging] = useState(false)
   const [rechargeOpen, setRechargeOpen] = useState(false)
   const [resetPwdOpen, setResetPwdOpen] = useState(false)
@@ -64,28 +64,28 @@ const AdminUserDetailPage: React.FC = () => {
     }
   }
 
-  /** 单独加载积分流水，按页拉取。 */
-  const loadTransactions = async (page: number, pageSize: number) => {
-    setTxLoading(true)
+  /** 加载按操作分组流水，按页拉取。 */
+  const loadGrouped = async (page: number, pageSize: number) => {
+    setGroupedLoading(true)
     try {
-      const res = await AdminService.listUserPointsTransactionsApiV1AdminUsersUserIdPointsTransactionsGet({
+      const res = await AdminService.listUserPointsTransactionsGroupedApiV1AdminUsersUserIdPointsTransactionsGroupedGet({
         userId: id,
         page,
         pageSize,
       })
-      setTransactions(res.data?.items ?? [])
-      setTxTotal(res.data?.pagination?.total ?? 0)
+      setGroupedData(res.data?.items ?? [])
+      setGroupedTotal(res.data?.pagination?.total ?? 0)
     } catch {
-      message.error('流水加载失败')
+      message.error('分组流水加载失败')
     } finally {
-      setTxLoading(false)
+      setGroupedLoading(false)
     }
   }
 
   useEffect(() => {
     if (id) {
       void load()
-      void loadTransactions(1, txPageSize)
+      void loadGrouped(1, groupedPageSize)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
@@ -119,11 +119,11 @@ const AdminUserDetailPage: React.FC = () => {
       message.success(amount > 0 ? '充值成功' : '扣减成功')
       setRechargeOpen(false)
       rechargeForm.resetFields()
-      // 充值后刷新摘要与流水。
+      // 充值后刷新摘要与分组流水。
       const pts = await AdminService.getUserPointsApiV1AdminUsersUserIdPointsGet({ userId: id })
       setPoints(pts.data ?? null)
-      await loadTransactions(1, txPageSize)
-      setTxPage(1)
+      setGroupedPage(1)
+      await loadGrouped(1, groupedPageSize)
     } catch {
       message.error('充值失败')
     } finally {
@@ -166,18 +166,20 @@ const AdminUserDetailPage: React.FC = () => {
               key: 'transactions',
               label: '积分流水',
               children: (
-                <PointTransactionTable
-                  dataSource={transactions}
-                  loading={txLoading}
-                  total={txTotal}
-                  page={txPage}
-                  pageSize={txPageSize}
-                  onChange={(page, pageSize) => {
-                    setTxPage(page)
-                    setTxPageSize(pageSize)
-                    void loadTransactions(page, pageSize)
-                  }}
-                />
+                <div>
+                  <PointTransactionTable
+                    dataSource={groupedData}
+                    loading={groupedLoading}
+                    total={groupedTotal}
+                    page={groupedPage}
+                    pageSize={groupedPageSize}
+                    onChange={(page, pageSize) => {
+                      setGroupedPage(page)
+                      setGroupedPageSize(pageSize)
+                      void loadGrouped(page, pageSize)
+                    }}
+                  />
+                </div>
               ),
             },
             {
