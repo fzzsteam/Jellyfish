@@ -13,7 +13,7 @@ from sqlalchemy import JSON, BigInteger, ForeignKey, Index, Integer, String, Tex
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
-from app.models.base import TimestampMixin, UserOwnedMixin
+from app.models.base import TimestampMixin
 
 
 class AgentTypeKey(str, Enum):
@@ -51,8 +51,8 @@ class LogLevel(str, Enum):
     error = "error"
 
 
-class Provider(Base, UserOwnedMixin, TimestampMixin):
-    """模型供应商配置。
+class Provider(Base, TimestampMixin):
+    """模型供应商配置（全局共享，仅管理员可写）。
 
     安全提示：
     - `api_key` / `api_secret` 属敏感信息；如后续接入审计/日志，避免明文输出。
@@ -98,8 +98,8 @@ class Provider(Base, UserOwnedMixin, TimestampMixin):
     )
 
 
-class Model(Base, UserOwnedMixin, TimestampMixin):
-    """具体模型实例（绑定供应商、类别与参数）。"""
+class Model(Base, TimestampMixin):
+    """具体模型实例（全局共享，仅管理员可写；绑定供应商、类别与参数）。"""
 
     __tablename__ = "models"
 
