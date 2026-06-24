@@ -24,6 +24,10 @@ const PointsPage: React.FC = () => {
   const [simpleTxns, setSimpleTxns] = useState<PointTransactionRead[]>([])
   const [groupedTotal, setGroupedTotal] = useState(0)
   const [groupedLoading, setGroupedLoading] = useState(false)
+  // 充值 Tab 独立分页状态,与操作记录分页互不干扰
+  const [simplePage, setSimplePage] = useState(1)
+  const [simplePageSize, setSimplePageSize] = useState(10)
+  const [simpleTotal, setSimpleTotal] = useState(0)
   const [searchIdType, setSearchIdType] = useState<'cascade_group_id' | 'billing_id' | 'transaction_id'>('cascade_group_id')
   const [searchIdValue, setSearchIdValue] = useState<string | undefined>(undefined)
   const [highlightTransactionId, setHighlightTransactionId] = useState<string | undefined>(undefined)
@@ -51,6 +55,8 @@ const PointsPage: React.FC = () => {
     ps: number,
     idType?: 'cascade_group_id' | 'billing_id' | 'transaction_id',
     idValue?: string,
+    simpleP: number = 1,
+    simplePs: number = 10,
   ) => {
     setGroupedLoading(true)
     try {
@@ -60,11 +66,14 @@ const PointsPage: React.FC = () => {
         cascadeGroupId: idType === 'cascade_group_id' ? idValue : undefined,
         billingId: idType === 'billing_id' ? idValue : undefined,
         transactionId: idType === 'transaction_id' ? idValue : undefined,
+        simplePage: simpleP,
+        simplePageSize: simplePs,
       })
       setGroupedData(res.data?.items ?? [])
-      setSimpleTxns(res.data?.simple_txns ?? [])
       setGroupedTotal(res.data?.pagination?.total ?? 0)
       setHighlightTransactionId(res.data?.matched_transaction_id ?? undefined)
+      setSimpleTxns(res.data?.simple_txns ?? [])
+      setSimpleTotal(res.data?.simple_pagination?.total ?? 0)
     } catch {
       message.error('流水加载失败')
     } finally {
@@ -121,7 +130,7 @@ const PointsPage: React.FC = () => {
                           const val = v.trim() || undefined
                           setSearchIdValue(val)
                           setPage(1)
-                          void loadGrouped(1, pageSize, searchIdType, val)
+                          void loadGrouped(1, pageSize, searchIdType, val, simplePage, simplePageSize)
                           if (!val) setHighlightTransactionId(undefined)
                         }}
                       />
@@ -138,7 +147,7 @@ const PointsPage: React.FC = () => {
                     onChange={(p, ps) => {
                       setPage(p)
                       setPageSize(ps)
-                      void loadGrouped(p, ps, searchIdType, searchIdValue)
+                      void loadGrouped(p, ps, searchIdType, searchIdValue, simplePage, simplePageSize)
                     }}
                   />
                 </div>
@@ -146,8 +155,20 @@ const PointsPage: React.FC = () => {
             },
             {
               key: 'simple',
-              label: '充值/调整',
-              children: <SimplePointTransactionTable dataSource={simpleTxns} />,
+              label: '充值',
+              children: (
+                <SimplePointTransactionTable
+                  dataSource={simpleTxns}
+                  page={simplePage}
+                  pageSize={simplePageSize}
+                  total={simpleTotal}
+                  onChange={(p, ps) => {
+                    setSimplePage(p)
+                    setSimplePageSize(ps)
+                    void loadGrouped(page, pageSize, searchIdType, searchIdValue, p, ps)
+                  }}
+                />
+              ),
             },
           ]}
         />
