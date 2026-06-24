@@ -596,3 +596,122 @@ def test_points_domain_error_handler_preserves_error_code(points_client: TestCli
     assert body["data"]["error_code"] == "POINTS_QUOTE_CHANGED"
     assert body["data"]["required_points"] == 7
     assert body["data"]["quote_token"] == "tok"
+
+
+# ---------------------------------------------------------------------------
+# GET /points/transactions/grouped 搜索
+# ---------------------------------------------------------------------------
+
+import uuid as _uuid
+from datetime import datetime, timezone as _tz
+from app.models.points import PointTransaction as _PTx, PointTransactionType as _PTxType
+
+
+def _seed_cascade_group(sm, user_id: str) -> tuple[str, str, str, str]:
+    """向 DB 插入一次完整的 cascade 生命周期（freeze → consume），返回
+    (cascade_group_id, billing_id, tx_freeze_id, tx_consume_id)。
+    """
+    import asyncio as _asyncio
+    cgid = "cgid-search-test"
+    bid  = "bid-search-test"
+    fid  = "txid-freeze-1"
+    cid  = "txid-consume-1"
+
+    async def _insert():
+        async with sm() as s:
+            now = datetime.now(_tz.utc)
+            s.add(_PTx(id=fid, user_id=user_id, type=_PTxType.freeze,
+                        amount=10, balance_after=100, frozen_after=10,
+                        source="billing", billing_id=bid, cascade_group_id=cgid, created_at=now))
+            s.add(_PTx(id=cid, user_id=user_id, type=_PTxType.consume,
+                        amount=10, balance_after=90, frozen_after=0,
+                        source="billing", billing_id=bid, cascade_group_id=cgid, created_at=now))
+            await s.commit()
+
+    _asyncio.run(_insert())
+    return cgid, bid, fid, cid
+
+
+@pytest.fixture
+def grouped_search_client(monkeypatch):
+    """带 cascade 分组数据的 points TestClient。"""
+    from fakeredis.aioredis import FakeRedis
+    fake = FakeRedis()
+    monkeypatch.setattr(ledger_module, "_redis_factory", lambda: fake)
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    sm = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async def _setup():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        async with sm() as s:
+            s.add(User(id="user-1", username="bob", hashed_password="x",
+                       is_admin=False, is_active=True))
+            s.add(UserPoints(user_id="user-1", balance=90, frozen=0))
+            await s.commit()
+
+    asyncio.run(_setup())
+    cgid, bid, fid, cid = _seed_cascade_group(sm, "user-1")
+
+    async def _override_db():
+        async with sm() as s:
+            try:
+                yield s
+                await s.commit()
+            except Exception:
+                await s.rollback()
+                raise
+
+    async def _normal_user():
+        return User(id="user-1", username="bob", hashed_password="x",
+                    is_admin=False, is_active=True)
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[get_current_user] = _normal_user
+    try:
+        yield TestClient(app), cgid, bid, fid
+    finally:
+        app.dependency_overrides.clear()
+        asyncio.run(engine.dispose())
+
+
+def test_grouped_search_by_cascade_group_id(grouped_search_client):
+    client, cgid, bid, fid = grouped_search_client
+    resp = client.get("/api/v1/points/transactions/grouped",
+                      params={"cascade_group_id": cgid})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["pagination"]["total"] == 1
+    assert data["items"][0]["cascade_group_id"] == cgid
+    assert data["matched_transaction_id"] is None
+
+
+def test_grouped_search_by_billing_id(grouped_search_client):
+    client, cgid, bid, fid = grouped_search_client
+    resp = client.get("/api/v1/points/transactions/grouped",
+                      params={"billing_id": bid})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["items"][0]["cascade_group_id"] == cgid
+    assert data["matched_transaction_id"] is None
+
+
+def test_grouped_search_by_transaction_id(grouped_search_client):
+    client, cgid, bid, fid = grouped_search_client
+    resp = client.get("/api/v1/points/transactions/grouped",
+                      params={"transaction_id": fid})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["items"][0]["cascade_group_id"] == cgid
+    assert data["matched_transaction_id"] == fid
+
+
+def test_grouped_search_unknown_id_returns_empty(grouped_search_client):
+    client, _, _, _ = grouped_search_client
+    resp = client.get("/api/v1/points/transactions/grouped",
+                      params={"transaction_id": "nonexistent-id"})
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert data["pagination"]["total"] == 0
+    assert data["items"] == []

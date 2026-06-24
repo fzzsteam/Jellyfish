@@ -112,17 +112,29 @@ async def list_my_transactions(
 async def list_grouped_transactions(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    cascade_group_id: str | None = Query(None, description="按操作ID精确搜索"),
+    billing_id: str | None = Query(None, description="按账单ID搜索，返回所属操作组"),
+    transaction_id: str | None = Query(None, description="按流水ID搜索，返回所属操作组"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[GroupedTransactionResponse]:
-    """按 cascade_group_id 聚合展示流水。同一操作级联的多个 billing_id 归为一组。"""
+    """按 cascade_group_id 聚合展示流水。同一操作级联的多个 billing_id 归为一组。
+
+    支持三种 ID 搜索：
+    - cascade_group_id：直接按操作组 ID 过滤
+    - billing_id：先解析到所属操作组，再返回该组数据
+    - transaction_id：先解析到所属操作组，再返回该组数据，并在 matched_transaction_id 中标记命中流水 ID
+    """
     from app.services.points.billing import list_grouped_transactions as _list_grouped
 
-    groups, total, _ = await _list_grouped(
+    groups, total, matched_transaction_id = await _list_grouped(
         db,
         user_id=current_user.id,
         page=page,
         page_size=page_size,
+        cascade_group_id=cascade_group_id,
+        billing_id=billing_id,
+        transaction_id=transaction_id,
     )
 
     # 解析 billing 层的 created_by → username
@@ -152,6 +164,7 @@ async def list_grouped_transactions(
         GroupedTransactionResponse(
             items=[OperationGroupRead(**g) for g in groups],
             pagination=pagination,
+            matched_transaction_id=matched_transaction_id,
         )
     )
 

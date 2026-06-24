@@ -687,16 +687,50 @@ async def list_grouped_transactions(
       - 仅 freeze → "frozen"
     - total_net = 组内所有 consume 金额之和（实际从余额扣出的净额）
     """
+    # ── 搜索参数解析：将 billing_id / transaction_id 解析为 cascade_group_id ──────
+    matched_transaction_id: str | None = None
+    resolved_cascade_group_id: str | None = cascade_group_id
+
+    if transaction_id is not None:
+        row = (await db.execute(
+            select(PointTransaction.cascade_group_id, PointTransaction.id)
+            .where(
+                PointTransaction.id == transaction_id,
+                PointTransaction.user_id == user_id,
+            )
+            .limit(1)
+        )).first()
+        if row is None or row[0] is None:
+            return [], 0, None
+        resolved_cascade_group_id = row[0]
+        matched_transaction_id = row[1]
+
+    elif billing_id is not None:
+        resolved_cascade_group_id = await db.scalar(
+            select(PointTransaction.cascade_group_id)
+            .where(
+                PointTransaction.billing_id == billing_id,
+                PointTransaction.user_id == user_id,
+            )
+            .limit(1)
+        )
+        if resolved_cascade_group_id is None:
+            return [], 0, None
+
     # 1) 查询当前页的 cascade_group_id 列表（去重、按最早时间倒序）
+    base_where = [
+        PointTransaction.user_id == user_id,
+        PointTransaction.cascade_group_id.isnot(None),
+    ]
+    if resolved_cascade_group_id is not None:
+        base_where.append(PointTransaction.cascade_group_id == resolved_cascade_group_id)
+
     group_subq = (
         select(
             PointTransaction.cascade_group_id,
             func.min(PointTransaction.created_at).label("group_created_at"),
         )
-        .where(
-            PointTransaction.user_id == user_id,
-            PointTransaction.cascade_group_id.isnot(None),
-        )
+        .where(*base_where)
         .group_by(PointTransaction.cascade_group_id)
         .order_by(text("group_created_at desc"))
         .offset((page - 1) * page_size)
@@ -706,10 +740,7 @@ async def list_grouped_transactions(
 
     total = await db.scalar(
         select(func.count(func.distinct(PointTransaction.cascade_group_id)))
-        .where(
-            PointTransaction.user_id == user_id,
-            PointTransaction.cascade_group_id.isnot(None),
-        )
+        .where(*base_where)
     ) or 0
 
     group_ids = [r[0] for r in (await db.execute(select(group_subq.c.cascade_group_id))).all()]
@@ -782,4 +813,4 @@ async def list_grouped_transactions(
     gid_order = {gid: i for i, gid in enumerate(group_ids)}
     result.sort(key=lambda g: gid_order.get(g["cascade_group_id"], len(group_ids)))
 
-    return result, total, None
+    return result, total, matched_transaction_id
