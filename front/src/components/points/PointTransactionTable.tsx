@@ -113,7 +113,11 @@ const makeEventColumns = (): TableColumnsType<BillingEventRead> => [
     dataIndex: 'balance_after',
     width: 85,
     render: (v?: number | null) =>
-      v != null ? <PointsBadge value={v} size="sm" /> : <span className="text-gray-300">—</span>,
+      v !== null && v !== undefined ? (
+        <PointsBadge value={v} size="sm" />
+      ) : (
+        <span className="text-gray-300">—</span>
+      ),
   },
   {
     title: '冻结后',
