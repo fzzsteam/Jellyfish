@@ -263,7 +263,7 @@ const AdminUserDetailPage: React.FC = () => {
                     },
                     {
                       key: 'simple',
-                      label: '充值',
+                      label: '充值记录',
                       children: (
                         <SimplePointTransactionTable
                           dataSource={simpleTxns}

@@ -25,7 +25,7 @@ import { TASK_COPY } from '../../../components/taskCopy'
 import { useTaskPageContext } from '../../../components/taskPageContext'
 import { useTaskUiStore } from '../../../components/taskUiStore'
 import { usePointsQuote } from '../../../../../hooks/usePointsQuote'
-import { PointsCostHint } from '../../../../../components/points/PointsCostHint'
+import { PointsBadge } from '../../../../../components/points/PointsBadge'
 import { makePointsAwareGetErrorMessage } from '../../../../../components/points/pointsTaskError'
 import {
   createRelationTaskState,
@@ -51,6 +51,7 @@ export function ChaptersTab() {
   const [createContent, setCreateContent] = useState('')
   const [chapterFlowMap, setChapterFlowMap] = useState<Record<string, ChapterFlowStats>>({})
   const [chapterDivisionActionId, setChapterDivisionActionId] = useState<string | null>(null)
+  const [divideConfirmChapter, setDivideConfirmChapter] = useState<Chapter | null>(null)
   const taskUiUpsert = useTaskUiStore((state) => state.upsertTask)
   const taskUiRemove = useTaskUiStore((state) => state.removeTask)
   const syncedTaskIdsRef = useRef<string[]>([])
@@ -275,9 +276,6 @@ export function ChaptersTab() {
     if (!scriptText) {
       message.warning('请先补章节原文')
       return
-    }
-    if (imageQuote.quote) {
-      message.info('分镜拆解为必执行项；若积分不足以覆盖资产图生成，对应资产将建档但不生成图片。')
     }
     setChapterDivisionActionId(record.id)
     try {
@@ -518,7 +516,7 @@ export function ChaptersTab() {
               size="small"
               onClick={() => {
                 if (state.key === 'extract_shots' && !activeTask) {
-                  void handleDivideAsync(record)
+                  setDivideConfirmChapter(record)
                   return
                 }
                 handlePrimaryAction(record)
@@ -542,17 +540,6 @@ export function ChaptersTab() {
               />
             </Dropdown>
             </Space>
-            {state.key === 'extract_shots' && !activeTask ? (
-              <>
-                <PointsCostHint
-                  quote={divideQuote.quote}
-                  loading={divideQuote.loading}
-                  error={divideQuote.error}
-                  textMultiplier={2}
-                  perImagePoints={imageQuote.quote?.required_points ?? null}
-                />
-              </>
-            ) : null}
           </Space>
         )
       },
@@ -668,6 +655,46 @@ export function ChaptersTab() {
               className="mt-1 font-mono text-sm"
             />
           </div>
+        </div>
+      </Modal>
+
+      {/* 提取分镜积分消耗确认弹窗 */}
+      <Modal
+        title="确认提取分镜并自动准备"
+        open={divideConfirmChapter !== null}
+        onOk={() => {
+          const chapter = divideConfirmChapter
+          setDivideConfirmChapter(null)
+          if (chapter) void handleDivideAsync(chapter)
+        }}
+        onCancel={() => setDivideConfirmChapter(null)}
+        okText="确认，开始提取"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <div className="flex flex-col gap-3 py-2 text-sm text-gray-600">
+          <p>本次操作包含两步，积分消耗如下：</p>
+          <div className="flex flex-col gap-2 rounded-lg bg-gray-50 px-4 py-3">
+            <div className="flex items-center justify-between">
+              <span>分镜拆解 + 信息提取（文本各一次）</span>
+              {divideQuote.quote ? (
+                <PointsBadge value={divideQuote.quote.required_points * 2} size="sm" />
+              ) : (
+                <span className="text-gray-400 text-xs">计算中…</span>
+              )}
+            </div>
+            <div className="flex items-center justify-between">
+              <span>资产图生成（每张）</span>
+              {imageQuote.quote ? (
+                <PointsBadge value={imageQuote.quote.required_points} size="sm" />
+              ) : (
+                <span className="text-gray-400 text-xs">图片模型未配置</span>
+              )}
+            </div>
+          </div>
+          <p className="text-gray-400 text-xs leading-relaxed">
+            资产图数量由 AI 拆解后生成的分镜数决定，拆解前无法预知；积分不足以覆盖某张图时，对应资产将建档但不生成图片。
+          </p>
         </div>
       </Modal>
     </Card>

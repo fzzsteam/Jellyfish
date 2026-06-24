@@ -9,15 +9,15 @@ Jellyfish 是面向 AI 短剧生产的工作台。本文件覆盖两类部署：
 
 ## 服务与端口
 
-| 服务 | 启动方式 | 默认地址 |
-| --- | --- | --- |
-| Frontend | Vite | <http://localhost:7788> |
-| Backend | Uvicorn | <http://localhost:8000> |
-| API 文档 | FastAPI | <http://localhost:8000/docs> |
-| MySQL | Docker Compose | `127.0.0.1:3307` |
-| Redis | Docker Compose | `127.0.0.1:6379` |
-| RustFS API | Docker Compose | <http://localhost:9000> |
-| RustFS Console | Docker Compose | <http://localhost:9001> |
+| 服务           | 启动方式       | 默认地址                     |
+| -------------- | -------------- | ---------------------------- |
+| Frontend       | Vite           | <http://localhost:7788>      |
+| Backend        | Uvicorn        | <http://localhost:8000>      |
+| API 文档       | FastAPI        | <http://localhost:8000/docs> |
+| MySQL          | Docker Compose | `127.0.0.1:3307`             |
+| Redis          | Docker Compose | `127.0.0.1:6379`             |
+| RustFS API     | Docker Compose | <http://localhost:9000>      |
+| RustFS Console | Docker Compose | <http://localhost:9001>      |
 
 MySQL、Redis 和 RustFS 的实际端口以 `deploy/compose/.env.local` 为准。修改 Compose 端口后，必须同步修改 `backend/.env`。
 
@@ -170,7 +170,7 @@ Worker 与 Backend 共用 `backend/.env`。启动前确认 Redis 容器为 `heal
 cd backend
 uv run celery \
   -A app.core.celery_app:celery_app \
-  worker \
+  worker --beat \
   -l info
 ```
 
@@ -348,16 +348,16 @@ docker push <registry>/jellyfish:<tag>
 
 在 SAE 应用配置中注入以下环境变量（应用与迁移脚本共用同一份 `DATABASE_URL`）：
 
-| 变量 | 必要性 | 说明 |
-| --- | --- | --- |
-| `DATABASE_URL` | 必设 | 线上 MySQL，如 `mysql+aiomysql://user:pass@host:3306/jellyfish` |
-| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | 必设 | Celery broker |
-| `S3_ENDPOINT_URL` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_BUCKET_NAME` | 必设 | 对象存储 |
-| `INITIAL_ADMIN_USERNAME` | 可选 | 默认 `admin` |
-| `INITIAL_ADMIN_PASSWORD` | 首次或无管理员时必设 | `users` 表无管理员时用它播种首个账号；不设且表空 → 应用拒绝启动 |
-| `JWT_SECRET_KEY` | 强烈建议改 | 默认为弱值，务必改为随机字符串 |
-| `CORS_ORIGINS` | 按需 | 前端域名（逗号分隔）；同源部署可不设 |
-| `OPENAI_API_KEY` 等 | 按需 | 真实调用大模型才需要 |
+| 变量                                                                               | 必要性               | 说明                                                            |
+| ---------------------------------------------------------------------------------- | -------------------- | --------------------------------------------------------------- |
+| `DATABASE_URL`                                                                     | 必设                 | 线上 MySQL，如 `mysql+aiomysql://user:pass@host:3306/jellyfish` |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD`                                     | 必设                 | Celery broker                                                   |
+| `S3_ENDPOINT_URL` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_BUCKET_NAME` | 必设                 | 对象存储                                                        |
+| `INITIAL_ADMIN_USERNAME`                                                           | 可选                 | 默认 `admin`                                                    |
+| `INITIAL_ADMIN_PASSWORD`                                                           | 首次或无管理员时必设 | `users` 表无管理员时用它播种首个账号；不设且表空 → 应用拒绝启动 |
+| `JWT_SECRET_KEY`                                                                   | 强烈建议改           | 默认为弱值，务必改为随机字符串                                  |
+| `CORS_ORIGINS`                                                                     | 按需                 | 前端域名（逗号分隔）；同源部署可不设                            |
+| `OPENAI_API_KEY` 等                                                                | 按需                 | 真实调用大模型才需要                                            |
 
 ### 3. 数据库迁移
 
@@ -397,14 +397,14 @@ curl -f http://<线上域名>/health      # 预期 200
 
 以下配置项均可在 `backend/.env` 或环境变量中覆盖，默认值适用于绝大多数场景：
 
-| 变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `POINTS_QUOTE_EXPIRE_SECONDS` | `300` | 报价令牌有效期（秒）。令牌过期后前端需重新报价 |
-| `POINTS_LOCK_TTL_MS` | `30000` | Redis 用户锁 TTL（毫秒），覆盖一次完整的账户变更 |
-| `POINTS_LOCK_WAIT_MS` | `3000` | 抢锁等待上限（毫秒），超时抛 `PointsOperationBusyError` |
-| `POINTS_LOCK_RETRY_MAX_BACKOFF_MS` | `250` | 抢锁指数退避上限（毫秒） |
-| `POINTS_RECONCILE_MIN_AGE_SECONDS` | `1800` | 对账扫描的最小冻结年龄（秒），冻结超过该年龄且未结算才会被兜底处理 |
-| `POINTS_RECONCILE_BATCH_SIZE` | `100` | 对账单批扫描上限，控制单次 Beat tick 的 DB 负载 |
+| 变量                               | 默认    | 说明                                                               |
+| ---------------------------------- | ------- | ------------------------------------------------------------------ |
+| `POINTS_QUOTE_EXPIRE_SECONDS`      | `300`   | 报价令牌有效期（秒）。令牌过期后前端需重新报价                     |
+| `POINTS_LOCK_TTL_MS`               | `30000` | Redis 用户锁 TTL（毫秒），覆盖一次完整的账户变更                   |
+| `POINTS_LOCK_WAIT_MS`              | `3000`  | 抢锁等待上限（毫秒），超时抛 `PointsOperationBusyError`            |
+| `POINTS_LOCK_RETRY_MAX_BACKOFF_MS` | `250`   | 抢锁指数退避上限（毫秒）                                           |
+| `POINTS_RECONCILE_MIN_AGE_SECONDS` | `1800`  | 对账扫描的最小冻结年龄（秒），冻结超过该年龄且未结算才会被兜底处理 |
+| `POINTS_RECONCILE_BATCH_SIZE`      | `100`   | 对账单批扫描上限，控制单次 Beat tick 的 DB 负载                    |
 
 > 这些项通常无需调整；调高 `POINTS_LOCK_WAIT_MS` 可在高并发账户变更时减少 `PointsOperationBusyError`，但也会拉长最坏情况下的请求耗时。
 

@@ -79,7 +79,8 @@ interface PointTransactionTableProps {
   page?: number
   pageSize?: number
   onChange?: (page: number, pageSize: number) => void
-  highlightTransactionId?: string  // 流水ID搜索时传入，驱动自动展开+高亮
+  highlightTransactionId?: string  // 流水ID搜索时传入，驱动自动展开到流水行并高亮
+  highlightBillingId?: string      // 账单ID搜索时传入，驱动自动展开到对应账单行
 }
 ```
 
@@ -124,13 +125,20 @@ const [expandedBillKeys, setExpandedBillKeys] = useState<string[]>([])
 
 Level 3 无需 state（迷你 Table 默认全量展示）。
 
-### 2.6 自动展开逻辑（`highlightTransactionId`）
+### 2.6 自动展开逻辑
 
-数据加载后（`useEffect` 监听 `dataSource + highlightTransactionId`）：
+`expandedBillKeys` 的 key 使用全局唯一的 `billing_id`（跨操作组不重复）。
 
+数据加载后（`useEffect` 监听 `dataSource + highlightTransactionId + highlightBillingId`）：
+
+**按流水ID搜索（`highlightTransactionId` 有值）**：
 1. 遍历 `dataSource`，找到包含目标流水的操作组 → 预置 `expandedOpKeys`
-2. 在该组 `billings` 中找到包含目标流水的账单 → 预置 `expandedBillKeys`
+2. 在该组 `billings` 中找到包含目标流水的账单 → 预置 `expandedBillKeys`（用 billing_id）
 3. Level 3 迷你 Table 中，匹配行加 `bg-amber-50 ring-1 ring-amber-300` 样式高亮
+
+**按账单ID搜索（`highlightBillingId` 有值）**：
+1. 遍历 `dataSource`，找到包含目标账单的操作组 → 预置 `expandedOpKeys`
+2. 将目标 billing_id 加入 `expandedBillKeys`，直接展开账单行
 
 ---
 

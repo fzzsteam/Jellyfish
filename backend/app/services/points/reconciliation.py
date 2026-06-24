@@ -112,7 +112,7 @@ async def reconcile_stale_freezes(
                     db,
                     user_id=frz.user_id,
                     billing_id=frz.billing_id,
-                    remark="reconcile: orphan freeze",
+                    remark="对账补偿：孤儿冻结（无关联任务），自动解冻",
                     created_by="system",
                 )
             elif task.status == GenerationTaskStatus.succeeded:
@@ -126,7 +126,7 @@ async def reconcile_stale_freezes(
                     db,
                     user_id=frz.user_id,
                     billing_id=frz.billing_id,
-                    remark=f"reconcile: task {task.status}",
+                    remark=f"对账补偿：任务终态 {task.status}，自动解冻",
                     created_by="system",
                 )
             else:

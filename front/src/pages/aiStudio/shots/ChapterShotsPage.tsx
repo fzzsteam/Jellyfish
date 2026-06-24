@@ -42,22 +42,12 @@ import { useTaskPageContext } from '../components/taskPageContext'
 import { createTaskSettledReloader } from '../components/taskResultHelpers'
 import { TASK_COPY } from '../components/taskCopy'
 import { generateUUID } from '../../../utils'
+import { usePointsQuote } from '../../../hooks/usePointsQuote'
+import { PointsBadge } from '../../../components/points/PointsBadge'
+import { makePointsAwareGetErrorMessage } from '../../../components/points/pointsTaskError'
 
 const { Header, Content } = Layout
 type ShotListFilter = 'all' | 'pending' | 'generating' | 'ready'
-
-function getErrorMessage(e: unknown) {
-  if (!e) return '请求失败'
-  if (typeof e === 'string') return e
-  if (typeof e === 'object') {
-    const maybeAny = e as any
-    const detail = maybeAny?.body?.detail ?? maybeAny?.detail
-    if (typeof detail === 'string' && detail.trim()) return detail
-    const msg = maybeAny?.message
-    if (typeof msg === 'string' && msg.trim()) return msg
-  }
-  return '请求失败'
-}
 
 function statusTag(status?: ShotStatus) {
   if (!status) return <span className="text-gray-400">—</span>
@@ -130,6 +120,7 @@ export function ChapterShotsPage() {
   const [insertSubmitting, setInsertSubmitting] = useState(false)
   const [insertForm] = Form.useForm<{ title: string; script_excerpt?: string }>()
   const [chapterDivisionTaskLoading, setChapterDivisionTaskLoading] = useState(false)
+  const [extractConfirmOpen, setExtractConfirmOpen] = useState(false)
 
   const refresh = async () => {
     if (!chapterId) return
@@ -188,6 +179,20 @@ export function ChapterShotsPage() {
         ]
       : [],
   )
+
+  const divideQuote = usePointsQuote({
+    businessType: 'script_divide',
+    category: 'text',
+    modelId: null,
+    enabled: !!chapterId && shots.length === 0 && !chapterDivisionTask,
+  })
+  const imageQuote = usePointsQuote({
+    businessType: 'image_generation',
+    category: 'image',
+    modelId: null,
+    resolutionProfile: 'standard',
+    enabled: !!chapterId && shots.length === 0 && !chapterDivisionTask,
+  })
 
   useEffect(() => {
     setSelectedRowKeys([])
@@ -351,20 +356,21 @@ export function ChapterShotsPage() {
               script_text: scriptText,
               write_to_db: true,
               chapter_id: chapterId,
+              quote_token: divideQuote.quoteToken,
             },
           }),
         trackTaskData,
         startedMessage: taskCopy.startedMessage,
         reusedMessage: taskCopy.reusedMessage,
         fallbackErrorMessage: '启动分镜提取失败',
-        getErrorMessage: (error) => getErrorMessage(error),
+        getErrorMessage: makePointsAwareGetErrorMessage(divideQuote.refresh),
       })
     } catch {
       // executeAsyncTaskCreate 已统一处理错误提示
     } finally {
       setExtracting(false)
     }
-  }, [chapterCondensedText, chapterId, chapterRawText])
+  }, [chapterCondensedText, chapterId, chapterRawText, divideQuote.quoteToken, divideQuote.refresh])
 
   const handleCancelChapterDivisionTask = useCallback(async () => {
     if (!chapterDivisionTask) return
@@ -706,8 +712,8 @@ export function ChapterShotsPage() {
                     type={shots.length === 0 ? 'primary' : 'default'}
                     icon={<ScissorOutlined />}
                     loading={extracting}
-                    disabled={extracting || shots.length > 0 || !!chapterDivisionTask}
-                    onClick={() => void handleOneClickExtract()}
+                    disabled={extracting || shots.length > 0 || !!chapterDivisionTask || (shots.length === 0 && !divideQuote.canSubmit)}
+                    onClick={() => shots.length === 0 && !chapterDivisionTask ? setExtractConfirmOpen(true) : undefined}
                   >
                     {chapterDivisionTask ? '分镜自动准备中' : shots.length === 0 ? '一键提取分镜并自动准备' : '重新提取需先清空分镜'}
                   </Button>
@@ -853,6 +859,42 @@ export function ChapterShotsPage() {
             <Input.TextArea rows={6} placeholder="可选" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* 提取分镜积分消耗确认弹窗 */}
+      <Modal
+        title="确认提取分镜并自动准备"
+        open={extractConfirmOpen}
+        onOk={() => { setExtractConfirmOpen(false); void handleOneClickExtract() }}
+        onCancel={() => setExtractConfirmOpen(false)}
+        okText="确认，开始提取"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <div className="flex flex-col gap-3 py-2 text-sm text-gray-600">
+          <p>本次操作包含两步，积分消耗如下：</p>
+          <div className="flex flex-col gap-2 rounded-lg bg-gray-50 px-4 py-3">
+            <div className="flex items-center justify-between">
+              <span>分镜拆解 + 信息提取（文本各一次）</span>
+              {divideQuote.quote ? (
+                <PointsBadge value={divideQuote.quote.required_points * 2} size="sm" />
+              ) : (
+                <span className="text-gray-400 text-xs">计算中…</span>
+              )}
+            </div>
+            <div className="flex items-center justify-between">
+              <span>资产图生成（每张）</span>
+              {imageQuote.quote ? (
+                <PointsBadge value={imageQuote.quote.required_points} size="sm" />
+              ) : (
+                <span className="text-gray-400 text-xs">图片模型未配置</span>
+              )}
+            </div>
+          </div>
+          <p className="text-gray-400 text-xs leading-relaxed">
+            资产图数量由 AI 拆解后生成的分镜数决定，拆解前无法预知；积分不足以覆盖某张图时，对应资产将建档但不生成图片。
+          </p>
+        </div>
       </Modal>
 
     </Layout>

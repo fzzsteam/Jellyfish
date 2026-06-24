@@ -293,7 +293,7 @@ async def test_unfreeze_returns_frozen_to_available() -> None:
             business_id="task-7",
             snapshot={"points": 40},
         )
-        tx = await unfreeze_frozen(db, user_id="u1", billing_id="B7", remark="task failed")
+        tx = await unfreeze_frozen(db, user_id="u1", billing_id="B7", remark="任务执行失败")
         assert tx.type == PointTransactionType.unfreeze
         assert tx.amount == 40
         assert tx.balance_after == 100  # 不变
