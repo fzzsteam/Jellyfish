@@ -119,6 +119,13 @@ const makeEventColumns = (): TableColumnsType<BillingEventRead> => [
         <span className="text-gray-300">—</span>
       ),
   },
+  {
+    // 单条流水备注;为空时不显示占位符(如"—"),保持空字符串以与明细语义一致
+    title: '备注',
+    dataIndex: 'remark',
+    ellipsis: true,
+    render: (v?: string | null) => v || '',
+  },
   ]
 
 /** Level 2 账单行列定义。 */

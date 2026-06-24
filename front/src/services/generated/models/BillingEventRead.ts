@@ -13,5 +13,6 @@ export type BillingEventRead = {
     created_at?: (string | null);
     balance_after?: (number | null);
     frozen_after?: (number | null);
+    remark?: (string | null);
 };
 

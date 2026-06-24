@@ -799,7 +799,7 @@ async def list_grouped_transactions(
                 remark=remark, created_by=created_by, created_at=billing_created_at,
                 events=[dict(id=e.id, type=e.type, amount=e.amount,
                              created_at=e.created_at, balance_after=e.balance_after,
-                             frozen_after=e.frozen_after) for e in events],
+                             frozen_after=e.frozen_after, remark=e.remark) for e in events],
             ))
 
         root_txs = [t for t in txs if t.cascade_group_id == t.billing_id] or txs

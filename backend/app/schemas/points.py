@@ -125,6 +125,8 @@ class BillingEventRead(BaseModel):
     created_at: datetime | None = None
     balance_after: int | None = None
     frozen_after: int | None = None
+    # 单条流水事件的备注;从 PointTransaction.remark 透传,用于 Level3 明细展示
+    remark: str | None = None
 
 
 class BillingLifecycleRead(BaseModel):
