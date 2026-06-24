@@ -8,6 +8,8 @@ import {
   Input,
   InputNumber,
   Modal,
+  Select,
+  Space,
   Table,
   Tabs,
   Tag,
@@ -41,6 +43,10 @@ const AdminUserDetailPage: React.FC = () => {
   const [groupedLoading, setGroupedLoading] = useState(false)
   const [groupedPage, setGroupedPage] = useState(1)
   const [groupedPageSize, setGroupedPageSize] = useState(10)
+  // 三种 ID 搜索类型与值，以及搜索命中后的行高亮状态。
+  const [searchIdType, setSearchIdType] = useState<'cascade_group_id' | 'billing_id' | 'transaction_id'>('cascade_group_id')
+  const [searchIdValue, setSearchIdValue] = useState<string | undefined>(undefined)
+  const [highlightTransactionId, setHighlightTransactionId] = useState<string | undefined>(undefined)
   const [recharging, setRecharging] = useState(false)
   const [rechargeOpen, setRechargeOpen] = useState(false)
   const [resetPwdOpen, setResetPwdOpen] = useState(false)
@@ -64,17 +70,30 @@ const AdminUserDetailPage: React.FC = () => {
     }
   }
 
-  /** 加载按操作分组流水，按页拉取。 */
-  const loadGrouped = async (page: number, pageSize: number) => {
+  /**
+   * 加载按操作分组流水，按页拉取。
+   * 支持三种 ID 过滤：操作ID(cascade_group_id)、账单ID(billing_id)、流水ID(transaction_id)。
+   * 当按 transaction_id 搜索时，后端返回 matched_transaction_id 用于高亮命中行。
+   */
+  const loadGrouped = async (
+    page: number,
+    pageSize: number,
+    idType?: 'cascade_group_id' | 'billing_id' | 'transaction_id',
+    idValue?: string,
+  ) => {
     setGroupedLoading(true)
     try {
       const res = await AdminService.listUserPointsTransactionsGroupedApiV1AdminUsersUserIdPointsTransactionsGroupedGet({
         userId: id,
         page,
         pageSize,
+        cascadeGroupId: idType === 'cascade_group_id' ? idValue : undefined,
+        billingId: idType === 'billing_id' ? idValue : undefined,
+        transactionId: idType === 'transaction_id' ? idValue : undefined,
       })
       setGroupedData(res.data?.items ?? [])
       setGroupedTotal(res.data?.pagination?.total ?? 0)
+      setHighlightTransactionId(res.data?.matched_transaction_id ?? undefined)
     } catch {
       message.error('分组流水加载失败')
     } finally {
@@ -167,16 +186,53 @@ const AdminUserDetailPage: React.FC = () => {
               label: '积分流水',
               children: (
                 <div>
+                  {/* 三种 ID 搜索：操作ID / 账单ID / 流水ID，与 PointsPage 对齐 */}
+                  <div className="mb-3">
+                    <Space>
+                      <Select<'cascade_group_id' | 'billing_id' | 'transaction_id'>
+                        size="small"
+                        value={searchIdType}
+                        style={{ width: 88 }}
+                        options={[
+                          { label: '操作ID', value: 'cascade_group_id' },
+                          { label: '账单ID', value: 'billing_id' },
+                          { label: '流水ID', value: 'transaction_id' },
+                        ]}
+                        onChange={(v) => {
+                          setSearchIdType(v)
+                          setSearchIdValue(undefined)
+                          setHighlightTransactionId(undefined)
+                        }}
+                      />
+                      <Input.Search
+                        allowClear
+                        placeholder="输入搜索值"
+                        size="small"
+                        style={{ width: 200 }}
+                        value={searchIdValue}
+                        onChange={(e) => setSearchIdValue(e.target.value || undefined)}
+                        onSearch={(v) => {
+                          const val = v.trim() || undefined
+                          setSearchIdValue(val)
+                          setGroupedPage(1)
+                          void loadGrouped(1, groupedPageSize, searchIdType, val)
+                          if (!val) setHighlightTransactionId(undefined)
+                        }}
+                      />
+                    </Space>
+                  </div>
                   <PointTransactionTable
                     dataSource={groupedData}
                     loading={groupedLoading}
                     total={groupedTotal}
                     page={groupedPage}
                     pageSize={groupedPageSize}
+                    highlightTransactionId={highlightTransactionId}
+                    highlightBillingId={searchIdType === 'billing_id' ? searchIdValue : undefined}
                     onChange={(page, pageSize) => {
                       setGroupedPage(page)
                       setGroupedPageSize(pageSize)
-                      void loadGrouped(page, pageSize)
+                      void loadGrouped(page, pageSize, searchIdType, searchIdValue)
                     }}
                   />
                 </div>
