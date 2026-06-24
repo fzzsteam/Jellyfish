@@ -85,4 +85,36 @@ MYSQL_PWD="$PASS" mysql -h 127.0.0.1 -P 3307 -u jellyfish jellyfish -e "SELECT .
   - 方式 A：`cd backend && uv run celery -A app.core.celery_app:celery_app inspect active`
   - 方式 B：`docker exec <celery-worker容器> celery -A app.core.celery_app:celery_app inspect active`
 
+## Step 3 · 高频域 playbook（加速器）
+
+### A. 积分计费
+
+- **表**：`user_points`（账户余额）、`point_transactions`（流水，含 `cascade_group_id` 级联分组）。
+- **Redis 锁**：`points:user:{user_id}`（前缀 `points:user:`，见 `app/services/points/locks.py`；抢锁超时抛 `PointsOperationBusyError`）。
+- **核心 service**：`app/services/points/billing.py` / `locks.py`；冻结逃逸对账走 Celery beat，配置 `points_reconcile_*`（`app/config.py`）。
+- **排查路径**：积分对不上 → 按 `user_id` / `cascade_group_id` 汇总 `point_transactions` → 对 `user_points` 余额 → 查是否有逃逸冻结（`points_reconcile_*` 是否跑过）→ 查 billing 日志。
+- **取证 SQL**：
+
+```sql
+SELECT user_id, SUM(amount) AS net, COUNT(*) AS n
+FROM point_transactions WHERE user_id = '<uid>' GROUP BY user_id;
+```
+
+- **⚠️ 已知缺口（复核是否已修）**：供应商 API 对 429/5xx 瞬时错误零重试，百炼 429 是首个暴露点 → 可能导致生成失败但积分冻结未正确结算。
+
+### B. 生成任务 / 供应商调用
+
+- **表**：`generation_tasks`。status：`pending` / `running` / `streaming` / `succeeded` / `failed` / `cancelled`；`error` 列；索引 `status+updated_at`。
+- **查卡住 / 失败**：
+
+```sql
+SELECT id, status, mode, updated_at, LEFT(error,200) AS err
+FROM generation_tasks
+WHERE status IN ('pending','running','streaming')
+ORDER BY updated_at DESC LIMIT 20;
+```
+
+- **日志关键词**：`[BailianVideo]` / `[BailianImage]`（logger `bailian.images` / `bailian.video`）、openai、volcengine、vidu；常见信号 `Task submitted` / `Failed to get task_id` / `Unknown status` / `429`。
+- **编排逻辑**：`app/core/task_manager/{stores,strategies,manager}.py`、`app/services/film/*`、`app/core/integrations/*`、`http_logging.py`（供应商请求/响应脱敏日志）。
+
 <!-- BUILD ANCHOR -->
