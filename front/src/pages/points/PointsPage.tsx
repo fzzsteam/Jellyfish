@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import type React from 'react'
-import { Card, Input, Select, Space, message } from 'antd'
+import { Card, Input, Select, Space, Tabs, message } from 'antd'
 import { PointsService } from '../../services/generated'
 import type {
   OperationGroupRead,
+  PointTransactionRead,
   PointsSummaryRead,
 } from '../../services/generated'
 import { PointsAccountCard } from '../../components/points/PointsAccountCard'
 import { PointTransactionTable } from '../../components/points/PointTransactionTable'
+import { SimplePointTransactionTable } from '../../components/points/SimplePointTransactionTable'
 
 /**
  * 用户积分页：展示当前用户积分账户摘要与积分流水（三层展开分组视图）。
@@ -19,6 +21,7 @@ const PointsPage: React.FC = () => {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [groupedData, setGroupedData] = useState<OperationGroupRead[]>([])
+  const [simpleTxns, setSimpleTxns] = useState<PointTransactionRead[]>([])
   const [groupedTotal, setGroupedTotal] = useState(0)
   const [groupedLoading, setGroupedLoading] = useState(false)
   const [searchIdType, setSearchIdType] = useState<'cascade_group_id' | 'billing_id' | 'transaction_id'>('cascade_group_id')
@@ -59,6 +62,7 @@ const PointsPage: React.FC = () => {
         transactionId: idType === 'transaction_id' ? idValue : undefined,
       })
       setGroupedData(res.data?.items ?? [])
+      setSimpleTxns(res.data?.simple_txns ?? [])
       setGroupedTotal(res.data?.pagination?.total ?? 0)
       setHighlightTransactionId(res.data?.matched_transaction_id ?? undefined)
     } catch {
@@ -80,56 +84,72 @@ const PointsPage: React.FC = () => {
         <PointsAccountCard summary={summary} loading={loading} />
       </Card>
 
-      <Card
-        title="积分流水"
-        extra={
-          <Space>
-            <Select<'cascade_group_id' | 'billing_id' | 'transaction_id'>
-              size="small"
-              value={searchIdType}
-              style={{ width: 88 }}
-              options={[
-                { label: '操作ID', value: 'cascade_group_id' },
-                { label: '账单ID', value: 'billing_id' },
-                { label: '流水ID', value: 'transaction_id' },
-              ]}
-              onChange={(v) => {
-                setSearchIdType(v)
-                setSearchIdValue(undefined)
-                setHighlightTransactionId(undefined)
-              }}
-            />
-            <Input.Search
-              allowClear
-              placeholder="输入搜索值"
-              size="small"
-              style={{ width: 200 }}
-              value={searchIdValue}
-              onChange={(e) => setSearchIdValue(e.target.value || undefined)}
-              onSearch={(v) => {
-                const val = v.trim() || undefined
-                setSearchIdValue(val)
-                setPage(1)
-                void loadGrouped(1, pageSize, searchIdType, val)
-                if (!val) setHighlightTransactionId(undefined)
-              }}
-            />
-          </Space>
-        }
-      >
-        <PointTransactionTable
-          dataSource={groupedData}
-          loading={groupedLoading}
-          total={groupedTotal}
-          page={page}
-          pageSize={pageSize}
-          highlightTransactionId={highlightTransactionId}
-          highlightBillingId={searchIdType === 'billing_id' ? searchIdValue : undefined}
-          onChange={(p, ps) => {
-            setPage(p)
-            setPageSize(ps)
-            void loadGrouped(p, ps, searchIdType, searchIdValue)
-          }}
+      <Card title="积分流水">
+        <Tabs
+          defaultActiveKey="operations"
+          items={[
+            {
+              key: 'operations',
+              label: '操作记录',
+              children: (
+                <div>
+                  <div className="mb-3">
+                    <Space>
+                      <Select<'cascade_group_id' | 'billing_id' | 'transaction_id'>
+                        size="small"
+                        value={searchIdType}
+                        style={{ width: 88 }}
+                        options={[
+                          { label: '操作ID', value: 'cascade_group_id' },
+                          { label: '账单ID', value: 'billing_id' },
+                          { label: '流水ID', value: 'transaction_id' },
+                        ]}
+                        onChange={(v) => {
+                          setSearchIdType(v)
+                          setSearchIdValue(undefined)
+                          setHighlightTransactionId(undefined)
+                        }}
+                      />
+                      <Input.Search
+                        allowClear
+                        placeholder="输入搜索值"
+                        size="small"
+                        style={{ width: 200 }}
+                        value={searchIdValue}
+                        onChange={(e) => setSearchIdValue(e.target.value || undefined)}
+                        onSearch={(v) => {
+                          const val = v.trim() || undefined
+                          setSearchIdValue(val)
+                          setPage(1)
+                          void loadGrouped(1, pageSize, searchIdType, val)
+                          if (!val) setHighlightTransactionId(undefined)
+                        }}
+                      />
+                    </Space>
+                  </div>
+                  <PointTransactionTable
+                    dataSource={groupedData}
+                    loading={groupedLoading}
+                    total={groupedTotal}
+                    page={page}
+                    pageSize={pageSize}
+                    highlightTransactionId={highlightTransactionId}
+                    highlightBillingId={searchIdType === 'billing_id' ? searchIdValue : undefined}
+                    onChange={(p, ps) => {
+                      setPage(p)
+                      setPageSize(ps)
+                      void loadGrouped(p, ps, searchIdType, searchIdValue)
+                    }}
+                  />
+                </div>
+              ),
+            },
+            {
+              key: 'simple',
+              label: '充值/调整',
+              children: <SimplePointTransactionTable dataSource={simpleTxns} />,
+            },
+          ]}
         />
       </Card>
     </div>
