@@ -9,6 +9,7 @@ export type GroupedTransactionResponse = {
     items: Array<OperationGroupRead>;
     pagination: Pagination;
     simple_txns?: Array<PointTransactionRead>;
+    simple_pagination?: (Pagination | null);
     matched_transaction_id?: (string | null);
 };
 

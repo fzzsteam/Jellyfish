@@ -283,6 +283,8 @@ export class AdminService {
         cascadeGroupId,
         billingId,
         transactionId,
+        simplePage = 1,
+        simplePageSize = 20,
         authorization,
     }: {
         userId: string,
@@ -300,6 +302,14 @@ export class AdminService {
          * 按流水ID搜索，返回所属操作组
          */
         transactionId?: (string | null),
+        /**
+         * 充值/调整记录分页页码
+         */
+        simplePage?: number,
+        /**
+         * 充值/调整记录每页数量
+         */
+        simplePageSize?: number,
         authorization?: (string | null),
     }): CancelablePromise<ApiResponse_GroupedTransactionResponse_> {
         return __request(OpenAPI, {
@@ -317,6 +327,8 @@ export class AdminService {
                 'cascade_group_id': cascadeGroupId,
                 'billing_id': billingId,
                 'transaction_id': transactionId,
+                'simple_page': simplePage,
+                'simple_page_size': simplePageSize,
             },
             errors: {
                 422: `Validation Error`,
