@@ -109,7 +109,7 @@ const makeEventColumns = (): TableColumnsType<BillingEventRead> => [
     ),
   },
   {
-    title: '余额后',
+    title: '余额',
     dataIndex: 'balance_after',
     width: 85,
     render: (v?: number | null) =>
@@ -119,15 +119,7 @@ const makeEventColumns = (): TableColumnsType<BillingEventRead> => [
         <span className="text-gray-300">—</span>
       ),
   },
-  {
-    title: '冻结后',
-    dataIndex: 'frozen_after',
-    width: 75,
-    render: (v?: number | null) => (
-      <span className="text-xs text-orange-400">{v ?? '—'}</span>
-    ),
-  },
-]
+  ]
 
 /** Level 2 账单行列定义。 */
 const makeBillingColumns = (modelMap: Record<string, string>): TableColumnsType<BillingLifecycleRead> => [
