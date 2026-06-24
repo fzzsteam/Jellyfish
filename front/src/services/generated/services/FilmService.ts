@@ -19,6 +19,7 @@ import type { TaskCancelRequest } from '../models/TaskCancelRequest';
 import type { TaskLinkAdoptRequest } from '../models/TaskLinkAdoptRequest';
 import type { TaskStatus } from '../models/TaskStatus';
 import type { VideoGenerationTaskRequest } from '../models/VideoGenerationTaskRequest';
+import type { VideoPromptPreviewRequest } from '../models/VideoPromptPreviewRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
@@ -33,7 +34,7 @@ export class FilmService {
         requestBody,
         authorization,
     }: {
-        requestBody: VideoGenerationTaskRequest,
+        requestBody: VideoPromptPreviewRequest,
         authorization?: (string | null),
     }): CancelablePromise<ApiResponse_VideoPromptPreviewResponse_> {
         return __request(OpenAPI, {

@@ -287,6 +287,7 @@ export type { VariantSuggestion } from './models/VariantSuggestion';
 export type { VFXType } from './models/VFXType';
 export type { VideoGenerationOptionsRead } from './models/VideoGenerationOptionsRead';
 export type { VideoGenerationTaskRequest } from './models/VideoGenerationTaskRequest';
+export type { VideoPromptPreviewRequest } from './models/VideoPromptPreviewRequest';
 export type { VideoPromptPreviewResponse } from './models/VideoPromptPreviewResponse';
 
 export { AdminService } from './services/AdminService';

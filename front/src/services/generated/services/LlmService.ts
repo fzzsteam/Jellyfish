@@ -75,7 +75,7 @@ export class LlmService {
         });
     }
     /**
-     * 创建模型供应商
+     * 创建模型供应商（仅管理员）
      * @returns ApiResponse_ProviderRead_ Successful Response
      * @throws ApiError
      */
@@ -197,7 +197,7 @@ export class LlmService {
         });
     }
     /**
-     * 更新模型供应商
+     * 更新模型供应商（仅管理员）
      * @returns ApiResponse_ProviderRead_ Successful Response
      * @throws ApiError
      */
@@ -227,7 +227,7 @@ export class LlmService {
         });
     }
     /**
-     * 删除模型供应商
+     * 删除模型供应商（仅管理员）
      * @returns ApiResponse_NoneType_ Successful Response
      * @throws ApiError
      */
@@ -318,7 +318,7 @@ export class LlmService {
         });
     }
     /**
-     * 创建模型
+     * 创建模型（仅管理员）
      * @returns ApiResponse_ModelRead_ Successful Response
      * @throws ApiError
      */
@@ -369,7 +369,7 @@ export class LlmService {
         });
     }
     /**
-     * 更新模型
+     * 更新模型（仅管理员）
      * @returns ApiResponse_ModelRead_ Successful Response
      * @throws ApiError
      */
@@ -399,7 +399,7 @@ export class LlmService {
         });
     }
     /**
-     * 删除模型
+     * 删除模型（仅管理员）
      * @returns ApiResponse_NoneType_ Successful Response
      * @throws ApiError
      */
