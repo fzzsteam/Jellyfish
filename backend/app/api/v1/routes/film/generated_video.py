@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +22,18 @@ from app.schemas.common import ApiResponse, created_response, success_response
 from .common import TaskCreated, _CreateOnlyTask
 from .video_request import VideoGenerationTaskRequest
 
+
+class VideoPromptPreviewRequest(BaseModel):
+    """视频提示词预览请求体：仅包含提示词构建所需字段，不含计费参数。"""
+
+    shot_id: str = Field(..., description="镜头 ID")
+    reference_mode: Literal["first", "last", "key", "first_last", "first_last_key", "text_only"] = Field(
+        ...,
+        description="参考模式：first | last | key | first_last | first_last_key | text_only",
+    )
+    prompt: str | None = Field(None, description="视频提示词（text_only 必填；非文本模式可作为补充描述）")
+    images: list[str] = Field(default_factory=list, description="参考图 file_id 列表")
+
 router = APIRouter()
 
 
@@ -37,7 +51,7 @@ class VideoPromptPreviewResponse(BaseModel):
     summary="视频提示词预览",
 )
 async def preview_video_generation_prompt(
-    body: VideoGenerationTaskRequest,
+    body: VideoPromptPreviewRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[VideoPromptPreviewResponse]:

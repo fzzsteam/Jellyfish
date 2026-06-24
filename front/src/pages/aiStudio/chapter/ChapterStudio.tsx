@@ -6135,12 +6135,15 @@ function Inspector(props: {
             if (videoPromptPreviewSubmitting) return
             setVideoPromptPreviewOpen(false)
           }}
-          okText="生成"
-          cancelText="取消"
-          onOk={() => void submitVideoGeneration()}
-          confirmLoading={videoPromptPreviewSubmitting}
           width={900}
           destroyOnClose
+          footer={
+            <div className="flex items-center justify-end gap-3">
+              <PointsCostHint quote={videoQuote.quote} loading={videoQuote.loading} error={videoQuote.error} />
+              <Button onClick={() => setVideoPromptPreviewOpen(false)} disabled={videoPromptPreviewSubmitting}>取消</Button>
+              <Button type="primary" loading={videoPromptPreviewSubmitting} disabled={!videoQuote.canSubmit} onClick={() => void submitVideoGeneration()}>生成</Button>
+            </div>
+          }
         >
           {videoPromptPreviewLoading ? (
             <div className="py-8 text-center">

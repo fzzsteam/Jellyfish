@@ -921,7 +921,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                   <Input value={formName} onChange={(e) => setFormName(e.target.value)} disabled={smartDetectBusy || savingBase} />
                 </div>
                 <div>
-                    <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-2 mb-1">
                       <div className="text-gray-600 text-sm">描述</div>
                       {relationType === 'actor_image' ||
                       relationType === 'character_image' ||
