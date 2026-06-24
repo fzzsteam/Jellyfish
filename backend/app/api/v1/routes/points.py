@@ -65,6 +65,7 @@ async def list_my_transactions(
     type: str | None = Query(None, description="按流水类型过滤：recharge/freeze/consume/unfreeze"),
     business_type: str | None = Query(None, description="按业务类型过滤"),
     billing_id: str | None = Query(None, description="按计费单据 ID 过滤"),
+    id: str | None = Query(None, description="按流水 ID 精确搜索"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
@@ -81,6 +82,7 @@ async def list_my_transactions(
             tx_type=type,
             business_type=business_type,
             billing_id=billing_id,
+            transaction_id=id,
             page=page,
             page_size=page_size,
         )
@@ -114,14 +116,29 @@ async def list_grouped_transactions(
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[GroupedTransactionResponse]:
     """按 cascade_group_id 聚合展示流水。同一操作级联的多个 billing_id 归为一组。"""
-    from app.services.points.billing import list_grouped_transactions
+    from app.services.points.billing import list_grouped_transactions as _list_grouped
 
-    groups, total = await list_grouped_transactions(
+    groups, total, _ = await _list_grouped(
         db,
         user_id=current_user.id,
         page=page,
         page_size=page_size,
     )
+
+    # 解析 billing 层的 created_by → username
+    created_by_ids = {
+        b["created_by"]
+        for g in groups for b in g.get("billings", [])
+        if b.get("created_by") and b["created_by"] != _SYSTEM_CREATED_BY
+    }
+    user_map: dict[str, str] = {_SYSTEM_CREATED_BY: _SYSTEM_CREATED_BY_DISPLAY}
+    if created_by_ids:
+        rows = await db.execute(select(User.id, User.username).where(User.id.in_(created_by_ids)))
+        user_map.update({r.id: r.username for r in rows})
+    for g in groups:
+        for b in g.get("billings", []):
+            b["created_by_username"] = user_map.get(b.get("created_by") or "", None)
+
     from app.schemas.common import Pagination
 
     max_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1

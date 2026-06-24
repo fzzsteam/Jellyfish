@@ -626,12 +626,13 @@ async def list_user_transactions(
     tx_type: str | None = None,
     business_type: str | None = None,
     billing_id: str | None = None,
+    transaction_id: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[PointTransaction], int]:
     """分页查询某用户积分流水，按 created_at 倒序。
 
-    过滤项：type（流水类型枚举值字符串）、business_type、billing_id。
+    过滤项：type（流水类型枚举值字符串）、business_type、billing_id、transaction_id（精确匹配）。
     返回 (items, total)。
     """
     stmt = select(PointTransaction).where(PointTransaction.user_id == user_id)
@@ -649,6 +650,9 @@ async def list_user_transactions(
     if billing_id is not None:
         stmt = stmt.where(PointTransaction.billing_id == billing_id)
         count_stmt = count_stmt.where(PointTransaction.billing_id == billing_id)
+    if transaction_id is not None:
+        stmt = stmt.where(PointTransaction.id == transaction_id)
+        count_stmt = count_stmt.where(PointTransaction.id == transaction_id)
 
     total = int((await db.scalar(count_stmt)) or 0)
     stmt = (
@@ -666,10 +670,14 @@ async def list_grouped_transactions(
     user_id: str,
     page: int = 1,
     page_size: int = 20,
-) -> tuple[list[dict], int]:
+    cascade_group_id: str | None = None,
+    billing_id: str | None = None,
+    transaction_id: str | None = None,
+) -> tuple[list[dict], int, str | None]:
     """按 cascade_group_id 聚合分组，按组最早 created_at 倒序，按组分页。
 
-    返回 (groups, total_groups)，每组包含多个 billing_id 生命周期。
+    返回 (groups, total_groups, matched_transaction_id)，每组包含多个 billing_id 生命周期。
+    cascade_group_id / billing_id / transaction_id 为搜索参数（Task 2 实现具体逻辑，此处预留）。
     业务逻辑：
     - 同一 cascade_group_id 的所有 point_transactions 归为一组
     - 组内按 billing_id 再分组（即单据生命周期）
@@ -703,19 +711,10 @@ async def list_grouped_transactions(
             PointTransaction.cascade_group_id.isnot(None),
         )
     ) or 0
-    # 未分组（NULL）流水独立成组
-    null_count = await db.scalar(
-        select(func.count(func.distinct(PointTransaction.billing_id)))
-        .where(
-            PointTransaction.user_id == user_id,
-            PointTransaction.cascade_group_id.is_(None),
-        )
-    ) or 0
-    total += null_count
 
     group_ids = [r[0] for r in (await db.execute(select(group_subq.c.cascade_group_id))).all()]
 
-    # 2) 一次性拉取所有匹配流水
+    # 2) 一次性拉取所有匹配流水（仅含已分组的 cascade 行，不含 NULL 孤儿）
     all_txs: list[PointTransaction] = []
     if group_ids:
         txs = (
@@ -731,23 +730,6 @@ async def list_grouped_transactions(
             .all()
         )
         all_txs.extend(txs)
-
-    # NULL 组（仅第1页展示）
-    if page == 1 and null_count > 0:
-        null_txs = (
-            (await db.execute(
-                select(PointTransaction)
-                .where(
-                    PointTransaction.user_id == user_id,
-                    PointTransaction.cascade_group_id.is_(None),
-                )
-                .order_by(PointTransaction.created_at.desc())
-                .limit(page_size)
-            ))
-            .scalars()
-            .all()
-        )
-        all_txs.extend(null_txs)
 
     # 3) 组装分组结构
     groups_map: dict[str, list[PointTransaction]] = OrderedDict()
@@ -771,9 +753,15 @@ async def list_grouped_transactions(
             status = "settled" if has_consume else ("refunded" if has_unfreeze else "frozen")
             model_id = next((e.model_id for e in events if e.model_id), None)
             bt = next((e.business_type for e in events if e.business_type), None)
+            # 备注/操作人/时间取冻结事件（首笔），无冻结时退而取任意一笔
+            freeze_event = next((e for e in events if e.type == PointTransactionType.freeze), events[0] if events else None)
+            remark = freeze_event.remark if freeze_event else None
+            created_by = freeze_event.created_by if freeze_event else None
+            billing_created_at = freeze_event.created_at if freeze_event else None
             billings.append(dict(
                 billing_id=bid, business_type=bt, model_id=model_id,
                 status=status, frozen_amount=freeze_amt, net_amount=consume_amt,
+                remark=remark, created_by=created_by, created_at=billing_created_at,
                 events=[dict(id=e.id, type=e.type, amount=e.amount,
                              created_at=e.created_at, balance_after=e.balance_after,
                              frozen_after=e.frozen_after) for e in events],
@@ -789,4 +777,9 @@ async def list_grouped_transactions(
             billings=billings,
         ))
 
-    return result, total
+    # group_ids 是按 min(created_at) DESC 排序的，result 需还原该顺序
+    # （all_txs 按 ASC 加载导致 groups_map 插入顺序是从旧到新）
+    gid_order = {gid: i for i, gid in enumerate(group_ids)}
+    result.sort(key=lambda g: gid_order.get(g["cascade_group_id"], len(group_ids)))
+
+    return result, total, None

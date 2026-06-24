@@ -25,13 +25,20 @@ from app.schemas.common import (
     paginated_response,
     success_response,
 )
-from app.schemas.points import PointTransactionRead, PointsRechargeRequest, PointsSummaryRead
+from app.schemas.points import (
+    GroupedTransactionResponse,
+    OperationGroupRead,
+    PointTransactionRead,
+    PointsRechargeRequest,
+    PointsSummaryRead,
+)
 from app.services import admin as admin_service
 from app.services.common import entity_already_exists, entity_not_found
 from app.services.points import ledger as points_ledger
 from app.services.points.billing import (
     PointsDomainError,
     build_insufficient_error,
+    list_grouped_transactions,
     list_user_transactions,
     to_summary,
 )
@@ -186,6 +193,7 @@ async def list_user_points_transactions(
     type: str | None = Query(None, description="流水类型"),
     business_type: str | None = Query(None, description="业务类型"),
     billing_id: str | None = Query(None, description="计费单据 ID"),
+    id: str | None = Query(None, description="按流水 ID 精确搜索"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -201,6 +209,7 @@ async def list_user_points_transactions(
             tx_type=type,
             business_type=business_type,
             billing_id=billing_id,
+            transaction_id=id,
             page=page,
             page_size=page_size,
         )
@@ -219,6 +228,56 @@ async def list_user_points_transactions(
         total=total,
         page=page,
         page_size=page_size,
+    )
+
+
+@router.get(
+    "/{user_id}/points/transactions/grouped",
+    response_model=ApiResponse[GroupedTransactionResponse],
+    summary="查看某用户按操作组聚合的积分流水",
+)
+async def list_user_points_transactions_grouped(
+    user_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+) -> ApiResponse[GroupedTransactionResponse]:
+    """按 cascade_group_id 聚合展示目标用户流水，供管理员查看。"""
+    from app.schemas.common import Pagination
+
+    groups, total, _ = await list_grouped_transactions(
+        db,
+        user_id=user_id,
+        page=page,
+        page_size=page_size,
+    )
+
+    # 解析 billing 层的 created_by → username
+    created_by_ids = {
+        b["created_by"]
+        for g in groups for b in g.get("billings", [])
+        if b.get("created_by") and b["created_by"] != _SYSTEM_CREATED_BY
+    }
+    user_map: dict[str, str] = {_SYSTEM_CREATED_BY: _SYSTEM_CREATED_BY_DISPLAY}
+    if created_by_ids:
+        rows = await db.execute(select(User.id, User.username).where(User.id.in_(created_by_ids)))
+        user_map.update({r.id: r.username for r in rows})
+    for g in groups:
+        for b in g.get("billings", []):
+            b["created_by_username"] = user_map.get(b.get("created_by") or "", None)
+
+    max_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1
+    pagination = Pagination(
+        page=page,
+        page_size=page_size,
+        total=total,
+        max_page=max_page,
+    )
+    return success_response(
+        GroupedTransactionResponse(
+            items=[OperationGroupRead(**g) for g in groups],
+            pagination=pagination,
+        )
     )
 
 

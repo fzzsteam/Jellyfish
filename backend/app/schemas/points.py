@@ -135,6 +135,10 @@ class BillingLifecycleRead(BaseModel):
     status: str = Field(..., description="frozen/settled/refunded")
     frozen_amount: int = 0
     net_amount: int = 0  # consume 金额
+    remark: str | None = None
+    created_by: str | None = None
+    created_by_username: str | None = None
+    created_at: datetime | None = None
     events: list[BillingEventRead] = []
 
 
@@ -150,6 +154,7 @@ class OperationGroupRead(BaseModel):
 class GroupedTransactionResponse(BaseModel):
     items: list[OperationGroupRead]
     pagination: Pagination
+    matched_transaction_id: str | None = None
 
 
 class PointsRechargeRequest(BaseModel):
