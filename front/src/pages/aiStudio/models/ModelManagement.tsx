@@ -3,9 +3,21 @@ import { Layout, Tabs } from 'antd'
 import ProvidersTab from './ProvidersTab'
 import ModelsTab from './ModelsTab'
 import SettingsTab from './SettingsTab'
+import { useAuthStore } from '../../../store/useAuthStore'
 
 export default function ModelManagement() {
-  const [activeTab, setActiveTab] = useState<string>('providers')
+  const user = useAuthStore((s) => s.user)
+  const isAdmin = user?.is_admin ?? false
+
+  const tabItems = isAdmin
+    ? [
+        { key: 'providers', label: '供应商' },
+        { key: 'models', label: '模型' },
+        { key: 'settings', label: '设置' },
+      ]
+    : [{ key: 'settings', label: '设置' }]
+
+  const [activeTab, setActiveTab] = useState<string>(isAdmin ? 'providers' : 'settings')
 
   return (
     <Layout className="h-full flex flex-col" style={{ minHeight: 0 }}>
@@ -17,11 +29,7 @@ export default function ModelManagement() {
           activeKey={activeTab}
           onChange={setActiveTab}
           size="small"
-          items={[
-            { key: 'providers', label: '供应商' },
-            { key: 'models', label: '模型' },
-            { key: 'settings', label: '设置' },
-          ]}
+          items={tabItems}
         />
       </div>
 
