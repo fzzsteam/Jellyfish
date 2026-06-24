@@ -36,7 +36,6 @@ async def test_create_model_persists_with_non_default_flag() -> None:
     async with db:
         await create_provider(
             db,
-            user_id="u1",
             body=ProviderCreate(
                 id="p1",
                 name="OpenAI",
@@ -46,7 +45,6 @@ async def test_create_model_persists_with_non_default_flag() -> None:
         )
         created = await create_model(
             db,
-            user_id="u1",
             body=ModelCreate(
                 id="m1",
                 name="gpt-4o-mini",
@@ -64,7 +62,6 @@ async def test_create_model_defaults_unit_points_to_zero() -> None:
     async with db:
         await create_provider(
             db,
-            user_id="u1",
             body=ProviderCreate(
                 id="p1",
                 name="OpenAI",
@@ -74,7 +71,6 @@ async def test_create_model_defaults_unit_points_to_zero() -> None:
         )
         created = await create_model(
             db,
-            user_id="u1",
             body=ModelCreate(
                 id="m-points",
                 name="gpt-4o-mini",
@@ -90,12 +86,11 @@ async def test_create_model_defaults_unit_points_to_zero() -> None:
 async def test_update_model_allows_regular_field_updates() -> None:
     db, engine = await _build_session()
     async with db:
-        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
         db.add(provider)
         db.add(
             Model(
                 id="m_text",
-                user_id="u1",
                 name="gpt-4o-mini",
                 category=ModelCategoryKey.text,
                 provider_id="p1",
@@ -105,7 +100,6 @@ async def test_update_model_allows_regular_field_updates() -> None:
 
         updated = await update_model(
             db,
-            user_id="u1",
             model_id="m_text",
             body=ModelUpdate(description="updated"),
         )
@@ -153,19 +147,18 @@ async def test_update_model_settings_persists_latest_values() -> None:
 async def test_list_models_paginated_returns_filtered_items() -> None:
     db, engine = await _build_session()
     async with db:
-        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
         db.add(provider)
         db.add_all(
             [
-                Model(id="m1", user_id="u1", name="gpt-4o-mini", category=ModelCategoryKey.text, provider_id="p1"),
-                Model(id="m2", user_id="u1", name="seedream", category=ModelCategoryKey.image, provider_id="p1"),
+                Model(id="m1", name="gpt-4o-mini", category=ModelCategoryKey.text, provider_id="p1"),
+                Model(id="m2", name="seedream", category=ModelCategoryKey.image, provider_id="p1"),
             ]
         )
         await db.commit()
 
         resp = await list_models_paginated(
             db,
-            user_id="u1",
             provider_id="p1",
             category=ModelCategoryKey.image,
             q="seed",
@@ -188,7 +181,6 @@ async def test_create_model_accepts_vidu_video_category() -> None:
     async with db:
         await create_provider(
             db,
-            user_id="u1",
             body=ProviderCreate(
                 id="p-vidu",
                 name="Vidu",
@@ -199,7 +191,6 @@ async def test_create_model_accepts_vidu_video_category() -> None:
 
         created = await create_model(
             db,
-            user_id="u1",
             body=ModelCreate(
                 id="m-vidu-video",
                 name="viduq3",
@@ -218,7 +209,6 @@ async def test_update_model_allows_switch_to_vidu_video_provider() -> None:
     async with db:
         await create_provider(
             db,
-            user_id="u1",
             body=ProviderCreate(
                 id="p-openai",
                 name="OpenAI",
@@ -228,7 +218,6 @@ async def test_update_model_allows_switch_to_vidu_video_provider() -> None:
         )
         await create_provider(
             db,
-            user_id="u1",
             body=ProviderCreate(
                 id="p-vidu",
                 name="Vidu",
@@ -238,7 +227,6 @@ async def test_update_model_allows_switch_to_vidu_video_provider() -> None:
         )
         await create_model(
             db,
-            user_id="u1",
             body=ModelCreate(
                 id="m-video-ok",
                 name="sora",
@@ -249,7 +237,6 @@ async def test_update_model_allows_switch_to_vidu_video_provider() -> None:
 
         updated = await update_model(
             db,
-            user_id="u1",
             model_id="m-video-ok",
             body=ModelUpdate(provider_id="p-vidu"),
         )
@@ -264,7 +251,6 @@ async def test_get_image_generation_options_uses_default_image_model_capability(
     async with db:
         await create_provider(
             db,
-            user_id="u1",
             body=ProviderCreate(
                 id="p-volc",
                 name="火山引擎",
@@ -274,7 +260,6 @@ async def test_get_image_generation_options_uses_default_image_model_capability(
         )
         await create_model(
             db,
-            user_id="u1",
             body=ModelCreate(
                 id="m-image-default",
                 name="seedream-4.0",

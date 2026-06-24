@@ -21,7 +21,7 @@ _TEST_USER_ID = "test-user"
 
 
 async def _override_current_user() -> User:
-    return User(id=_TEST_USER_ID, username=_TEST_USER_ID, hashed_password="h")
+    return User(id=_TEST_USER_ID, username=_TEST_USER_ID, hashed_password="h", is_admin=True)
 
 
 @pytest.fixture(autouse=True)
@@ -99,7 +99,6 @@ def _seed_provider(db: _FakeLlmDB, provider_id: str = "p-1") -> Provider:
     now = datetime.now(UTC)
     obj = Provider(
         id=provider_id,
-        user_id=_TEST_USER_ID,
         name="OpenAI",
         base_url="https://api.openai.com/v1",
         api_key="secret",
@@ -298,3 +297,32 @@ def test_get_image_generation_options_returns_ratio_size_profiles(client: TestCl
     assert body["data"]["default_resolution_profile"] == "standard"
     assert body["data"]["ratio_size_profiles"]["16:9"]["standard"] == "2848x1600"
     assert body["data"]["ratio_size_profiles"]["16:9"]["high"] == "4096x2304"
+
+
+def test_create_provider_requires_admin(client: TestClient) -> None:
+    """非管理员调用写操作应返回 403。"""
+    db = _FakeLlmDB()
+    llm_app.dependency_overrides[get_db] = _override_db(db)
+
+    async def _non_admin() -> User:
+        return User(id="non-admin", username="non-admin", hashed_password="h", is_admin=False)
+
+    llm_app.dependency_overrides[get_current_user] = _non_admin
+    try:
+        response = client.post(
+            "/api/v1/llm/providers",
+            json={
+                "id": "p-forbidden",
+                "name": "OpenAI",
+                "base_url": "https://api.openai.com/v1",
+                "api_key": "secret",
+                "api_secret": "",
+                "description": "",
+                "status": "testing",
+                "created_by": "tester",
+            },
+        )
+    finally:
+        llm_app.dependency_overrides.clear()
+
+    assert response.status_code == 403
