@@ -71,8 +71,8 @@ pgrep -af 'uvicorn app.main|celery -A|celery worker' | rg -v 'pgrep|/bin/(zsh|ba
 - **数据库（只读，端口取自 0.1，密码用 MYSQL_PWD 不进进程列表）**：
 
 ```bash
-PASS=$(python3 -c "import re,pathlib;u=next(l for l in pathlib.Path('backend/.env').read_text().splitlines() if l.startswith('DATABASE_URL='));print(re.match(r'[^:]+://[^:]+:([^@]+)@',u).group(1))")
-MYSQL_PWD="$PASS" mysql -h 127.0.0.1 -P 3307 -u jellyfish jellyfish -e "SELECT ... LIMIT 50;"
+PASS=$(python3 -c "import re,pathlib;lines=pathlib.Path('backend/.env').read_text().splitlines();u=next((l for l in lines if l.startswith('DATABASE_URL=')),None);print(re.match(r'[^:]+://[^:]+:([^@]+)@',u).group(1) if u else '(DATABASE_URL 未配置，检查 backend/.env)')")
+MYSQL_PWD="$PASS" mysql -h 127.0.0.1 -P <port> -u <user> <db> -e "SELECT ... LIMIT 50;"
 ```
 
 - **日志**：
