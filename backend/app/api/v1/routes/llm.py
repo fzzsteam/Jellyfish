@@ -5,7 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.dependencies import get_current_user, get_db
+from app.dependencies import get_current_user, get_db, require_admin
 from app.models.llm import ModelCategoryKey
 from app.models.user import User
 from app.schemas.common import ApiResponse, PaginatedData, created_response, empty_response, success_response
@@ -59,7 +59,7 @@ MAX_PAGE_SIZE = 100
 )
 async def list_providers(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     q: str | None = Query(None, description="关键字，过滤 name/description"),
     order: str | None = Query(None, description="排序字段：name, created_at, updated_at"),
     is_desc: bool = Query(False, description="是否倒序"),
@@ -68,7 +68,6 @@ async def list_providers(
 ) -> ApiResponse[PaginatedData[ProviderRead]]:
     return await list_providers_paginated(
         db,
-        user_id=current_user.id,
         q=q,
         order=order,
         is_desc=is_desc,
@@ -120,14 +119,14 @@ async def get_video_generation_options(
     "/providers",
     response_model=ApiResponse[ProviderRead],
     status_code=status.HTTP_201_CREATED,
-    summary="创建模型供应商",
+    summary="创建模型供应商（仅管理员）",
 )
 async def create_provider(
     body: ProviderCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ) -> ApiResponse[ProviderRead]:
-    provider = await create_provider_service(db, user_id=current_user.id, body=body)
+    provider = await create_provider_service(db, body=body)
     return created_response(ProviderRead.model_validate(provider))
 
 
@@ -139,24 +138,24 @@ async def create_provider(
 async def get_provider(
     provider_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ) -> ApiResponse[ProviderRead]:
-    provider = await get_provider_service(db, user_id=current_user.id, provider_id=provider_id)
+    provider = await get_provider_service(db, provider_id=provider_id)
     return success_response(ProviderRead.model_validate(provider))
 
 
 @router.patch(
     "/providers/{provider_id}",
     response_model=ApiResponse[ProviderRead],
-    summary="更新模型供应商",
+    summary="更新模型供应商（仅管理员）",
 )
 async def update_provider(
     provider_id: str,
     body: ProviderUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ) -> ApiResponse[ProviderRead]:
-    provider = await update_provider_service(db, user_id=current_user.id, provider_id=provider_id, body=body)
+    provider = await update_provider_service(db, provider_id=provider_id, body=body)
     return success_response(ProviderRead.model_validate(provider))
 
 
@@ -164,14 +163,14 @@ async def update_provider(
     "/providers/{provider_id}",
     response_model=ApiResponse[None],
     status_code=status.HTTP_200_OK,
-    summary="删除模型供应商",
+    summary="删除模型供应商（仅管理员）",
 )
 async def delete_provider(
     provider_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ) -> ApiResponse[None]:
-    await delete_provider_service(db, user_id=current_user.id, provider_id=provider_id)
+    await delete_provider_service(db, provider_id=provider_id)
     return empty_response()
 
 
@@ -185,7 +184,7 @@ async def delete_provider(
 )
 async def list_models(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
     provider_id: str | None = Query(None, description="按供应商过滤"),
     category: ModelCategoryKey | None = Query(None, description="按模型类别过滤"),
     q: str | None = Query(None, description="关键字，过滤 name/description"),
@@ -196,7 +195,6 @@ async def list_models(
 ) -> ApiResponse[PaginatedData[ModelRead]]:
     return await list_models_paginated(
         db,
-        user_id=current_user.id,
         provider_id=provider_id,
         category=category,
         q=q,
@@ -212,14 +210,14 @@ async def list_models(
     "/models",
     response_model=ApiResponse[ModelRead],
     status_code=status.HTTP_201_CREATED,
-    summary="创建模型",
+    summary="创建模型（仅管理员）",
 )
 async def create_model(
     body: ModelCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ) -> ApiResponse[ModelRead]:
-    model = await create_model_service(db, user_id=current_user.id, body=body)
+    model = await create_model_service(db, body=body)
     return created_response(ModelRead.model_validate(model))
 
 
@@ -231,24 +229,24 @@ async def create_model(
 async def get_model(
     model_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(get_current_user),
 ) -> ApiResponse[ModelRead]:
-    model = await get_model_service(db, user_id=current_user.id, model_id=model_id)
+    model = await get_model_service(db, model_id=model_id)
     return success_response(ModelRead.model_validate(model))
 
 
 @router.patch(
     "/models/{model_id}",
     response_model=ApiResponse[ModelRead],
-    summary="更新模型",
+    summary="更新模型（仅管理员）",
 )
 async def update_model(
     model_id: str,
     body: ModelUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ) -> ApiResponse[ModelRead]:
-    model = await update_model_service(db, user_id=current_user.id, model_id=model_id, body=body)
+    model = await update_model_service(db, model_id=model_id, body=body)
     return success_response(ModelRead.model_validate(model))
 
 
@@ -256,14 +254,14 @@ async def update_model(
     "/models/{model_id}",
     response_model=ApiResponse[None],
     status_code=status.HTTP_200_OK,
-    summary="删除模型",
+    summary="删除模型（仅管理员）",
 )
 async def delete_model(
     model_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
 ) -> ApiResponse[None]:
-    await delete_model_service(db, user_id=current_user.id, model_id=model_id)
+    await delete_model_service(db, model_id=model_id)
     return empty_response()
 
 
