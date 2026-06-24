@@ -715,3 +715,31 @@ def test_grouped_search_unknown_id_returns_empty(grouped_search_client):
     data = resp.json()["data"]
     assert data["pagination"]["total"] == 0
     assert data["items"] == []
+
+
+def test_grouped_transactions_returns_recharge_in_simple_txns(points_client: TestClient) -> None:
+    """充值/调整应进入 simple_txns，而不是 cascade 分组 items。"""
+    async def _admin_user() -> User:
+        return User(id="admin-1", username="admin", hashed_password="x", is_admin=True, is_active=True)
+
+    app.dependency_overrides[get_current_user] = _admin_user
+    recharge_resp = points_client.post(
+        "/api/v1/admin/users/user-1/points/recharge",
+        json={"amount": 25, "remark": "manual top up"},
+    )
+    assert recharge_resp.status_code == 200
+    tx_id = recharge_resp.json()["data"]["id"]
+
+    async def _normal_user() -> User:
+        return User(id="user-1", username="bob", hashed_password="x", is_admin=False, is_active=True)
+
+    app.dependency_overrides[get_current_user] = _normal_user
+    resp = points_client.get("/api/v1/points/transactions/grouped")
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    assert "simple_txns" in data
+    assert any(tx["id"] == tx_id for tx in data["simple_txns"])
+    assert all(
+        g["cascade_group_id"] != recharge_resp.json()["data"]["billing_id"]
+        for g in data["items"]
+    )

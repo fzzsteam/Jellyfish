@@ -476,3 +476,17 @@ async def test_recharge_not_deduped_each_call_new_transaction() -> None:
     finally:
         await db.close()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_recharge_does_not_set_cascade_group_id() -> None:
+    """充值/调整是单笔流水，不应写入 cascade_group_id。"""
+    db, engine = await _build_session()
+    try:
+        tx = await recharge(db, user_id="u1", amount=100, created_by="admin-1", remark="top up")
+        assert tx.type == PointTransactionType.recharge
+        assert tx.billing_id is not None
+        assert tx.cascade_group_id is None
+    finally:
+        await db.close()
+        await engine.dispose()
