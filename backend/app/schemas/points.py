@@ -155,6 +155,7 @@ class GroupedTransactionResponse(BaseModel):
     items: list[OperationGroupRead]
     pagination: Pagination
     simple_txns: list[PointTransactionRead] = []
+    simple_pagination: Pagination | None = None
     matched_transaction_id: str | None = None
 
 

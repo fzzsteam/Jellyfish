@@ -115,6 +115,8 @@ async def list_grouped_transactions(
     cascade_group_id: str | None = Query(None, description="按操作ID精确搜索"),
     billing_id: str | None = Query(None, description="按账单ID搜索，返回所属操作组"),
     transaction_id: str | None = Query(None, description="按流水ID搜索，返回所属操作组"),
+    simple_page: int = Query(1, ge=1, description="充值/调整记录分页页码"),
+    simple_page_size: int = Query(20, ge=1, le=100, description="充值/调整记录每页数量"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[GroupedTransactionResponse]:
@@ -124,10 +126,11 @@ async def list_grouped_transactions(
     - cascade_group_id：直接按操作组 ID 过滤
     - billing_id：先解析到所属操作组，再返回该组数据
     - transaction_id：先解析到所属操作组，再返回该组数据，并在 matched_transaction_id 中标记命中流水 ID
+    simple_page / simple_page_size 用于充值/调整记录的独立分页。
     """
     from app.services.points.billing import list_grouped_transactions as _list_grouped
 
-    groups, total, matched_transaction_id, simple_txns = await _list_grouped(
+    groups, total, matched_transaction_id, simple_txns, simple_total = await _list_grouped(
         db,
         user_id=current_user.id,
         page=page,
@@ -135,6 +138,8 @@ async def list_grouped_transactions(
         cascade_group_id=cascade_group_id,
         billing_id=billing_id,
         transaction_id=transaction_id,
+        simple_page=simple_page,
+        simple_page_size=simple_page_size,
     )
 
     # 解析 billing 层的 created_by → username
@@ -171,12 +176,24 @@ async def list_grouped_transactions(
         total=total,
         max_page=max_page,
     )
+    simple_max_page = (
+        max(1, (simple_total + simple_page_size - 1) // simple_page_size)
+        if simple_page_size > 0
+        else 1
+    )
+    simple_pagination = Pagination(
+        page=simple_page,
+        page_size=simple_page_size,
+        total=simple_total,
+        max_page=simple_max_page,
+    )
     return success_response(
         GroupedTransactionResponse(
             items=[OperationGroupRead(**g) for g in groups],
             pagination=pagination,
             matched_transaction_id=matched_transaction_id,
             simple_txns=simple_txns_models,
+            simple_pagination=simple_pagination,
         )
     )
 

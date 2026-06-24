@@ -673,7 +673,9 @@ async def list_grouped_transactions(
     cascade_group_id: str | None = None,
     billing_id: str | None = None,
     transaction_id: str | None = None,
-) -> tuple[list[dict], int, str | None, list[PointTransaction]]:
+    simple_page: int = 1,
+    simple_page_size: int = 20,
+) -> tuple[list[dict], int, str | None, list[PointTransaction], int]:
     """按 cascade_group_id 聚合分组，按组最早 created_at 倒序，按组分页。
 
     返回 (groups, total_groups, matched_transaction_id, simple_txns)，每组包含多个 billing_id 生命周期。
@@ -702,7 +704,7 @@ async def list_grouped_transactions(
             .limit(1)
         )).first()
         if row is None or row[0] is None:
-            return [], 0, None, []
+            return [], 0, None, [], 0
 
         resolved_cascade_group_id = row[0]
         matched_transaction_id = row[1]
@@ -717,7 +719,7 @@ async def list_grouped_transactions(
             .limit(1)
         )
         if resolved_cascade_group_id is None:
-            return [], 0, None, []
+            return [], 0, None, [], 0
 
     # 1) 查询当前页的 cascade_group_id 列表（去重、按最早时间倒序）
     base_where = [
@@ -817,16 +819,33 @@ async def list_grouped_transactions(
 
     # ── 查询单笔流水（source="admin" 的充值/调整记录）─────
     simple_txns: list[PointTransaction] = []
+    simple_total = 0
     if user_id:
-        rows = (await db.execute(
+        simple_base = (
             select(PointTransaction)
             .where(
                 PointTransaction.user_id == user_id,
                 PointTransaction.source == "admin",
             )
-            .order_by(PointTransaction.created_at.desc())
-            .limit(50)
-        )).scalars().all()
-        simple_txns = list(rows)
+        )
+        # 先算总数（用于分页器），再按页取数据
+        simple_total = int(
+            await db.scalar(
+                select(func.count())
+                .select_from(PointTransaction)
+                .where(
+                    PointTransaction.user_id == user_id,
+                    PointTransaction.source == "admin",
+                )
+            )
+            or 0
+        )
+        if simple_total > 0:
+            rows = (await db.execute(
+                simple_base.order_by(PointTransaction.created_at.desc())
+                .offset((simple_page - 1) * simple_page_size)
+                .limit(simple_page_size)
+            )).scalars().all()
+            simple_txns = list(rows)
 
-    return result, total, matched_transaction_id, simple_txns
+    return result, total, matched_transaction_id, simple_txns, simple_total

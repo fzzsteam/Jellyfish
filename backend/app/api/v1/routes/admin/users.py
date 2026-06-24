@@ -243,12 +243,14 @@ async def list_user_points_transactions_grouped(
     cascade_group_id: str | None = Query(None, description="按操作ID精确搜索"),
     billing_id: str | None = Query(None, description="按账单ID搜索，返回所属操作组"),
     transaction_id: str | None = Query(None, description="按流水ID搜索，返回所属操作组"),
+    simple_page: int = Query(1, ge=1, description="充值/调整记录分页页码"),
+    simple_page_size: int = Query(20, ge=1, le=100, description="充值/调整记录每页数量"),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[GroupedTransactionResponse]:
     """按 cascade_group_id 聚合展示目标用户流水，供管理员查看。支持三种 ID 搜索。"""
     from app.schemas.common import Pagination
 
-    groups, total, matched_transaction_id, simple_txns = await list_grouped_transactions(
+    groups, total, matched_transaction_id, simple_txns, simple_total = await list_grouped_transactions(
         db,
         user_id=user_id,
         page=page,
@@ -256,6 +258,8 @@ async def list_user_points_transactions_grouped(
         cascade_group_id=cascade_group_id,
         billing_id=billing_id,
         transaction_id=transaction_id,
+        simple_page=simple_page,
+        simple_page_size=simple_page_size,
     )
 
     created_by_ids = {
@@ -284,12 +288,24 @@ async def list_user_points_transactions_grouped(
 
     max_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1
     pagination = Pagination(page=page, page_size=page_size, total=total, max_page=max_page)
+    simple_max_page = (
+        max(1, (simple_total + simple_page_size - 1) // simple_page_size)
+        if simple_page_size > 0
+        else 1
+    )
+    simple_pagination = Pagination(
+        page=simple_page,
+        page_size=simple_page_size,
+        total=simple_total,
+        max_page=simple_max_page,
+    )
     return success_response(
         GroupedTransactionResponse(
             items=[OperationGroupRead(**g) for g in groups],
             pagination=pagination,
             matched_transaction_id=matched_transaction_id,
             simple_txns=simple_txns_models,
+            simple_pagination=simple_pagination,
         )
     )
 
