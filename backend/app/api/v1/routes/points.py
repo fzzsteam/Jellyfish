@@ -127,7 +127,7 @@ async def list_grouped_transactions(
     """
     from app.services.points.billing import list_grouped_transactions as _list_grouped
 
-    groups, total, matched_transaction_id = await _list_grouped(
+    groups, total, matched_transaction_id, simple_txns = await _list_grouped(
         db,
         user_id=current_user.id,
         page=page,
@@ -144,12 +144,23 @@ async def list_grouped_transactions(
         if b.get("created_by") and b["created_by"] != _SYSTEM_CREATED_BY
     }
     user_map: dict[str, str] = {_SYSTEM_CREATED_BY: _SYSTEM_CREATED_BY_DISPLAY}
+    # 补充简单流水的 created_by
+    for tx in simple_txns:
+        if tx.created_by and tx.created_by not in user_map:
+            created_by_ids.add(tx.created_by)
     if created_by_ids:
         rows = await db.execute(select(User.id, User.username).where(User.id.in_(created_by_ids)))
         user_map.update({r.id: r.username for r in rows})
     for g in groups:
         for b in g.get("billings", []):
             b["created_by_username"] = user_map.get(b.get("created_by") or "", None)
+
+    # 解析简单流水的 created_by → username
+    simple_txns_models = []
+    for tx in simple_txns:
+        read = PointTransactionRead.model_validate(tx)
+        read.created_by_username = user_map.get(tx.created_by) if tx.created_by else None
+        simple_txns_models.append(read)
 
     from app.schemas.common import Pagination
 
@@ -165,6 +176,7 @@ async def list_grouped_transactions(
             items=[OperationGroupRead(**g) for g in groups],
             pagination=pagination,
             matched_transaction_id=matched_transaction_id,
+            simple_txns=simple_txns_models,
         )
     )
 

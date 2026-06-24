@@ -437,6 +437,7 @@ async def recharge(
                 shortfall=pts.frozen - new_balance,
             )
 
+        billing_id = _new_tx_id()  # 每次充值独立，不去重
         tx = PointTransaction(
             id=_new_tx_id(),
             user_id=user_id,
@@ -445,7 +446,8 @@ async def recharge(
             balance_after=new_balance,
             frozen_after=pts.frozen,
             source="admin",
-            billing_id=_new_tx_id(),  # 每次充值独立，不去重
+            billing_id=billing_id,
+            cascade_group_id=None,  # 充值/调整为单笔操作，不参与级联分组
             remark=remark,
             created_by=created_by,
         )

@@ -248,7 +248,7 @@ async def list_user_points_transactions_grouped(
     """按 cascade_group_id 聚合展示目标用户流水，供管理员查看。支持三种 ID 搜索。"""
     from app.schemas.common import Pagination
 
-    groups, total, matched_transaction_id = await list_grouped_transactions(
+    groups, total, matched_transaction_id, simple_txns = await list_grouped_transactions(
         db,
         user_id=user_id,
         page=page,
@@ -264,12 +264,23 @@ async def list_user_points_transactions_grouped(
         if b.get("created_by") and b["created_by"] != _SYSTEM_CREATED_BY
     }
     user_map: dict[str, str] = {_SYSTEM_CREATED_BY: _SYSTEM_CREATED_BY_DISPLAY}
+    # 补充简单流水的 created_by
+    for tx in simple_txns:
+        if tx.created_by and tx.created_by not in user_map:
+            created_by_ids.add(tx.created_by)
     if created_by_ids:
         rows = await db.execute(select(User.id, User.username).where(User.id.in_(created_by_ids)))
         user_map.update({r.id: r.username for r in rows})
     for g in groups:
         for b in g.get("billings", []):
             b["created_by_username"] = user_map.get(b.get("created_by") or "", None)
+
+    # 解析简单流水的 created_by → username
+    simple_txns_models = []
+    for tx in simple_txns:
+        read = PointTransactionRead.model_validate(tx)
+        read.created_by_username = user_map.get(tx.created_by) if tx.created_by else None
+        simple_txns_models.append(read)
 
     max_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1
     pagination = Pagination(page=page, page_size=page_size, total=total, max_page=max_page)
@@ -278,6 +289,7 @@ async def list_user_points_transactions_grouped(
             items=[OperationGroupRead(**g) for g in groups],
             pagination=pagination,
             matched_transaction_id=matched_transaction_id,
+            simple_txns=simple_txns_models,
         )
     )
 

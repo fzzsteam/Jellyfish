@@ -154,6 +154,7 @@ class OperationGroupRead(BaseModel):
 class GroupedTransactionResponse(BaseModel):
     items: list[OperationGroupRead]
     pagination: Pagination
+    simple_txns: list[PointTransactionRead] = []
     matched_transaction_id: str | None = None
 
 
