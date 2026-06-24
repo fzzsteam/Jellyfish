@@ -50,6 +50,10 @@ const AdminUserDetailPage: React.FC = () => {
   const [searchIdValue, setSearchIdValue] = useState<string | undefined>(undefined)
   const [highlightTransactionId, setHighlightTransactionId] = useState<string | undefined>(undefined)
   const [simpleTxns, setSimpleTxns] = useState<PointTransactionRead[]>([])
+  // 充值/调整流水的独立分页状态，与操作记录分页互不影响。
+  const [simplePage, setSimplePage] = useState(1)
+  const [simplePageSize, setSimplePageSize] = useState(10)
+  const [simpleTotal, setSimpleTotal] = useState(0)
   const [recharging, setRecharging] = useState(false)
   const [rechargeOpen, setRechargeOpen] = useState(false)
   const [resetPwdOpen, setResetPwdOpen] = useState(false)
@@ -77,12 +81,15 @@ const AdminUserDetailPage: React.FC = () => {
    * 加载按操作分组流水，按页拉取。
    * 支持三种 ID 过滤：操作ID(cascade_group_id)、账单ID(billing_id)、流水ID(transaction_id)。
    * 当按 transaction_id 搜索时，后端返回 matched_transaction_id 用于高亮命中行。
+   * simpleP/simplePs 控制充值/调整 Tab 的独立分页，与操作记录分页解耦。
    */
   const loadGrouped = async (
     page: number,
     pageSize: number,
     idType?: 'cascade_group_id' | 'billing_id' | 'transaction_id',
     idValue?: string,
+    simpleP: number = 1,
+    simplePs: number = 10,
   ) => {
     setGroupedLoading(true)
     try {
@@ -93,11 +100,14 @@ const AdminUserDetailPage: React.FC = () => {
         cascadeGroupId: idType === 'cascade_group_id' ? idValue : undefined,
         billingId: idType === 'billing_id' ? idValue : undefined,
         transactionId: idType === 'transaction_id' ? idValue : undefined,
+        simplePage: simpleP,
+        simplePageSize: simplePs,
       })
       setGroupedData(res.data?.items ?? [])
       setGroupedTotal(res.data?.pagination?.total ?? 0)
-      setSimpleTxns(res.data?.simple_txns ?? [])
       setHighlightTransactionId(res.data?.matched_transaction_id ?? undefined)
+      setSimpleTxns(res.data?.simple_txns ?? [])
+      setSimpleTotal(res.data?.simple_pagination?.total ?? 0)
     } catch {
       message.error('分组流水加载失败')
     } finally {
@@ -142,10 +152,11 @@ const AdminUserDetailPage: React.FC = () => {
       message.success(amount > 0 ? '充值成功' : '扣减成功')
       setRechargeOpen(false)
       rechargeForm.resetFields()
-      // 充值后刷新摘要与分组流水。
+      // 充值后刷新摘要与分组流水，两个 Tab 均回到第 1 页。
       const pts = await AdminService.getUserPointsApiV1AdminUsersUserIdPointsGet({ userId: id })
       setPoints(pts.data ?? null)
       setGroupedPage(1)
+      setSimplePage(1)
       await loadGrouped(1, groupedPageSize)
     } catch {
       message.error('充值失败')
@@ -227,7 +238,7 @@ const AdminUserDetailPage: React.FC = () => {
                                   const val = v.trim() || undefined
                                   setSearchIdValue(val)
                                   setGroupedPage(1)
-                                  void loadGrouped(1, groupedPageSize, searchIdType, val)
+                                  void loadGrouped(1, groupedPageSize, searchIdType, val, simplePage, simplePageSize)
                                   if (!val) setHighlightTransactionId(undefined)
                                 }}
                               />
@@ -244,7 +255,7 @@ const AdminUserDetailPage: React.FC = () => {
                             onChange={(page, pageSize) => {
                               setGroupedPage(page)
                               setGroupedPageSize(pageSize)
-                              void loadGrouped(page, pageSize, searchIdType, searchIdValue)
+                              void loadGrouped(page, pageSize, searchIdType, searchIdValue, simplePage, simplePageSize)
                             }}
                           />
                         </div>
@@ -252,10 +263,18 @@ const AdminUserDetailPage: React.FC = () => {
                     },
                     {
                       key: 'simple',
-                      label: '充值/调整',
+                      label: '充值',
                       children: (
                         <SimplePointTransactionTable
                           dataSource={simpleTxns}
+                          page={simplePage}
+                          pageSize={simplePageSize}
+                          total={simpleTotal}
+                          onChange={(p, ps) => {
+                            setSimplePage(p)
+                            setSimplePageSize(ps)
+                            void loadGrouped(groupedPage, groupedPageSize, searchIdType, searchIdValue, p, ps)
+                          }}
                         />
                       ),
                     },
