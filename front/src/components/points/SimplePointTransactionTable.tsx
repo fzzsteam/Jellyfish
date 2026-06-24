@@ -45,6 +45,14 @@ const CopyableId: React.FC<{ value?: string | null }> = ({ value }) => {
 export interface SimplePointTransactionTableProps {
   dataSource: PointTransactionRead[]
   loading?: boolean
+  /** 当前页码(从 1 开始),用于受控分页。 */
+  page?: number
+  /** 每页条数,默认 10。 */
+  pageSize?: number
+  /** 总条数,用于分页器展示。 */
+  total?: number
+  /** 分页变化回调(页码、每页条数)。 */
+  onChange?: (page: number, pageSize: number) => void
 }
 
 /** 格式化充值/调整流水金额，正数绿色加号、负数红色减号。 */
@@ -96,7 +104,7 @@ const columns: TableColumnsType<PointTransactionRead> = [
     dataIndex: 'remark',
     ellipsis: true,
     render: (v?: string | null) => (
-      <span className="text-xs text-gray-500" title={v ?? undefined}>{v || '—'}</span>
+      <span className="text-xs text-gray-500" title={v ?? undefined}>{v || ''}</span>
     ),
   },
   {
@@ -107,10 +115,14 @@ const columns: TableColumnsType<PointTransactionRead> = [
   },
 ]
 
-/** 无分页的简化流水表格，由父组件负责传入固定列表。 */
+/** 简化流水表格，支持受控分页，由父组件负责传入当前页数据与分页参数。 */
 export const SimplePointTransactionTable: React.FC<SimplePointTransactionTableProps> = ({
   dataSource,
   loading,
+  page = 1,
+  pageSize = 10,
+  total = 0,
+  onChange,
 }) => (
   <Table<PointTransactionRead>
     rowKey="id"
@@ -118,7 +130,13 @@ export const SimplePointTransactionTable: React.FC<SimplePointTransactionTablePr
     dataSource={dataSource}
     columns={columns}
     size="small"
-    pagination={false}
+    pagination={{
+      current: page,
+      pageSize,
+      total,
+      showSizeChanger: true,
+      onChange,
+    }}
     scroll={{ x: 760 }}
   />
 )
