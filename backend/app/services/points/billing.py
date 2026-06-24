@@ -677,7 +677,8 @@ async def list_grouped_transactions(
     """按 cascade_group_id 聚合分组，按组最早 created_at 倒序，按组分页。
 
     返回 (groups, total_groups, matched_transaction_id)，每组包含多个 billing_id 生命周期。
-    cascade_group_id / billing_id / transaction_id 为搜索参数（Task 2 实现具体逻辑，此处预留）。
+    cascade_group_id / billing_id / transaction_id 为搜索参数，由搜索解析逻辑统一解析为
+    resolved_cascade_group_id 后过滤；transaction_id 搜索时回传 matched_transaction_id。
     业务逻辑：
     - 同一 cascade_group_id 的所有 point_transactions 归为一组
     - 组内按 billing_id 再分组（即单据生命周期）

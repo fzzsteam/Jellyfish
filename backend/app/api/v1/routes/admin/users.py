@@ -240,19 +240,24 @@ async def list_user_points_transactions_grouped(
     user_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
+    cascade_group_id: str | None = Query(None, description="按操作ID精确搜索"),
+    billing_id: str | None = Query(None, description="按账单ID搜索，返回所属操作组"),
+    transaction_id: str | None = Query(None, description="按流水ID搜索，返回所属操作组"),
     db: AsyncSession = Depends(get_db),
 ) -> ApiResponse[GroupedTransactionResponse]:
-    """按 cascade_group_id 聚合展示目标用户流水，供管理员查看。"""
+    """按 cascade_group_id 聚合展示目标用户流水，供管理员查看。支持三种 ID 搜索。"""
     from app.schemas.common import Pagination
 
-    groups, total, _ = await list_grouped_transactions(
+    groups, total, matched_transaction_id = await list_grouped_transactions(
         db,
         user_id=user_id,
         page=page,
         page_size=page_size,
+        cascade_group_id=cascade_group_id,
+        billing_id=billing_id,
+        transaction_id=transaction_id,
     )
 
-    # 解析 billing 层的 created_by → username
     created_by_ids = {
         b["created_by"]
         for g in groups for b in g.get("billings", [])
@@ -267,16 +272,12 @@ async def list_user_points_transactions_grouped(
             b["created_by_username"] = user_map.get(b.get("created_by") or "", None)
 
     max_page = max(1, (total + page_size - 1) // page_size) if page_size > 0 else 1
-    pagination = Pagination(
-        page=page,
-        page_size=page_size,
-        total=total,
-        max_page=max_page,
-    )
+    pagination = Pagination(page=page, page_size=page_size, total=total, max_page=max_page)
     return success_response(
         GroupedTransactionResponse(
             items=[OperationGroupRead(**g) for g in groups],
             pagination=pagination,
+            matched_transaction_id=matched_transaction_id,
         )
     )
 
