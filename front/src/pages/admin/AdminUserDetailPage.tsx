@@ -18,10 +18,12 @@ import {
 import { useParams } from 'react-router-dom'
 import { PointsAccountCard } from '../../components/points/PointsAccountCard'
 import { PointTransactionTable } from '../../components/points/PointTransactionTable'
+import { SimplePointTransactionTable } from '../../components/points/SimplePointTransactionTable'
 import { AdminService } from '../../services/generated'
 import type {
   OperationGroupRead,
   PointsSummaryRead,
+  PointTransactionRead,
   UserAdminRead,
   UserProjectBrief,
 } from '../../services/generated'
@@ -47,6 +49,7 @@ const AdminUserDetailPage: React.FC = () => {
   const [searchIdType, setSearchIdType] = useState<'cascade_group_id' | 'billing_id' | 'transaction_id'>('cascade_group_id')
   const [searchIdValue, setSearchIdValue] = useState<string | undefined>(undefined)
   const [highlightTransactionId, setHighlightTransactionId] = useState<string | undefined>(undefined)
+  const [simpleTxns, setSimpleTxns] = useState<PointTransactionRead[]>([])
   const [recharging, setRecharging] = useState(false)
   const [rechargeOpen, setRechargeOpen] = useState(false)
   const [resetPwdOpen, setResetPwdOpen] = useState(false)
@@ -93,6 +96,7 @@ const AdminUserDetailPage: React.FC = () => {
       })
       setGroupedData(res.data?.items ?? [])
       setGroupedTotal(res.data?.pagination?.total ?? 0)
+      setSimpleTxns(res.data?.simple_txns ?? [])
       setHighlightTransactionId(res.data?.matched_transaction_id ?? undefined)
     } catch {
       message.error('分组流水加载失败')
@@ -185,57 +189,78 @@ const AdminUserDetailPage: React.FC = () => {
               key: 'transactions',
               label: '积分流水',
               children: (
-                <div>
-                  {/* 三种 ID 搜索：操作ID / 账单ID / 流水ID，与 PointsPage 对齐 */}
-                  <div className="mb-3">
-                    <Space>
-                      <Select<'cascade_group_id' | 'billing_id' | 'transaction_id'>
-                        size="small"
-                        value={searchIdType}
-                        style={{ width: 88 }}
-                        options={[
-                          { label: '操作ID', value: 'cascade_group_id' },
-                          { label: '账单ID', value: 'billing_id' },
-                          { label: '流水ID', value: 'transaction_id' },
-                        ]}
-                        onChange={(v) => {
-                          setSearchIdType(v)
-                          setSearchIdValue(undefined)
-                          setHighlightTransactionId(undefined)
-                        }}
-                      />
-                      <Input.Search
-                        allowClear
-                        placeholder="输入搜索值"
-                        size="small"
-                        style={{ width: 200 }}
-                        value={searchIdValue}
-                        onChange={(e) => setSearchIdValue(e.target.value || undefined)}
-                        onSearch={(v) => {
-                          const val = v.trim() || undefined
-                          setSearchIdValue(val)
-                          setGroupedPage(1)
-                          void loadGrouped(1, groupedPageSize, searchIdType, val)
-                          if (!val) setHighlightTransactionId(undefined)
-                        }}
-                      />
-                    </Space>
-                  </div>
-                  <PointTransactionTable
-                    dataSource={groupedData}
-                    loading={groupedLoading}
-                    total={groupedTotal}
-                    page={groupedPage}
-                    pageSize={groupedPageSize}
-                    highlightTransactionId={highlightTransactionId}
-                    highlightBillingId={searchIdType === 'billing_id' ? searchIdValue : undefined}
-                    onChange={(page, pageSize) => {
-                      setGroupedPage(page)
-                      setGroupedPageSize(pageSize)
-                      void loadGrouped(page, pageSize, searchIdType, searchIdValue)
-                    }}
-                  />
-                </div>
+                <Tabs
+                  defaultActiveKey="operations"
+                  size="small"
+                  items={[
+                    {
+                      key: 'operations',
+                      label: '操作记录',
+                      children: (
+                        <div>
+                          {/* 三种 ID 搜索：操作ID / 账单ID / 流水ID */}
+                          <div className="mb-3">
+                            <Space>
+                              <Select<'cascade_group_id' | 'billing_id' | 'transaction_id'>
+                                size="small"
+                                value={searchIdType}
+                                style={{ width: 88 }}
+                                options={[
+                                  { label: '操作ID', value: 'cascade_group_id' },
+                                  { label: '账单ID', value: 'billing_id' },
+                                  { label: '流水ID', value: 'transaction_id' },
+                                ]}
+                                onChange={(v) => {
+                                  setSearchIdType(v)
+                                  setSearchIdValue(undefined)
+                                  setHighlightTransactionId(undefined)
+                                }}
+                              />
+                              <Input.Search
+                                allowClear
+                                placeholder="输入搜索值"
+                                size="small"
+                                style={{ width: 200 }}
+                                value={searchIdValue}
+                                onChange={(e) => setSearchIdValue(e.target.value || undefined)}
+                                onSearch={(v) => {
+                                  const val = v.trim() || undefined
+                                  setSearchIdValue(val)
+                                  setGroupedPage(1)
+                                  void loadGrouped(1, groupedPageSize, searchIdType, val)
+                                  if (!val) setHighlightTransactionId(undefined)
+                                }}
+                              />
+                            </Space>
+                          </div>
+                          <PointTransactionTable
+                            dataSource={groupedData}
+                            loading={groupedLoading}
+                            total={groupedTotal}
+                            page={groupedPage}
+                            pageSize={groupedPageSize}
+                            highlightTransactionId={highlightTransactionId}
+                            highlightBillingId={searchIdType === 'billing_id' ? searchIdValue : undefined}
+                            onChange={(page, pageSize) => {
+                              setGroupedPage(page)
+                              setGroupedPageSize(pageSize)
+                              void loadGrouped(page, pageSize, searchIdType, searchIdValue)
+                            }}
+                          />
+                        </div>
+                      ),
+                    },
+                    {
+                      key: 'simple',
+                      label: '充值/调整',
+                      children: (
+                        <SimplePointTransactionTable
+                          dataSource={simpleTxns}
+                        />
+                      ),
+                    },
+                  ]}
+                />
               ),
             },
             {
