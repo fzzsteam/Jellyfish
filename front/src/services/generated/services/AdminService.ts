@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ApiResponse_GroupedTransactionResponse_ } from '../models/ApiResponse_GroupedTransactionResponse_';
 import type { ApiResponse_list_UserProjectBrief__ } from '../models/ApiResponse_list_UserProjectBrief__';
 import type { ApiResponse_PaginatedData_PointTransactionRead__ } from '../models/ApiResponse_PaginatedData_PointTransactionRead__';
 import type { ApiResponse_PaginatedData_UserAdminRead__ } from '../models/ApiResponse_PaginatedData_UserAdminRead__';
@@ -221,6 +222,7 @@ export class AdminService {
         type,
         businessType,
         billingId,
+        id,
         page = 1,
         pageSize = 20,
         authorization,
@@ -238,6 +240,10 @@ export class AdminService {
          * 计费单据 ID
          */
         billingId?: (string | null),
+        /**
+         * 按流水 ID 精确搜索
+         */
+        id?: (string | null),
         page?: number,
         pageSize?: number,
         authorization?: (string | null),
@@ -255,8 +261,62 @@ export class AdminService {
                 'type': type,
                 'business_type': businessType,
                 'billing_id': billingId,
+                'id': id,
                 'page': page,
                 'page_size': pageSize,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 查看某用户按操作组聚合的积分流水
+     * 按 cascade_group_id 聚合展示目标用户流水，供管理员查看。支持三种 ID 搜索。
+     * @returns ApiResponse_GroupedTransactionResponse_ Successful Response
+     * @throws ApiError
+     */
+    public static listUserPointsTransactionsGroupedApiV1AdminUsersUserIdPointsTransactionsGroupedGet({
+        userId,
+        page = 1,
+        pageSize = 20,
+        cascadeGroupId,
+        billingId,
+        transactionId,
+        authorization,
+    }: {
+        userId: string,
+        page?: number,
+        pageSize?: number,
+        /**
+         * 按操作ID精确搜索
+         */
+        cascadeGroupId?: (string | null),
+        /**
+         * 按账单ID搜索，返回所属操作组
+         */
+        billingId?: (string | null),
+        /**
+         * 按流水ID搜索，返回所属操作组
+         */
+        transactionId?: (string | null),
+        authorization?: (string | null),
+    }): CancelablePromise<ApiResponse_GroupedTransactionResponse_> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/admin/users/{user_id}/points/transactions/grouped',
+            path: {
+                'user_id': userId,
+            },
+            headers: {
+                'authorization': authorization,
+            },
+            query: {
+                'page': page,
+                'page_size': pageSize,
+                'cascade_group_id': cascadeGroupId,
+                'billing_id': billingId,
+                'transaction_id': transactionId,
             },
             errors: {
                 422: `Validation Error`,

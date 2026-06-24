@@ -45,6 +45,7 @@ export class PointsService {
         type,
         businessType,
         billingId,
+        id,
         page = 1,
         pageSize = 20,
         authorization,
@@ -61,6 +62,10 @@ export class PointsService {
          * 按计费单据 ID 过滤
          */
         billingId?: (string | null),
+        /**
+         * 按流水 ID 精确搜索
+         */
+        id?: (string | null),
         page?: number,
         pageSize?: number,
         authorization?: (string | null),
@@ -75,6 +80,7 @@ export class PointsService {
                 'type': type,
                 'business_type': businessType,
                 'billing_id': billingId,
+                'id': id,
                 'page': page,
                 'page_size': pageSize,
             },
@@ -86,16 +92,36 @@ export class PointsService {
     /**
      * 按操作组聚合的积分流水
      * 按 cascade_group_id 聚合展示流水。同一操作级联的多个 billing_id 归为一组。
+     *
+     * 支持三种 ID 搜索：
+     * - cascade_group_id：直接按操作组 ID 过滤
+     * - billing_id：先解析到所属操作组，再返回该组数据
+     * - transaction_id：先解析到所属操作组，再返回该组数据，并在 matched_transaction_id 中标记命中流水 ID
      * @returns ApiResponse_GroupedTransactionResponse_ Successful Response
      * @throws ApiError
      */
     public static listGroupedTransactionsApiV1PointsTransactionsGroupedGet({
         page = 1,
         pageSize = 20,
+        cascadeGroupId,
+        billingId,
+        transactionId,
         authorization,
     }: {
         page?: number,
         pageSize?: number,
+        /**
+         * 按操作ID精确搜索
+         */
+        cascadeGroupId?: (string | null),
+        /**
+         * 按账单ID搜索，返回所属操作组
+         */
+        billingId?: (string | null),
+        /**
+         * 按流水ID搜索，返回所属操作组
+         */
+        transactionId?: (string | null),
         authorization?: (string | null),
     }): CancelablePromise<ApiResponse_GroupedTransactionResponse_> {
         return __request(OpenAPI, {
@@ -107,6 +133,9 @@ export class PointsService {
             query: {
                 'page': page,
                 'page_size': pageSize,
+                'cascade_group_id': cascadeGroupId,
+                'billing_id': billingId,
+                'transaction_id': transactionId,
             },
             errors: {
                 422: `Validation Error`,

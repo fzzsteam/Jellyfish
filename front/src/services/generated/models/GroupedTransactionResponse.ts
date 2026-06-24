@@ -7,5 +7,6 @@ import type { Pagination } from './Pagination';
 export type GroupedTransactionResponse = {
     items: Array<OperationGroupRead>;
     pagination: Pagination;
+    matched_transaction_id?: (string | null);
 };
 

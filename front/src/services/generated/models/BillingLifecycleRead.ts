@@ -16,6 +16,10 @@ export type BillingLifecycleRead = {
     status: string;
     frozen_amount?: number;
     net_amount?: number;
+    remark?: (string | null);
+    created_by?: (string | null);
+    created_by_username?: (string | null);
+    created_at?: (string | null);
     events?: Array<BillingEventRead>;
 };
 
