@@ -115,7 +115,7 @@ def resolve_vidu_video_capability(model: str | None) -> VideoModelCapability:
         return VIDU_MULTIFRAME_VIDEO_CAPABILITY
     if model_lower.startswith("viduq3-mix"):
         return VIDU_MIX_VIDEO_CAPABILITY
-    if model_lower.startswith("viduq3-pro"):
+    if model_lower.startswith("viduq3-pro") or model_lower.startswith("viduq3-turbo"):
         return VIDU_TEXT_VIDEO_CAPABILITY
 
     matches = [

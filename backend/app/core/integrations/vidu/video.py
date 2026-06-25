@@ -276,19 +276,30 @@ class ViduVideoApiAdapter:
         return name
 
     @staticmethod
+    def _is_standard_vidu_model(model: str) -> bool:
+        """Return True for Vidu models that use text2video/img2video/start-end2video routing.
+
+        -pro 和 -turbo 后缀的 viduq3 系列均通过标准 API（text2video / img2video /
+        start-end2video）接入，由图片数量自动分流。viduq2-turbo 在更早的 multiframe
+        分支已被捕获，不会到达此处。
+        """
+        m = model.strip().lower()
+        return m.endswith("-pro") or m.endswith("-turbo")
+
+    @staticmethod
     def _uses_text2video_payload(model: str, images: list[str]) -> bool:
         """Return True for Vidu text-to-video models without reference images."""
-        return not images and model.strip().lower().endswith("-pro")
+        return not images and ViduVideoApiAdapter._is_standard_vidu_model(model)
 
     @staticmethod
     def _uses_img2video_payload(model: str, images: list[str]) -> bool:
         """Return True for Vidu image-to-video models with one reference image."""
-        return len(images) == 1 and model.strip().lower().endswith("-pro")
+        return len(images) == 1 and ViduVideoApiAdapter._is_standard_vidu_model(model)
 
     @staticmethod
     def _uses_start_end2video_payload(model: str, images: list[str]) -> bool:
         """Return True for Vidu first/last-frame video generation."""
-        return len(images) >= 2 and model.strip().lower().endswith("-pro")
+        return len(images) >= 2 and ViduVideoApiAdapter._is_standard_vidu_model(model)
 
     @staticmethod
     def _resolve_resolution(
