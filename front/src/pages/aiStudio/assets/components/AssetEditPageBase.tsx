@@ -30,7 +30,7 @@ import { useRelationTaskNotification } from '../../components/taskNotificationHe
 import { useTaskPageContext } from '../../components/taskPageContext'
 import { TASK_COPY } from '../../components/taskCopy'
 import { usePointsQuote } from '../../../../hooks/usePointsQuote'
-import { PointsCostHint } from '../../../../components/points/PointsCostHint'
+import { PointsCostButton } from '../../../../components/points/PointsCostButton'
 import { makePointsAwareGetErrorMessage } from '../../../../components/points/pointsTaskError'
 import { useLocation } from 'react-router-dom'
 import {
@@ -929,16 +929,18 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                       relationType === 'prop_image' ||
                       relationType === 'costume_image' ? (
                         <>
-                          <Button
+                          <PointsCostButton
                             type="primary"
                             size="small"
-                            onClick={() => void handleSmartDetectMissing()}
                             loading={smartDetectLoading}
-                            disabled={Boolean(loading) || !!smartDetectTask || !smartDetectQuote.canSubmit}
+                            disabled={Boolean(loading) || !!smartDetectTask}
+                            quote={smartDetectQuote.quote}
+                            quoteLoading={smartDetectQuote.loading}
+                            quoteError={smartDetectQuote.error}
+                            onClick={() => void handleSmartDetectMissing()}
                           >
                             {smartDetectTask ? '检测中' : '智能检测'}
-                          </Button>
-                          <PointsCostHint quote={smartDetectQuote.quote} loading={smartDetectQuote.loading} error={smartDetectQuote.error} />
+                          </PointsCostButton>
                           {smartDetectTask ? (
                             <Button
                               size="small"
@@ -1042,15 +1044,18 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                       footer={
                         <div className="flex flex-col gap-1">
                           <div className="flex items-center gap-2">
-                            <Button
+                            <PointsCostButton
                               type="primary"
                               size="small"
-                              disabled={!slot.image || !imageQuote.canSubmit}
+                              disabled={!slot.image}
                               loading={Boolean(slot.image && generatingByImageId[slot.image.id])}
+                              quote={imageQuote.quote}
+                              quoteLoading={imageQuote.loading}
+                              quoteError={imageQuote.error}
                               onClick={() => slot.image && void handleGenerateImage(slot.image)}
                             >
                               生成
-                            </Button>
+                            </PointsCostButton>
                             <Button
                               size="small"
                               icon={<EditOutlined />}
@@ -1060,7 +1065,6 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                               候选池
                             </Button>
                           </div>
-                          <PointsCostHint quote={imageQuote.quote} loading={imageQuote.loading} error={imageQuote.error} />
                         </div>
                       }
                     />

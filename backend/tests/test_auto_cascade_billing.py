@@ -113,11 +113,10 @@ def _build_engines() -> tuple[Any, Any, Any, Any]:
 def _seed_sync(db: Session) -> None:
     """在同步库中预置 user/provider/model/settings/project/chapter。"""
     db.add(User(id=USER_ID, username="u1", hashed_password="x", is_active=True, token_version=0))
-    db.add(Provider(id="p1", user_id=USER_ID, name="prov", base_url="http://x", api_key="k"))
+    db.add(Provider(id="p1", name="prov", base_url="http://x", api_key="k"))
     db.add(
         Model(
             id="m_img",
-            user_id=USER_ID,
             name="img-model",
             category=ModelCategoryKey.image,
             provider_id="p1",
@@ -153,11 +152,10 @@ async def _seed_async(async_session_local) -> None:
         await conn.run_sync(_Base.metadata.create_all)
     async with async_session_local() as db:
         db.add(User(id=USER_ID, username="u1", hashed_password="x", is_active=True, token_version=0))
-        db.add(Provider(id="p1", user_id=USER_ID, name="prov", base_url="http://x", api_key="k"))
+        db.add(Provider(id="p1", name="prov", base_url="http://x", api_key="k"))
         db.add(
             Model(
                 id="m_img",
-                user_id=USER_ID,
                 name="img-model",
                 category=ModelCategoryKey.image,
                 provider_id="p1",
@@ -167,7 +165,6 @@ async def _seed_async(async_session_local) -> None:
         db.add(
             Model(
                 id="m_text",
-                user_id=USER_ID,
                 name="text-model",
                 category=ModelCategoryKey.text,
                 provider_id="p1",
@@ -397,7 +394,6 @@ def test_auto_extract_cache_miss_consumes(monkeypatch) -> None:
         db.add(
             Model(
                 id="m_text",
-                user_id=USER_ID,
                 name="text-model",
                 category=ModelCategoryKey.text,
                 provider_id="p1",
@@ -470,7 +466,6 @@ def test_auto_extract_cache_hit_unfreezes(monkeypatch) -> None:
         db.add(
             Model(
                 id="m_text",
-                user_id=USER_ID,
                 name="text-model",
                 category=ModelCategoryKey.text,
                 provider_id="p1",
@@ -537,7 +532,6 @@ def test_auto_extract_insufficient_balance_skips_extraction(monkeypatch) -> None
         db.add(
             Model(
                 id="m_text",
-                user_id=USER_ID,
                 name="text-model",
                 category=ModelCategoryKey.text,
                 provider_id="p1",

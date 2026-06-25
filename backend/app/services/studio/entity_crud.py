@@ -81,13 +81,14 @@ async def list_entities_paginated(
 ) -> tuple[list[dict[str, Any]], int]:
     entity_type_norm = normalize_entity_type(entity_type)
     spec = entity_spec(entity_type_norm)
+    # character 是项目级实体，必须传 project_id 才能做用户隔离（自身无 user_id 列）。
+    if entity_type_norm == "character" and not project_id:
+        raise HTTPException(status_code=400, detail="project_id is required for character entity type")
     stmt = select(spec.model)
     # 资产类型按 user_id 隔离：用户只能看到自己的 actor/scene/prop/costume。
-    # character 无 user_id 列，靠 project_id 间接隔离，这里不加该过滤。
     if entity_type_norm in USER_OWNED_ENTITY_TYPES:
         stmt = stmt.where(spec.model.user_id == user_id)
     stmt = apply_keyword_filter(stmt, q=q, fields=[spec.model.name, spec.model.description])
-    # character 是项目级实体，可按 project_id 过滤以只展示当前项目的角色
     if project_id and entity_type_norm in {"actor", "character"} and hasattr(spec.model, "project_id"):
         stmt = stmt.where(getattr(spec.model, "project_id") == project_id)
     if style:

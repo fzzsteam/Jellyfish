@@ -4,7 +4,7 @@
 /* eslint-disable */
 import type { PromptCategory } from './PromptCategory';
 /**
- * 创建提示词模板。id 由后端自动生成；is_system 不可由客户端设置。
+ * 创建提示词模板。id 由后端自动生成；is_system 仅管理员可设为 True。
  */
 export type PromptTemplateCreate = {
     /**
@@ -31,5 +31,9 @@ export type PromptTemplateCreate = {
      * 是否为默认提示词
      */
     is_default?: boolean;
+    /**
+     * 是否设为系统预置（仅管理员有效）
+     */
+    is_system?: boolean;
 };
 

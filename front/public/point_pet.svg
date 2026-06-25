@@ -1,0 +1,75 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- coin base -->
+    <linearGradient id="coinGradient" x1="156" y1="116" x2="356" y2="410" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFEA63"/>
+      <stop offset="0.48" stop-color="#FFC21A"/>
+      <stop offset="1" stop-color="#F19A00"/>
+    </linearGradient>
+
+    <!-- outer rim -->
+    <linearGradient id="rimGradient" x1="152" y1="96" x2="360" y2="430" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFE877"/>
+      <stop offset="0.45" stop-color="#FFC21A"/>
+      <stop offset="1" stop-color="#C97800"/>
+    </linearGradient>
+
+    <!-- inner face -->
+    <linearGradient id="innerGradient" x1="180" y1="150" x2="340" y2="370" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFD943"/>
+      <stop offset="1" stop-color="#F6A900"/>
+    </linearGradient>
+
+    <!-- star shadow -->
+    <filter id="starShadow" x="110" y="120" width="292" height="270" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="10" stdDeviation="4" flood-color="#B46A00" flood-opacity="0.35"/>
+    </filter>
+
+    <!-- soft coin shadow -->
+    <filter id="coinShadow" x="86" y="86" width="340" height="340" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#A86600" flood-opacity="0.18"/>
+    </filter>
+  </defs>
+
+  <!-- coin -->
+  <g filter="url(#coinShadow)">
+    <!-- outer circle -->
+    <circle cx="256" cy="256" r="164" fill="url(#rimGradient)"/>
+
+    <!-- bright rim -->
+    <circle cx="256" cy="256" r="148" fill="none" stroke="#FFE45C" stroke-width="18"/>
+
+    <!-- inner coin face -->
+    <circle cx="256" cy="256" r="126" fill="url(#innerGradient)"/>
+
+    <!-- inner ring -->
+    <circle cx="256" cy="256" r="126" fill="none" stroke="#C97A00" stroke-width="8"/>
+
+    <!-- outer edge -->
+    <circle cx="256" cy="256" r="164" fill="none" stroke="#C47400" stroke-width="10"/>
+  </g>
+
+  <!-- glossy highlights -->
+  <ellipse cx="168" cy="154" rx="34" ry="12" transform="rotate(-38 168 154)" fill="white" fill-opacity="0.45"/>
+  <ellipse cx="196" cy="174" rx="28" ry="10" transform="rotate(-38 196 174)" fill="white" fill-opacity="0.55"/>
+
+  <!-- center star -->
+  <path
+    d="M256 142
+       L291 218
+       L374 226
+       L311 280
+       L330 361
+       L256 319
+       L182 361
+       L201 280
+       L138 226
+       L221 218
+       Z"
+    fill="white"
+    stroke="#D58A00"
+    stroke-width="10"
+    stroke-linejoin="round"
+    filter="url(#starShadow)"
+  />
+</svg>

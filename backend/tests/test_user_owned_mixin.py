@@ -9,10 +9,10 @@ from app.core.db import Base
 from app.models.studio_projects import Project
 from app.models.studio_assets import Actor, Costume, Prop, Scene
 from app.models.studio_prompts_files_timeline import FileItem, PromptTemplate
-from app.models.llm import Model, Provider
 from app.models.task import GenerationTask
 
-OWNED_MODELS = [Project, Actor, Scene, Prop, Costume, FileItem, Provider, Model, GenerationTask]
+# Provider / Model 已改为全局共享（无 user_id 列），不再参与此测试。
+OWNED_MODELS = [Project, Actor, Scene, Prop, Costume, FileItem, GenerationTask]
 
 
 @pytest.mark.parametrize("model", OWNED_MODELS)

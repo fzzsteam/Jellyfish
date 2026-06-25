@@ -36,8 +36,8 @@ import { useTaskPageContext } from '../components/taskPageContext'
 import { createTaskSettledReloader } from '../components/taskResultHelpers'
 import { TASK_COPY } from '../components/taskCopy'
 import { usePointsQuote } from '../../../hooks/usePointsQuote'
-import { PointsCostHint } from '../../../components/points/PointsCostHint'
 import { makePointsAwareGetErrorMessage } from '../../../components/points/pointsTaskError'
+import { ExtractionConfirmModal } from './components/ExtractionConfirmModal'
 import {
   SCRIPT_EXTRACTION_RELATION_TYPE,
   useCancelableRelationTask,
@@ -220,6 +220,11 @@ export function ChapterShotEditPage() {
 
   // 积分试算：单条与批量提取均调用同一个 script_extract 接口，共享同一份 quote_token。
   const extractQuote = usePointsQuote({ businessType: 'script_extract', category: 'text', modelId: null, enabled: !!projectId && !!chapterId })
+  // 图片生成单价，用于提取确认弹窗内展示"每张资产图"参考积分。
+  const imageQuote = usePointsQuote({ businessType: 'image_generation', category: 'image', modelId: null, enabled: !!projectId && !!chapterId })
+  // 提取确认弹窗：'single' = 当前镜头，'batch' = 批量多选。
+  const [extractConfirmOpen, setExtractConfirmOpen] = useState(false)
+  const [extractConfirmTarget, setExtractConfirmTarget] = useState<'single' | 'batch'>('single')
 
   // 资产替换 Drawer 状态：选中的待替换资产、抽屉开关、提交中标记
   const [replaceDrawerOpen, setReplaceDrawerOpen] = useState(false)
@@ -1557,11 +1562,10 @@ export function ChapterShotEditPage() {
                 size="small"
                 loading={extractingAssets || extractTaskActive}
                 disabled={extractTaskActive || !extractQuote.canSubmit}
-                onClick={() => void extractAssets()}
+                onClick={() => { setExtractConfirmTarget('single'); setExtractConfirmOpen(true) }}
               >
                 重新提取/刷新候选
               </Button>
-              <PointsCostHint quote={extractQuote.quote} loading={extractQuote.loading} error={extractQuote.error} />
               {extractTask ? (
                 <Button
                   size="small"
@@ -1729,18 +1733,16 @@ export function ChapterShotEditPage() {
                     </Space>
                     {multiSelectActive ? (
                       <Space size={6} className="shrink-0 items-center">
-                        <PointsCostHint quote={extractQuote.quote} loading={extractQuote.loading} error={extractQuote.error} />
-                        <Tooltip title="批量提取并刷新">
-                          <Button
-                            size="small"
-                            type="primary"
-                            shape="circle"
-                            icon={<ReloadOutlined />}
-                            loading={batchExtractingAssets || extractTaskActive}
-                            disabled={extractTaskActive || !extractQuote.canSubmit}
-                            onClick={() => void batchExtractAssets()}
-                          />
-                        </Tooltip>
+                        <Button
+                          size="small"
+                          type="primary"
+                          icon={<ReloadOutlined />}
+                          loading={batchExtractingAssets || extractTaskActive}
+                          disabled={extractTaskActive || !extractQuote.canSubmit}
+                          onClick={() => { setExtractConfirmTarget('batch'); setExtractConfirmOpen(true) }}
+                        >
+                          批量提取
+                        </Button>
                         <Tooltip title="清空选择">
                           <Button
                             size="small"
@@ -1993,6 +1995,37 @@ export function ChapterShotEditPage() {
         loading={addDrawerLoading}
         onSelect={(entityId, entityName) => void doAddLink(entityId, entityName)}
         onClose={() => setAddDrawerOpen(false)}
+      />
+
+      <ExtractionConfirmModal
+        open={extractConfirmOpen}
+        title={extractConfirmTarget === 'batch'
+          ? `确认批量提取（${selectedShots.filter(s => !s.skip_extraction).length} 条镜头）`
+          : '确认提取并自动准备'}
+        onConfirm={() => {
+          setExtractConfirmOpen(false)
+          if (extractConfirmTarget === 'batch') {
+            void batchExtractAssets()
+          } else {
+            void extractAssets()
+          }
+        }}
+        onCancel={() => setExtractConfirmOpen(false)}
+        costRows={[
+          {
+            label: 'AI 信息提取（每条镜头）',
+            quote: extractQuote.quote,
+            loading: extractQuote.loading,
+          },
+          { label: '自动关联已有资产', free: true },
+          {
+            label: '新资产图片生成（每张）',
+            quote: imageQuote.quote,
+            loading: imageQuote.loading,
+            noModel: !imageQuote.loading && !imageQuote.quote ? true : undefined,
+          },
+        ]}
+        note="资产图片数量由 AI 提取结果决定，提取前无法预知；积分不足时对应资产将建档但不生成图片。"
       />
     </Layout>
   )

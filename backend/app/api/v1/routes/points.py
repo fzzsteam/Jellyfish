@@ -207,7 +207,6 @@ async def quote_my_points(
     """试算本次生成所需积分并签发短期 quote_token。
 
     - 不支持的视频分辨率 → 400。
-    - 显式 model_id 归属他人 → PointsDomainError(403) 由 main.py 处理器序列化。
     - 用户未配置默认模型 → 503（配置错误，由通用处理器兜底）。
     """
     try:

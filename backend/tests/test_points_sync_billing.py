@@ -118,11 +118,10 @@ def _build_app_and_db(monkeypatch) -> tuple[FastAPI, object, object]:
             await conn.run_sync(Base.metadata.create_all)
         async with session_local() as db:
             db.add(User(id=USER_ID, username="u1", hashed_password="x", is_active=True, token_version=0))
-            db.add(Provider(id="p1", user_id=USER_ID, name="prov", base_url="http://x", api_key="k"))
+            db.add(Provider(id="p1", name="prov", base_url="http://x", api_key="k"))
             db.add(
                 Model(
                     id="m_text",
-                    user_id=USER_ID,
                     name="text-model",
                     category=ModelCategoryKey.text,
                     provider_id="p1",

@@ -64,7 +64,7 @@ class PointsDomainError(Exception):
         data: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message)
-        self.code = code  # 稳定字符串：INSUFFICIENT_POINTS / POINTS_QUOTE_CHANGED / POINTS_OPERATION_BUSY / MODEL_NOT_OWNED
+        self.code = code  # 稳定字符串：INSUFFICIENT_POINTS / POINTS_QUOTE_CHANGED / POINTS_OPERATION_BUSY
         self.message = message
         self.status_code = status_code
         self.data = data or {}
@@ -104,18 +104,6 @@ def build_busy_error(*, user_id: str) -> PointsDomainError:
     )
 
 
-def build_model_not_owned_error(*, model_id: str, user_id: str) -> PointsDomainError:
-    """构造模型归属校验失败错误（HTTP 403），拒绝借用他人模型计价。
-
-    为什么需要：`resolver.get_model_by_category` 不会校验显式 model_id 是否归属当前用户
-    （模型按用户严格隔离），试算必须显式补这道校验，否则用户可借用他人模型的单价试算。
-    """
-    return PointsDomainError(
-        code="MODEL_NOT_OWNED",
-        message=f"model {model_id} does not belong to user {user_id}",
-        status_code=403,
-        data={"model_id": model_id, "user_id": user_id},
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -192,9 +180,10 @@ async def freeze_for_task(
             data={},
         ) from None
 
-    # 2. 以 token 中 model_id 为权威取模型 + 归属 + 类别校验。
+    # 2. 以 token 中 model_id 为权威取模型 + 类别校验。
     # 若调用方显式传入 model_id 且与 token 绑定的 model_id 不一致,视为请求与报价单据不一致
     # (客户端试图对报价之外的模型计费) → POINTS_QUOTE_CHANGED(409)。
+    # 模型已全局共享（无 user_id 隔离），不再做归属校验。
     if model_id is not None and model_id != claims.model_id:
         raise PointsDomainError(
             code="POINTS_QUOTE_CHANGED",
@@ -213,8 +202,6 @@ async def freeze_for_task(
             status_code=400,
             data={"model_id": claims.model_id},
         )
-    if model.user_id != user_id:
-        raise build_model_not_owned_error(model_id=model.id, user_id=user_id)
     if model.category != category:
         raise PointsDomainError(
             code="MODEL_CATEGORY_MISMATCH",
@@ -536,7 +523,7 @@ async def quote_points(
 ) -> PointsQuoteResponse:
     """试算：解析模型 → 计价 → 查余额 → 签发 quote_token。
 
-    - 显式 `model_id`：先按 id 取 Model，校验归属（`model.user_id == user_id`）与类别匹配。
+    - 显式 `model_id`：按 id 取 Model 并做类别匹配校验（模型全局共享，无归属限制）。
     - 默认模型：调用 `get_default_model_by_category`，无默认配置时让其抛 503 HTTPException
       （属配置错误，由通用 HTTPException 处理器兜底即可）。
     - 计价参数（duration_seconds/resolution）写入 params_hash 绑定到 quote_token，
@@ -555,8 +542,6 @@ async def quote_points(
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=entity_not_found("Model")
             ) from None
-        if model.user_id != user_id:
-            raise build_model_not_owned_error(model_id=model_id, user_id=user_id)
         if model.category != category:
             raise PointsDomainError(
                 code="MODEL_CATEGORY_MISMATCH",

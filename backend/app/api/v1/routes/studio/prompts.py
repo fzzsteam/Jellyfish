@@ -140,7 +140,7 @@ async def create_prompt_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[PromptTemplateRead]:
-    obj = await prompt_service.create_prompt_template(db, body, user_id=current_user.id)
+    obj = await prompt_service.create_prompt_template(db, body, user_id=current_user.id, is_admin=current_user.is_admin)
     return created_response(PromptTemplateRead.model_validate(obj))
 
 
@@ -157,7 +157,7 @@ async def update_prompt_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[PromptTemplateRead]:
-    obj = await prompt_service.update_prompt_template(db, template_id, body, user_id=current_user.id)
+    obj = await prompt_service.update_prompt_template(db, template_id, body, user_id=current_user.id, is_admin=current_user.is_admin)
     return success_response(PromptTemplateRead.model_validate(obj))
 
 
@@ -173,5 +173,5 @@ async def delete_prompt_template(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[None]:
-    await prompt_service.delete_prompt_template(db, template_id, user_id=current_user.id)
+    await prompt_service.delete_prompt_template(db, template_id, user_id=current_user.id, is_admin=current_user.is_admin)
     return empty_response()

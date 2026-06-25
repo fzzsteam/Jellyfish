@@ -1,0 +1,20 @@
+@keyframes pointBadgeBounce {
+  0%, 100% { transform: translateY(0); }
+  40%       { transform: translateY(-4px); }
+  65%       { transform: translateY(-2px); }
+}
+
+.point-amount-hover {
+  transition: transform 0.15s ease;
+}
+.point-amount-hover:hover {
+  animation: pointBadgeBounce 0.45s ease;
+}
+
+/* 图标本身无颜色处理，hover 追加金色光晕（匹配金币 #FFC21A） */
+.point-coin-icon {
+  transition: filter 0.2s ease;
+}
+.point-amount-hover:hover .point-coin-icon {
+  filter: drop-shadow(0 0 5px rgba(251, 194, 26, 0.75));
+}

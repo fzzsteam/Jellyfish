@@ -436,11 +436,11 @@ async def test_single_row_failure_does_not_block_batch(monkeypatch) -> None:
         real_consume = consume_frozen
         call_count = {"n": 0}
 
-        async def _flaky_consume(session, *, user_id, billing_id):  # noqa: ANN001
+        async def _flaky_consume(session, *, user_id, billing_id, created_by=None):  # noqa: ANN001
             call_count["n"] += 1
             if billing_id == "BAD1":
                 raise RuntimeError("injected failure")
-            return await real_consume(session, user_id=user_id, billing_id=billing_id)
+            return await real_consume(session, user_id=user_id, billing_id=billing_id, created_by=created_by)
 
         monkeypatch.setattr(recon_mod, "consume_frozen", _flaky_consume)
 

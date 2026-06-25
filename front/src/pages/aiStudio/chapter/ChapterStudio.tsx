@@ -103,7 +103,7 @@ import { ChapterStudioReadinessDiagnosisPanel } from './components/ChapterStudio
 import { ChapterStudioVideoReadinessPanel } from './components/ChapterStudioVideoReadinessPanel'
 import { useGenerationDraft, type GenerationDraftState } from '../hooks/useGenerationDraft'
 import { usePointsQuote } from '../../../hooks/usePointsQuote'
-import { PointsCostHint } from '../../../components/points/PointsCostHint'
+import { PointsCostButton } from '../../../components/points/PointsCostButton'
 import { makePointsAwareGetErrorMessage } from '../../../components/points/pointsTaskError'
 import { useTaskPageContext } from '../components/taskPageContext'
 import type { RelationTaskState } from '../project/ProjectWorkbench/chapterDivisionTasks'
@@ -638,12 +638,11 @@ const ChapterStudio: React.FC = () => {
   const [batchVideoModels, setBatchVideoModels] = useState<VideoModelOption[]>([])
   const [batchVideoModelsLoading, setBatchVideoModelsLoading] = useState(false)
   const [batchVideoModelId, setBatchVideoModelId] = useState<string | null>(null)
-  const [batchVideoModelPickerOpen, setBatchVideoModelPickerOpen] = useState(false)
   const [batchVideoResolution, setBatchVideoResolution] = useState<'720p' | '1080p'>('720p')
-  const batchVideoModel = useMemo(
-    () => batchVideoModels.find((item) => item.id === batchVideoModelId) ?? null,
-    [batchVideoModelId, batchVideoModels],
-  )
+  // 一键生成确认弹窗状态
+  const [batchConfirmOpen, setBatchConfirmOpen] = useState(false)
+  const [batchConfirmCostLoading, setBatchConfirmCostLoading] = useState(false)
+  const [batchConfirmTotalCost, setBatchConfirmTotalCost] = useState<number | null>(null)
   const [loadingShots, setLoadingShots] = useState(true)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [prefs, setPrefs] = useLocalStoragePrefs()
@@ -725,7 +724,6 @@ const ChapterStudio: React.FC = () => {
     Array<{ shot: StudioShot; readiness: ShotVideoReadinessRead | null; error?: string }>
   >([])
   const [batchGenerating, setBatchGenerating] = useState(false)
-  const [batchGenerateProgress, setBatchGenerateProgress] = useState<{ current: number; total: number } | null>(null)
   const [batchDownloading, setBatchDownloading] = useState(false)
   const [batchDownloadProgress, setBatchDownloadProgress] = useState<{ current: number; total: number } | null>(null)
   const [saving, setSaving] = useState(false)
@@ -1277,100 +1275,145 @@ const ChapterStudio: React.FC = () => {
     }
   }, [fetchBatchVideoReadiness])
 
-  /** 串行为所有可见分镜提交视频生成任务 */
-  const handleBatchGenerateAll = useCallback(async () => {
+  /** 预估选中分镜视频生成的积分总花费（并行查询，仅用于弹窗展示） */
+  const calculateBatchTotalCost = useCallback(async (modelId: string, resolution: '720p' | '1080p') => {
+    const targets = selectedShots.filter((s) => (shotDurations[s.id] ?? 0) > 0)
+    if (targets.length === 0 || !modelId) {
+      setBatchConfirmTotalCost(null)
+      setBatchConfirmCostLoading(false)
+      return
+    }
+    setBatchConfirmCostLoading(true)
+    setBatchConfirmTotalCost(null)
+    try {
+      const results = await Promise.all(
+        targets.map((shot) =>
+          PointsService.quoteMyPointsApiV1PointsQuotePost({
+            requestBody: {
+              business_type: 'video_generation',
+              category: 'video',
+              model_id: modelId,
+              duration_seconds: shotDurations[shot.id],
+              resolution,
+              generation_count: 1,
+            },
+          })
+            .then((res) => res.data?.required_points ?? 0)
+            .catch(() => 0),
+        ),
+      )
+      setBatchConfirmTotalCost(results.reduce((a, b) => a + b, 0))
+    } finally {
+      setBatchConfirmCostLoading(false)
+    }
+  }, [selectedShots, shotDurations])
+
+  /**
+   * 确认弹窗提交：先对选中分镜做视频准备度检查，过滤出 ready 的分镜，
+   * 再串行逐镜试算积分并提交视频生成任务。未通过检查的分镜自动跳过并展示诊断面板。
+   */
+  const handleBatchGenerateSelected = useCallback(async () => {
     const ratio = resolveShotVideoRatio(null)
     if (!ratio) {
       message.warning('当前缺少视频比例，请先设置项目默认比例')
       return
     }
-    if (!batchVideoModelId) {
-      message.warning('请先选择视频模型')
-      return
-    }
-    const targets = shots.filter((s) => !s.hidden)
-    if (targets.length === 0) {
-      message.warning('没有可见分镜')
-      return
-    }
     setBatchGenerating(true)
-    setBatchGenerateProgress({ current: 0, total: targets.length })
-    let successCount = 0
-    let failCount = 0
-    let skipCount = 0
-    for (let i = 0; i < targets.length; i++) {
-      const shot = targets[i]
-      setBatchGenerateProgress({ current: i + 1, total: targets.length })
-      // 批量视频按逐镜试算：quote_token 的 params_hash 绑定 duration_seconds，
-      // 各分镜时长不同故无法复用单一凭证。无 duration 的分镜直接跳过（不计失败）。
-      const durationSeconds = shotDurations[shot.id] ?? null
-      if (!durationSeconds) {
-        skipCount++
-        continue
+    try {
+      const readinessResults = await fetchBatchVideoReadiness()
+      const readyShots = readinessResults.filter((item) => item.readiness?.ready)
+      const blockedShots = readinessResults.filter((item) => !item.readiness?.ready)
+
+      if (blockedShots.length > 0) {
+        setBatchVideoReadinessItems(readinessResults)
+        setBatchVideoReadinessOpen(true)
       }
-      try {
-        const previewRes = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
+
+      if (readyShots.length === 0) {
+        message.warning('当前选中的分镜都未通过视频准备度检查，已为你展开检查结果')
+        return
+      }
+
+      if (blockedShots.length > 0) {
+        message.warning(`其中 ${blockedShots.length} 条未通过检查，已自动跳过，仅继续生成 ${readyShots.length} 条`)
+      }
+
+      const targets = readyShots.map((item) => item.shot)
+      let successCount = 0
+      let failCount = 0
+      let skipCount = 0
+
+      for (let i = 0; i < targets.length; i++) {
+        const shot = targets[i]
+        // 各分镜时长不同，quote_token 的 params_hash 绑定 duration_seconds，必须逐镜试算。
+        const durationSeconds = shotDurations[shot.id] ?? null
+        if (!durationSeconds) {
+          skipCount++
+          continue
+        }
+        try {
+          const previewRes = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
             requestBody: {
               shot_id: shot.id,
               reference_mode: 'text_only',
               prompt: null,
               images: [],
-            ratio,
-          } as any,
-        })
-        const derived = (previewRes as any)?.data ?? null
-        const prompt = typeof derived?.prompt === 'string' ? derived.prompt : ''
-        const images: string[] = Array.isArray(derived?.images)
-          ? (derived.images as string[]).filter(Boolean)
-          : []
-        // 逐镜试算积分，获取绑定本镜 duration+resolution+model 的 quote_token。
-        const quoteRes = await PointsService.quoteMyPointsApiV1PointsQuotePost({
-          requestBody: {
-            business_type: 'video_generation',
-            category: 'video',
-            model_id: batchVideoModelId,
-            duration_seconds: durationSeconds,
-            resolution: batchVideoResolution,
-            generation_count: 1,
-          },
-        })
-        const perShotQuoteToken = quoteRes.data?.quote_token ?? null
-        if (!perShotQuoteToken) {
+              ratio,
+            } as any,
+          })
+          const derived = (previewRes as any)?.data ?? null
+          const prompt = typeof derived?.prompt === 'string' ? derived.prompt : ''
+          const images: string[] = Array.isArray(derived?.images)
+            ? (derived.images as string[]).filter(Boolean)
+            : []
+          const quoteRes = await PointsService.quoteMyPointsApiV1PointsQuotePost({
+            requestBody: {
+              business_type: 'video_generation',
+              category: 'video',
+              model_id: batchVideoModelId,
+              duration_seconds: durationSeconds,
+              resolution: batchVideoResolution,
+              generation_count: 1,
+            },
+          })
+          const perShotQuoteToken = quoteRes.data?.quote_token ?? null
+          if (!perShotQuoteToken) {
+            failCount++
+            continue
+          }
+          await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
+            requestBody: {
+              shot_id: shot.id,
+              model_id: batchVideoModelId,
+              reference_mode: 'text_only',
+              prompt,
+              images,
+              ratio: ratio as '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9',
+              resolution: batchVideoResolution,
+              quote_token: perShotQuoteToken,
+            },
+          })
+          successCount++
+        } catch (error) {
+          const pointsAware = makePointsAwareGetErrorMessage(() => {})
+          const msg = pointsAware(error, '分镜视频生成失败')
+          message.error(`分镜 ${String(shot.index).padStart(2, '0')}：${msg}`)
           failCount++
-          continue
         }
-        await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
-          requestBody: {
-            shot_id: shot.id,
-            model_id: batchVideoModelId,
-            reference_mode: 'text_only',
-            prompt,
-            images,
-            ratio: ratio as '16:9' | '4:3' | '1:1' | '3:4' | '9:16' | '21:9',
-            resolution: batchVideoResolution,
-            quote_token: perShotQuoteToken,
-          },
-        })
-        successCount++
-      } catch (error) {
-        // 积分不足/报价变更：提示后继续下一镜，避免单个分镜阻塞整批。
-        const pointsAware = makePointsAwareGetErrorMessage(() => {})
-        const msg = pointsAware(error, '分镜视频生成失败')
-        message.error(`分镜 ${String(shot.index).padStart(2, '0')}：${msg}`)
-        failCount++
       }
+
+      if (failCount === 0 && skipCount === 0) {
+        message.success(`已成功提交 ${successCount} 个分镜的视频生成任务`)
+      } else {
+        const parts = [`${successCount} 成功`]
+        if (failCount > 0) parts.push(`${failCount} 失败`)
+        if (skipCount > 0) parts.push(`${skipCount} 跳过（无时长）`)
+        message.warning(`提交完成：${parts.join('，')}`)
+      }
+    } finally {
+      setBatchGenerating(false)
     }
-    setBatchGenerating(false)
-    setBatchGenerateProgress(null)
-    if (failCount === 0 && skipCount === 0) {
-      message.success(`已成功提交 ${successCount} 个分镜的视频生成任务`)
-    } else {
-      const parts = [`${successCount} 成功`]
-      if (failCount > 0) parts.push(`${failCount} 失败`)
-      if (skipCount > 0) parts.push(`${skipCount} 跳过（无时长）`)
-      message.warning(`提交完成：${parts.join('，')}`)
-    }
-  }, [resolveShotVideoRatio, shots, setBatchGenerating, setBatchGenerateProgress, batchVideoModelId, batchVideoResolution, shotDurations])
+  }, [resolveShotVideoRatio, fetchBatchVideoReadiness, shotDurations, batchVideoModelId, batchVideoResolution, setBatchGenerating, setBatchVideoReadinessItems, setBatchVideoReadinessOpen])
 
   /** 将所有已生成视频下载到用户选择的本地文件夹 */
   /** 下载每个分镜中被选中的视频到用户指定的本地文件夹 */
@@ -1442,81 +1485,6 @@ const ChapterStudio: React.FC = () => {
       setBatchDownloadProgress(null)
     }
   }, [shots, selectedVideosByShot])
-
-  const runBatchGenerate = useCallback(
-    async (targetShotIds: string[]) => {
-      for (const id of targetShotIds) {
-        const framesRes = await StudioShotFrameImagesService.listShotFrameImagesApiV1StudioShotFrameImagesGet({
-          shotDetailId: id,
-          order: null,
-          isDesc: false,
-          page: 1,
-          pageSize: 100,
-        })
-        const frames = framesRes.data?.items ?? []
-        const target = frames.find((x) => x.frame_type === 'key') ?? frames[0]
-        if (!target) continue
-
-        const detailRes: any = await StudioShotDetailsService.getShotDetailApiV1StudioShotDetailsShotIdGet({ shotId: id })
-        const d = detailRes?.data as any
-        const prompt =
-          (target.frame_type === 'first'
-            ? d?.first_frame_prompt
-            : target.frame_type === 'last'
-              ? d?.last_frame_prompt
-              : d?.key_frame_prompt) ?? ''
-        if (!String(prompt || '').trim()) continue
-
-        const linked = await StudioShotsService.listShotLinkedAssetsApiV1StudioShotsShotIdLinkedAssetsGet({
-          shotId: id,
-          page: 1,
-          pageSize: 100,
-        })
-        const items = (linked.data?.items ?? []) as any[]
-        const extractFileId = (thumbnail?: string | null): string | null => {
-          const v = (thumbnail || '').trim()
-          if (!v) return null
-          if (!v.includes('/') && !v.includes(':')) return v
-          try {
-            const url = new URL(v, typeof window !== 'undefined' ? window.location.origin : 'http://localhost')
-            const m = url.pathname.match(/\/api\/v1\/studio\/files\/([^/]+)\/download\/?$/)
-            if (m?.[1]) return decodeURIComponent(m[1])
-          } catch {
-            // ignore
-          }
-          return null
-        }
-        const imagesPayload = items
-          .map((x) => {
-            const fileId = typeof x?.file_id === 'string' && x.file_id.trim() ? x.file_id.trim() : extractFileId(x?.thumbnail)
-            return fileId
-              ? {
-                  type: x?.type as any,
-                  id: String(x?.id ?? ''),
-                  name: String(x?.name ?? x?.id ?? ''),
-                  file_id: fileId,
-                }
-              : null
-          })
-          .filter(Boolean)
-        const targetRatio = resolveShotVideoRatio(d)
-        if (!targetRatio) continue
-        await StudioImageTasksService.createShotFrameImageGenerationTaskApiV1StudioImageTasksShotShotIdFrameImageTasksPost({
-          shotId: id,
-          requestBody: {
-            frame_type: target.frame_type as any,
-            model_id: null,
-            prompt,
-            images: imagesPayload,
-            target_ratio: targetRatio,
-            resolution_profile: keyframeResolutionProfile,
-            quote_token: imageQuote.quoteToken,
-          } as any,
-        })
-      }
-    },
-    [keyframeResolutionProfile, resolveShotVideoRatio, imageQuote.quoteToken],
-  )
 
   const updatePromptProps = async (propIds: string[]) => {
     if (!selectedShotId || !projectId) return
@@ -2186,47 +2154,16 @@ const ChapterStudio: React.FC = () => {
     {
       key: 'generate',
       icon: <ThunderboltOutlined />,
-      label: '批量生成',
+      label: '批量生成视频',
       onClick: () => {
         if (selectedShotIds.length === 0) return
-        Modal.confirm({
-          title: `批量生成 ${selectedShotIds.length} 个分镜？`,
-          okText: '开始',
-          cancelText: '取消',
-          onOk: async () => {
-            setGenerating(true)
-            try {
-              const readinessResults = await fetchBatchVideoReadiness()
-              const readyShots = readinessResults.filter((item) => item.readiness?.ready)
-              const blockedShots = readinessResults.filter((item) => !item.readiness?.ready)
-
-              if (blockedShots.length > 0) {
-                setBatchVideoReadinessItems(readinessResults)
-                setBatchVideoReadinessOpen(true)
-              }
-
-              if (readyShots.length === 0) {
-                message.warning('当前选中的分镜都未通过视频准备度检查，已为你展开检查结果')
-                return
-              }
-
-              if (blockedShots.length > 0) {
-                message.warning(`其中 ${blockedShots.length} 条未通过检查，已自动跳过，仅继续生成 ${readyShots.length} 条`)
-              }
-
-              await runBatchGenerate(readyShots.map((item) => item.shot.id))
-              message.success('已创建批量生成任务')
-            } catch (error) {
-              // 优先识别积分业务错误（积分不足/报价已变更），命中后刷新报价并返回语义文案。
-              const pointsAware = makePointsAwareGetErrorMessage(imageQuote.refresh)
-              const fallback = '批量生成失败'
-              const msg = pointsAware(error, fallback)
-              message.error(msg)
-            } finally {
-              setGenerating(false)
-            }
-          },
-        })
+        setBatchConfirmOpen(true)
+        if (batchVideoModelId) {
+          void calculateBatchTotalCost(batchVideoModelId, batchVideoResolution)
+        } else {
+          setBatchConfirmTotalCost(null)
+          setBatchConfirmCostLoading(false)
+        }
       },
     },
   ]
@@ -2295,8 +2232,15 @@ const ChapterStudio: React.FC = () => {
           }}
         >
           <div className="cs-group m-3 mb-2 flex flex-col gap-2 min-w-0">
-            <div className="cs-group-title mb-0 flex items-center gap-2 shrink-0">
-              <FileTextOutlined /> 分镜列表
+            <div className="cs-group-title mb-0 flex items-center gap-2 shrink-0 min-w-0">
+              <FileTextOutlined className="shrink-0" /> 分镜列表
+              {!multiToolbarVisible ? (
+                <span className="text-[11px] text-slate-500 font-normal truncate" title="Command/Ctrl + 点击多选">
+                  Command/Ctrl + 点击多选
+                </span>
+              ) : (
+                <span className="text-xs font-normal text-slate-500 shrink-0">已选 {selectedShotIds.length} 条</span>
+              )}
             </div>
             <div className="overflow-x-auto min-w-0 -mx-1 px-1">
               <Segmented
@@ -2511,82 +2455,6 @@ const ChapterStudio: React.FC = () => {
             }
             extra={
               <div className="flex items-center gap-2">
-                <Popover
-                  open={batchVideoModelPickerOpen}
-                  onOpenChange={setBatchVideoModelPickerOpen}
-                  trigger="click"
-                  placement="bottomRight"
-                  title={<span className="text-sm font-medium">批量视频模型</span>}
-                  content={(
-                    <div style={{ width: 240 }}>
-                      {batchVideoModelsLoading ? (
-                        <div className="py-3 text-center text-xs text-gray-400">加载中...</div>
-                      ) : batchVideoModels.length === 0 ? (
-                        <div className="py-3 text-center text-xs text-gray-400">暂无可用视频模型</div>
-                      ) : (
-                        <div className="space-y-1">
-                          {batchVideoModels.map((model) => (
-                            <div
-                              key={model.id}
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => {
-                                setBatchVideoModelId(model.id)
-                                setBatchVideoModelPickerOpen(false)
-                              }}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter' || event.key === ' ') {
-                                  event.preventDefault()
-                                  setBatchVideoModelId(model.id)
-                                  setBatchVideoModelPickerOpen(false)
-                                }
-                              }}
-                              className={[
-                                'flex cursor-pointer items-start gap-2 rounded px-3 py-2 transition-colors select-none',
-                                batchVideoModelId === model.id ? 'bg-blue-50 ring-1 ring-blue-400' : 'hover:bg-gray-50',
-                              ].join(' ')}
-                            >
-                              <div className="flex-1 min-w-0">
-                                <div className="truncate text-sm font-medium text-gray-800">{model.name}</div>
-                                <Tag className="m-0 mt-0.5 flex-shrink-0 px-1 py-0 text-[10px] leading-4">{model.provider_name}</Tag>
-                              </div>
-                              {batchVideoModelId === model.id && <CheckOutlined className="mt-0.5 flex-shrink-0 text-blue-500" />}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                >
-                  <Button
-                    size="small"
-                    loading={batchVideoModelsLoading}
-                    icon={<AppstoreOutlined />}
-                    className="text-left"
-                    style={{ justifyContent: 'flex-start' }}
-                  >
-                    {batchVideoModel ? batchVideoModel.name : '批量模型'}
-                  </Button>
-                </Popover>
-                <Segmented
-                  size="small"
-                  value={batchVideoResolution}
-                  options={[
-                    { value: '720p', label: '720p' },
-                    { value: '1080p', label: '1080p' },
-                  ]}
-                  onChange={(value) => setBatchVideoResolution(value as '720p' | '1080p')}
-                />
-                <Button
-                  size="small"
-                  loading={batchGenerating}
-                  disabled={!batchVideoModelId}
-                  onClick={handleBatchGenerateAll}
-                >
-                  {batchGenerating && batchGenerateProgress
-                    ? `生成中 ${batchGenerateProgress.current}/${batchGenerateProgress.total}`
-                    : '一键全部生成'}
-                </Button>
                 <Button
                   size="small"
                   loading={batchDownloading}
@@ -2773,6 +2641,102 @@ const ChapterStudio: React.FC = () => {
             </Tooltip>
           </>
         )}
+
+        {/* 一键生成视频确认弹窗 */}
+        <Modal
+          title="一键生成视频"
+          open={batchConfirmOpen}
+          onCancel={() => {
+            if (batchGenerating) return
+            setBatchConfirmOpen(false)
+          }}
+          footer={[
+            <Button
+              key="cancel"
+              onClick={() => setBatchConfirmOpen(false)}
+              disabled={batchGenerating}
+            >
+              取消
+            </Button>,
+            <PointsCostButton
+              key="confirm"
+              type="primary"
+              icon={<VideoCameraOutlined />}
+              loading={batchGenerating}
+              disabled={!batchVideoModelId || batchGenerating}
+              quote={batchConfirmTotalCost !== null
+                ? { required_points: batchConfirmTotalCost, available_points: 0, sufficient: true, quote_token: '', resolved_model_id: batchVideoModelId ?? '', resolved_model_name: '', using_default_model: false }
+                : null}
+              quoteLoading={batchConfirmCostLoading}
+              onClick={() => {
+                setBatchConfirmOpen(false)
+                void handleBatchGenerateSelected()
+              }}
+            >
+              确认生成
+            </PointsCostButton>,
+          ]}
+          width={480}
+          destroyOnClose
+        >
+          <div className="space-y-5 py-2">
+            {/* 选中分镜数量 */}
+            <div className="flex items-center justify-between rounded-lg bg-blue-50 px-4 py-3">
+              <span className="text-sm text-gray-700">选中分镜</span>
+              <span className="text-lg font-semibold text-blue-600">
+                {selectedShotIds.length}
+                <span className="ml-1 text-sm font-normal text-gray-500">组</span>
+              </span>
+            </div>
+            <div className="text-xs text-gray-400">
+              · 将先做视频准备度检查，未通过的分镜自动跳过；积分预估仅覆盖已加载时长的分镜
+            </div>
+
+            {/* 模型选择 */}
+            <div className="space-y-1.5">
+              <div className="text-sm font-medium text-gray-700">视频模型</div>
+              <Select
+                style={{ width: '100%' }}
+                placeholder="请选择视频模型"
+                loading={batchVideoModelsLoading}
+                value={batchVideoModelId}
+                onChange={(value) => {
+                  setBatchVideoModelId(value)
+                  void calculateBatchTotalCost(value, batchVideoResolution)
+                }}
+                options={batchVideoModels.map((model) => ({
+                  value: model.id,
+                  label: (
+                    <span>
+                      {model.name}
+                      <span className="ml-2 text-xs text-gray-400">{model.provider_name}</span>
+                    </span>
+                  ),
+                }))}
+              />
+            </div>
+
+            {/* 清晰度选择 */}
+            <div className="space-y-1.5">
+              <div className="text-sm font-medium text-gray-700">清晰度</div>
+              <Segmented
+                value={batchVideoResolution}
+                options={[
+                  { value: '720p', label: '720p' },
+                  { value: '1080p', label: '1080p' },
+                ]}
+                onChange={(value) => {
+                  const res = value as '720p' | '1080p'
+                  setBatchVideoResolution(res)
+                  if (batchVideoModelId) {
+                    void calculateBatchTotalCost(batchVideoModelId, res)
+                  }
+                }}
+              />
+            </div>
+
+          </div>
+        </Modal>
 
         <Modal
           title={`批量视频准备度（${selectedShots.length} 条）`}
@@ -5413,10 +5377,18 @@ function Inspector(props: {
                         ]}
                         onChange={(value) => setVideoResolution(value as '720p' | '1080p')}
                       />
-                      <PointsCostHint quote={videoQuote.quote} loading={videoQuote.loading} error={videoQuote.error} />
-                      <Button type="primary" block icon={<VideoCameraOutlined />} disabled={!videoQuote.canSubmit} loading={videoPromptPreviewSubmitting || videoTaskPolling} onClick={() => void openVideoPromptPreview()}>
+                      <PointsCostButton
+                        type="primary"
+                        block
+                        icon={<VideoCameraOutlined />}
+                        quote={videoQuote.quote}
+                        quoteLoading={videoQuote.loading}
+                        quoteError={videoQuote.error}
+                        loading={videoPromptPreviewSubmitting || videoTaskPolling}
+                        onClick={() => void openVideoPromptPreview()}
+                      >
                         生成视频
-                      </Button>
+                      </PointsCostButton>
                       {videoTaskStatus ? <span className="text-xs text-gray-500">任务状态：{videoTaskStatus}</span> : null}
                     </Space>
                   </div>
@@ -5464,8 +5436,7 @@ function Inspector(props: {
             setKeyframePromptPreviewOpen(false)
           }}
           footer={(
-            <div className="flex items-center justify-between">
-              <PointsCostHint quote={imageQuote.quote} loading={imageQuote.loading} error={imageQuote.error} />
+            <div className="flex items-center justify-end">
               <Space>
                 <Button
                   loading={keyframePromptActionLoading}
@@ -5476,9 +5447,16 @@ function Inspector(props: {
                 >
                   取消
                 </Button>
-                <Button type="primary" loading={keyframePromptActionLoading} disabled={!imageQuote.canSubmit} onClick={() => void confirmGenerateKeyframeWithPrompt()}>
+                <PointsCostButton
+                  type="primary"
+                  loading={keyframePromptActionLoading}
+                  quote={imageQuote.quote}
+                  quoteLoading={imageQuote.loading}
+                  quoteError={imageQuote.error}
+                  onClick={() => void confirmGenerateKeyframeWithPrompt()}
+                >
                   生成
-                </Button>
+                </PointsCostButton>
               </Space>
             </div>
           )}
@@ -5626,23 +5604,18 @@ function Inspector(props: {
                   </div>
                   <Space size="small">
                     <Tag color={hasBasePrompt ? 'blue' : 'default'}>{hasBasePrompt ? '可编辑' : '未生成'}</Tag>
-                    <Button
+                    <PointsCostButton
                       size="small"
                       type={hasBasePrompt ? 'default' : 'primary'}
                       loading={keyframePromptActionLoading}
-                      disabled={!shotFramePromptQuote.canSubmit}
+                      quote={shotFramePromptQuote.quote}
+                      quoteLoading={shotFramePromptQuote.loading}
+                      quoteError={shotFramePromptQuote.error}
                       onClick={() => void regenerateKeyframePrompt()}
                     >
                       AI生成
-                    </Button>
+                    </PointsCostButton>
                   </Space>
-                </div>
-                <div className="mb-2">
-                  <PointsCostHint
-                    quote={shotFramePromptQuote.quote}
-                    loading={shotFramePromptQuote.loading}
-                    error={shotFramePromptQuote.error}
-                  />
                 </div>
                 {!hasBasePrompt ? (
                   <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
@@ -6139,9 +6112,17 @@ function Inspector(props: {
           destroyOnClose
           footer={
             <div className="flex items-center justify-end gap-3">
-              <PointsCostHint quote={videoQuote.quote} loading={videoQuote.loading} error={videoQuote.error} />
               <Button onClick={() => setVideoPromptPreviewOpen(false)} disabled={videoPromptPreviewSubmitting}>取消</Button>
-              <Button type="primary" loading={videoPromptPreviewSubmitting} disabled={!videoQuote.canSubmit} onClick={() => void submitVideoGeneration()}>生成</Button>
+              <PointsCostButton
+                type="primary"
+                loading={videoPromptPreviewSubmitting}
+                quote={videoQuote.quote}
+                quoteLoading={videoQuote.loading}
+                quoteError={videoQuote.error}
+                onClick={() => void submitVideoGeneration()}
+              >
+                生成
+              </PointsCostButton>
             </div>
           }
         >

@@ -24,7 +24,7 @@ import { useRelationTaskNotification } from '../../components/taskNotificationHe
 import { useTaskPageContext } from '../../components/taskPageContext'
 import { TASK_COPY } from '../../components/taskCopy'
 import { usePointsQuote } from '../../../../hooks/usePointsQuote'
-import { PointsCostHint } from '../../../../components/points/PointsCostHint'
+import { PointsCostButton } from '../../../../components/points/PointsCostButton'
 import { makePointsAwareGetErrorMessage } from '../../../../components/points/pointsTaskError'
 
 type EditorMode = 'raw' | 'condensed' | 'compare'
@@ -555,16 +555,18 @@ export function ChapterRawTextEditorModal({
                 </Button>
               ) : (
                 <>
-                  <Button
+                  <PointsCostButton
                     size="small"
                     icon={<ReloadOutlined />}
                     loading={checkingConsistency}
-                    disabled={actionsLoading || !consistencyQuote.canSubmit}
+                    disabled={actionsLoading}
+                    quote={consistencyQuote.quote}
+                    quoteLoading={consistencyQuote.loading}
+                    quoteError={consistencyQuote.error}
                     onClick={() => void handleCheckConsistency()}
                   >
                     角色混淆检查
-                  </Button>
-                  <PointsCostHint quote={consistencyQuote.quote} loading={consistencyQuote.loading} error={consistencyQuote.error} />
+                  </PointsCostButton>
                 </>
               )}
 
@@ -581,16 +583,18 @@ export function ChapterRawTextEditorModal({
                 </Button>
               ) : (
                 <>
-                  <Button
+                  <PointsCostButton
                     size="small"
                     icon={<ThunderboltOutlined />}
                     loading={extracting}
-                    disabled={actionsLoading || !simplifyQuote.canSubmit}
+                    disabled={actionsLoading}
+                    quote={simplifyQuote.quote}
+                    quoteLoading={simplifyQuote.loading}
+                    quoteError={simplifyQuote.error}
                     onClick={() => void handleSmartSimplify()}
                   >
                     智能精简
-                  </Button>
-                  <PointsCostHint quote={simplifyQuote.quote} loading={simplifyQuote.loading} error={simplifyQuote.error} />
+                  </PointsCostButton>
                 </>
               )}
 
@@ -716,17 +720,19 @@ export function ChapterRawTextEditorModal({
                       </Button>
                     ) : (
                       <>
-                        <Button
+                        <PointsCostButton
                           size="small"
                           type="primary"
                           icon={<ThunderboltOutlined />}
                           loading={optimizingScript}
-                          disabled={actionsLoading || !optimizeQuote.canSubmit}
+                          disabled={actionsLoading}
+                          quote={optimizeQuote.quote}
+                          quoteLoading={optimizeQuote.loading}
+                          quoteError={optimizeQuote.error}
                           onClick={() => void handleOneClickOptimize()}
                         >
                           一键优化
-                        </Button>
-                        <PointsCostHint quote={optimizeQuote.quote} loading={optimizeQuote.loading} error={optimizeQuote.error} />
+                        </PointsCostButton>
                       </>
                     )}
                   </Space>

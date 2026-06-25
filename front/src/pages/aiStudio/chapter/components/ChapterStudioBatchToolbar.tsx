@@ -29,11 +29,6 @@ export function ChapterStudioBatchToolbar({
       <div className="cs-group-title mb-1 flex items-center gap-2">
         <AppstoreOutlined /> 批量操作
       </div>
-      <div className="mb-2 text-xs text-gray-500">
-        正在批量处理 {selectedCount} 条分镜，可继续按{' '}
-        <span className="font-medium text-gray-700">Command/Ctrl + 点击</span>{' '}
-        调整选择
-      </div>
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-xs text-gray-600">已选 {selectedCount} 项</span>
         <Button

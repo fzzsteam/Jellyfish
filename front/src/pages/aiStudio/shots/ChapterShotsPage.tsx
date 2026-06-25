@@ -43,8 +43,8 @@ import { createTaskSettledReloader } from '../components/taskResultHelpers'
 import { TASK_COPY } from '../components/taskCopy'
 import { generateUUID } from '../../../utils'
 import { usePointsQuote } from '../../../hooks/usePointsQuote'
-import { PointsBadge } from '../../../components/points/PointsBadge'
 import { makePointsAwareGetErrorMessage } from '../../../components/points/pointsTaskError'
+import { ExtractionConfirmModal } from './components/ExtractionConfirmModal'
 
 const { Header, Content } = Layout
 type ShotListFilter = 'all' | 'pending' | 'generating' | 'ready'
@@ -861,41 +861,28 @@ export function ChapterShotsPage() {
         </Form>
       </Modal>
 
-      {/* 提取分镜积分消耗确认弹窗 */}
-      <Modal
-        title="确认提取分镜并自动准备"
+      <ExtractionConfirmModal
         open={extractConfirmOpen}
-        onOk={() => { setExtractConfirmOpen(false); void handleOneClickExtract() }}
+        title="确认提取分镜并自动准备"
+        onConfirm={() => { setExtractConfirmOpen(false); void handleOneClickExtract() }}
         onCancel={() => setExtractConfirmOpen(false)}
-        okText="确认，开始提取"
-        cancelText="取消"
-        destroyOnClose
-      >
-        <div className="flex flex-col gap-3 py-2 text-sm text-gray-600">
-          <p>本次操作包含两步，积分消耗如下：</p>
-          <div className="flex flex-col gap-2 rounded-lg bg-gray-50 px-4 py-3">
-            <div className="flex items-center justify-between">
-              <span>分镜拆解 + 信息提取（文本各一次）</span>
-              {divideQuote.quote ? (
-                <PointsBadge value={divideQuote.quote.required_points * 2} size="sm" />
-              ) : (
-                <span className="text-gray-400 text-xs">计算中…</span>
-              )}
-            </div>
-            <div className="flex items-center justify-between">
-              <span>资产图生成（每张）</span>
-              {imageQuote.quote ? (
-                <PointsBadge value={imageQuote.quote.required_points} size="sm" />
-              ) : (
-                <span className="text-gray-400 text-xs">图片模型未配置</span>
-              )}
-            </div>
-          </div>
-          <p className="text-gray-400 text-xs leading-relaxed">
-            资产图数量由 AI 拆解后生成的分镜数决定，拆解前无法预知；积分不足以覆盖某张图时，对应资产将建档但不生成图片。
-          </p>
-        </div>
-      </Modal>
+        costRows={[
+          {
+            label: '分镜拆解 + 信息提取（文本各一次）',
+            quote: divideQuote.quote,
+            loading: divideQuote.loading,
+            textMultiplier: 2,
+          },
+          { label: '自动关联已有资产', free: true },
+          {
+            label: '新资产图片生成（每张）',
+            quote: imageQuote.quote,
+            loading: imageQuote.loading,
+            noModel: !imageQuote.loading && !imageQuote.quote ? true : undefined,
+          },
+        ]}
+        note="资产图数量由 AI 拆解后生成的分镜数决定，拆解前无法预知；积分不足时对应资产将建档但不生成图片。"
+      />
 
     </Layout>
   )

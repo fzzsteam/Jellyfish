@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FC, Key } from 'react'
-import { Card, Tree, Input, Row, Col, Tag, Pagination, Button, Modal, Form, Select, Switch, message } from 'antd'
+import { Card, Tree, Input, Row, Col, Tag, Pagination, Button, Modal, Form, Select, Switch, Tooltip, message } from 'antd'
+import { QuestionCircleOutlined } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree'
 import { StudioPromptsService } from '../../../services/generated'
 import type { PromptCategory, PromptTemplateRead } from '../../../services/generated'
+import { useAuthStore } from '../../../store/useAuthStore'
 
 const fallbackCategoryLabels: Record<string, string> = {
   frame_head_image: '首帧图片',
@@ -62,6 +64,7 @@ type CreatePromptForm = {
   preview?: string
   variables?: string[]
   is_default?: boolean
+  is_system?: boolean
 }
 
 type PromptModalMode = 'create' | 'edit'
@@ -106,6 +109,7 @@ function getGroupKey(category: string): (typeof groupOrder)[number] {
 }
 
 const PromptTemplateManager: FC = () => {
+  const isAdmin = useAuthStore((s) => s.user?.is_admin ?? false)
   const [templates, setTemplates] = useState<PromptTemplateRead[]>([])
   const [selected, setSelected] = useState<PromptTemplateRead | null>(null)
   const [searchText, setSearchText] = useState('')
@@ -232,6 +236,7 @@ const PromptTemplateManager: FC = () => {
     createForm.setFieldsValue({
       category: categoryOptions[0]?.value,
       is_default: false,
+      is_system: isAdmin,
       variables: [],
     })
     setFormOpen(true)
@@ -248,6 +253,7 @@ const PromptTemplateManager: FC = () => {
       content: template.content,
       variables: template.variables,
       is_default: template.is_default,
+      is_system: template.is_system,
     })
     setFormOpen(true)
   }
@@ -259,6 +265,7 @@ const PromptTemplateManager: FC = () => {
     preview: values.preview?.trim() || undefined,
     variables: (values.variables ?? []).map((v) => v.trim()).filter(Boolean),
     is_default: values.is_default ?? false,
+    is_system: values.is_system ?? false,
   })
 
   const handleFormSubmit = async () => {
@@ -476,6 +483,22 @@ const PromptTemplateManager: FC = () => {
           <Form.Item label="设为默认提示词" name="is_default" valuePropName="checked">
             <Switch />
           </Form.Item>
+          {isAdmin && (
+            <Form.Item
+              name="is_system"
+              valuePropName="checked"
+              label={
+                <span>
+                  设为系统预置&nbsp;
+                  <Tooltip title="系统预置提示词对所有用户可见，且不归属任何用户。管理员可修改或删除，操作将影响所有用户，请谨慎操作。">
+                    <QuestionCircleOutlined className="text-gray-400 cursor-help" />
+                  </Tooltip>
+                </span>
+              }
+            >
+              <Switch />
+            </Form.Item>
+          )}
         </Form>
       </Modal>
     </div>

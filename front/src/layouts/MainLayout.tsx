@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Layout, Menu, theme, Dropdown, Space, Avatar, Tooltip } from 'antd'
+import { Layout, Menu, theme, Dropdown, Space, Avatar } from 'antd'
 import {
   UserOutlined,
   FolderOutlined,
@@ -8,6 +8,7 @@ import {
   ApiOutlined,
   TeamOutlined,
   WalletOutlined,
+  LoadingOutlined,
 } from '@ant-design/icons'
 import { PointsBadge } from '../components/points/PointsBadge'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
@@ -32,8 +33,9 @@ const MainLayout: React.FC = () => {
   const authUser = useAuthStore((state) => state.user)
   const logout = useAuthStore((state) => state.logout)
   const [passwordOpen, setPasswordOpen] = useState(false)
-  // 当前用户积分摘要，用于顶部"可用 X"徽标。仅在登录后拉取一次。
+  // 积分摘要：hover 头像下拉时实时拉取一次，避免常驻顶栏的数据陈旧问题。
   const [points, setPoints] = useState<PointsSummaryRead | null>(null)
+  const [pointsLoading, setPointsLoading] = useState(false)
 
   const selectedKeys = useMemo(() => {
     if (location.pathname === '/projects' || location.pathname.startsWith('/projects/')) return ['projects']
@@ -47,16 +49,18 @@ const MainLayout: React.FC = () => {
     return []
   }, [location.pathname])
 
-  // 登录后拉取一次当前用户积分摘要，用于顶部徽标展示。
   useEffect(() => {
-    if (!authUser) {
-      setPoints(null)
-      return
-    }
+    if (!authUser) setPoints(null)
+  }, [authUser])
+
+  const handleUserDropdownOpenChange = (open: boolean) => {
+    if (!open || !authUser) return
+    setPointsLoading(true)
     PointsService.getMyPointsApiV1PointsMeGet({})
       .then((r) => setPoints(r.data ?? null))
       .catch(() => setPoints(null))
-  }, [authUser])
+      .finally(() => setPointsLoading(false))
+  }
 
   // 从 URL 提取项目 / 章节上下文，用于顶部导航按钮
   const pathSegments = useMemo(
@@ -200,6 +204,35 @@ const MainLayout: React.FC = () => {
 
   const userMenuItems = [
     {
+      key: 'points-summary',
+      disabled: true,
+      label: (
+        <div className="py-1 flex items-center gap-2 min-w-[140px]">
+          {pointsLoading ? (
+            <span className="text-gray-400 text-xs flex items-center gap-1.5">
+              <LoadingOutlined spin /> 加载积分…
+            </span>
+          ) : points ? (
+            <div className="flex flex-col gap-0.5">
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400 w-8">可用</span>
+                <PointsBadge value={points.available} size="sm" />
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-gray-400 w-8">冻结</span>
+                <PointsBadge value={points.frozen} size="sm" />
+              </div>
+            </div>
+          ) : (
+            <span className="text-gray-400 text-xs">积分暂不可用</span>
+          )}
+        </div>
+      ),
+    },
+    {
+      type: 'divider' as const,
+    },
+    {
       key: 'change-password',
       label: t('user.changePassword'),
       onClick: () => setPasswordOpen(true),
@@ -327,15 +360,12 @@ const MainLayout: React.FC = () => {
 
           {/* 用户信息 */}
           <Space size="middle" className="px-4 shrink-0">
-            {points && (
-              <Tooltip title={`可用 ${points.available} / 冻结 ${points.frozen} / 余额 ${points.balance}`}>
-                <Link to="/points" className="flex items-center gap-1.5 hover:opacity-80 transition-opacity">
-                  <WalletOutlined className="text-amber-400 text-sm" />
-                  <PointsBadge value={points.available} size="sm" />
-                </Link>
-              </Tooltip>
-            )}
-            <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
+            <Dropdown
+              menu={{ items: userMenuItems }}
+              placement="bottomRight"
+              trigger={['hover']}
+              onOpenChange={handleUserDropdownOpenChange}
+            >
               <div className="flex items-center gap-2 cursor-pointer">
                 <Avatar size={32} icon={<UserOutlined />} />
                 <div className="hidden md:flex flex-col leading-tight">

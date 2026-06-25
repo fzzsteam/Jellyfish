@@ -29,8 +29,8 @@ async def test_get_default_model_by_category_uses_model_settings() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
-        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
-        model = Model(id="m_text", user_id="u1", name="gpt-4o-mini", category=ModelCategoryKey.text, provider_id="p1")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_text", name="gpt-4o-mini", category=ModelCategoryKey.text, provider_id="p1")
         settings = ModelSettings(user_id="u1", default_text_model_id="m_text")
         db.add(User(id="u1", username="u1", hashed_password="h"))
         db.add_all([provider, model, settings])
@@ -50,10 +50,9 @@ async def test_get_default_model_by_category_requires_model_settings_entry() -> 
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
-        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
         model = Model(
             id="m_text",
-            user_id="u1",
             name="gpt-4o-mini",
             category=ModelCategoryKey.text,
             provider_id="p1",
@@ -77,8 +76,8 @@ async def test_get_provider_by_model_or_id_supports_both_inputs() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
-        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
-        model = Model(id="m_text", user_id="u1", name="gpt-4o-mini", category=ModelCategoryKey.text, provider_id="p1")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_text", name="gpt-4o-mini", category=ModelCategoryKey.text, provider_id="p1")
         db.add(User(id="u1", username="u1", hashed_password="h"))
         db.add_all([provider, model])
         await db.commit()
@@ -99,8 +98,8 @@ async def test_get_model_by_category_supports_explicit_id_without_default_fallba
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
-        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
-        model = Model(id="m_img", user_id="u1", name="gpt-image-1", category=ModelCategoryKey.image, provider_id="p1")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_img", name="gpt-image-1", category=ModelCategoryKey.image, provider_id="p1")
         db.add(User(id="u1", username="u1", hashed_password="h"))
         db.add_all([provider, model])
         await db.commit()
@@ -125,7 +124,7 @@ async def test_get_provider_by_id_or_obj_supports_both_inputs() -> None:
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
-        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
         db.add(User(id="u1", username="u1", hashed_password="h"))
         db.add(provider)
         await db.commit()
@@ -154,10 +153,9 @@ async def test_build_chat_model_from_provider_builds_chatopenai_with_model_param
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
-        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
         model = Model(
             id="m_text",
-            user_id="u1",
             name="gpt-4o-mini",
             category=ModelCategoryKey.text,
             provider_id="p1",
@@ -195,10 +193,9 @@ async def test_build_default_text_llm_supports_thinking_toggle(monkeypatch: pyte
         await conn.run_sync(Base.metadata.create_all)
 
     async with session_local() as db:
-        provider = Provider(id="p1", user_id="u1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
         model = Model(
             id="m_text",
-            user_id="u1",
             name="gpt-4o-mini",
             category=ModelCategoryKey.text,
             provider_id="p1",

@@ -73,7 +73,6 @@ async def _seed_async(db: AsyncSession) -> None:
         db.add(
             Provider(
                 id="p1",
-                user_id=USER_ID,
                 name="prov",
                 base_url="http://x",
                 api_key="k",
@@ -82,7 +81,6 @@ async def _seed_async(db: AsyncSession) -> None:
         db.add(
             Model(
                 id="m1",
-                user_id=USER_ID,
                 name="vid-model",
                 category=ModelCategoryKey.video,
                 provider_id="p1",
@@ -283,55 +281,6 @@ async def test_freeze_for_task_insufficient_raises() -> None:
 
 
 @pytest.mark.asyncio
-async def test_freeze_for_task_model_not_owned_raises() -> None:
-    """quote token 中 model_id 不归属当前 user → MODEL_NOT_OWNED（403）。
-
-    构造一个属于 OTHER_USER 的模型，user=u1 持其 token 冻结 → 拒绝。
-    """
-    db, engine = await _build_async_db()
-    try:
-        # 给 OTHER_USER 建一个 provider+model
-        async with db.begin():
-            db.add(
-                Provider(
-                    id="p2",
-                    user_id=OTHER_USER_ID,
-                    name="prov2",
-                    base_url="http://x",
-                    api_key="k",
-                )
-            )
-            db.add(
-                Model(
-                    id="m2",
-                    user_id=OTHER_USER_ID,
-                    name="other-model",
-                    category=ModelCategoryKey.video,
-                    provider_id="p2",
-                    unit_points=10,
-                )
-            )
-        # token 用 m2（属 OTHER_USER），required=100 匹配 m2
-        token = _make_quote_token(model_id="m2", required_points=100, duration_seconds=5, resolution="1080p")
-        with pytest.raises(PointsDomainError) as exc_info:
-            await freeze_for_task(
-                db,
-                user_id=USER_ID,
-                quote_token=token,
-                business_type="video_generation",
-                category=ModelCategoryKey.video,
-                model_id="m2",
-                duration_seconds=5,
-                resolution="1080p",
-            )
-        assert exc_info.value.code == "MODEL_NOT_OWNED"
-        assert exc_info.value.status_code == 403
-    finally:
-        await db.close()
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
 async def test_freeze_for_task_model_id_mismatch_raises_quote_changed() -> None:
     """显式 model_id 与 quote token 绑定的 model_id 不符 → POINTS_QUOTE_CHANGED(409)。
 
@@ -344,7 +293,6 @@ async def test_freeze_for_task_model_id_mismatch_raises_quote_changed() -> None:
             db.add(
                 Model(
                     id="m2",
-                    user_id=USER_ID,
                     name="another-own-model",
                     category=ModelCategoryKey.video,
                     provider_id="p1",
@@ -948,11 +896,10 @@ async def _seed_async_with_text_and_image_models(db: AsyncSession) -> None:
 
     async with db.begin():
         db.add(User(id=USER_ID, username="u1", hashed_password="x", is_admin=False, is_active=True, token_version=0))
-        db.add(Provider(id="p1", user_id=USER_ID, name="prov", base_url="http://x", api_key="k"))
+        db.add(Provider(id="p1", name="prov", base_url="http://x", api_key="k"))
         db.add(
             Model(
                 id="m_text",
-                user_id=USER_ID,
                 name="text-model",
                 category=ModelCategoryKey.text,
                 provider_id="p1",
@@ -962,7 +909,6 @@ async def _seed_async_with_text_and_image_models(db: AsyncSession) -> None:
         db.add(
             Model(
                 id="m_img",
-                user_id=USER_ID,
                 name="img-model",
                 category=ModelCategoryKey.image,
                 provider_id="p1",
@@ -1870,8 +1816,8 @@ async def test_build_run_args_passes_resolution_into_input_dict(monkeypatch) -> 
                 description="x",
                 vfx_type=VFXType.none,
             ))
-            db.add(Provider(id="pv1", user_id="tu", name="openai", base_url="http://x", api_key="k"))
-            db.add(Model(id="mv1", user_id="tu", name="sora-mini", category=ModelCategoryKey.video, provider_id="pv1", unit_points=10))
+            db.add(Provider(id="pv1", name="openai", base_url="http://x", api_key="k"))
+            db.add(Model(id="mv1", name="sora-mini", category=ModelCategoryKey.video, provider_id="pv1", unit_points=10))
             db.add(ModelSettings(id=1, default_video_model_id="mv1", user_id="tu"))
             await db.commit()
 
@@ -2089,8 +2035,8 @@ def test_video_route_freezes_before_task_create(monkeypatch) -> None:
             await conn.run_sync(Base.metadata.create_all)
         async with async_session_local() as db:
             db.add(User(id=USER_ID, username="u1", hashed_password="x", is_active=True, token_version=0))
-            db.add(Provider(id="p1", user_id=USER_ID, name="openai", base_url="http://x", api_key="k"))
-            db.add(Model(id="m1", user_id=USER_ID, name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", unit_points=10))
+            db.add(Provider(id="p1", name="openai", base_url="http://x", api_key="k"))
+            db.add(Model(id="m1", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", unit_points=10))
             # Shot 图：mark_shot_generating → recompute_shot_status 需要 Shot 行
             db.add(Project(id="proj-1", name="p", style=ProjectStyle.real_people_city, visual_style=ProjectVisualStyle.live_action, user_id=USER_ID))
             db.add(Chapter(id="ch-1", project_id="proj-1", index=1, title="ch"))
@@ -2193,8 +2139,8 @@ def test_video_route_insufficient_points_no_task(monkeypatch) -> None:
             await conn.run_sync(Base.metadata.create_all)
         async with async_session_local() as db:
             db.add(User(id=USER_ID, username="u1", hashed_password="x", is_active=True, token_version=0))
-            db.add(Provider(id="p1", user_id=USER_ID, name="openai", base_url="http://x", api_key="k"))
-            db.add(Model(id="m1", user_id=USER_ID, name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", unit_points=10))
+            db.add(Provider(id="p1", name="openai", base_url="http://x", api_key="k"))
+            db.add(Model(id="m1", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", unit_points=10))
             await db.commit()
             # 未充值 → 可用 0
 
@@ -2445,11 +2391,10 @@ def _seed_shot_frame_prompt_db(async_engine, async_session_local) -> None:
             await conn.run_sync(Base.metadata.create_all)
         async with async_session_local() as db:
             db.add(User(id=USER_ID, username="u1", hashed_password="x", is_active=True, token_version=0))
-            db.add(Provider(id="p1", user_id=USER_ID, name="openai", base_url="http://x", api_key="k"))
+            db.add(Provider(id="p1", name="openai", base_url="http://x", api_key="k"))
             db.add(
                 Model(
                     id="m_text",
-                    user_id=USER_ID,
                     name="text-model",
                     category=ModelCategoryKey.text,
                     provider_id="p1",
@@ -2576,11 +2521,10 @@ def test_shot_frame_prompt_route_insufficient_points_no_task(monkeypatch) -> Non
             await conn.run_sync(Base.metadata.create_all)
         async with async_session_local() as db:
             db.add(User(id=USER_ID, username="u1", hashed_password="x", is_active=True, token_version=0))
-            db.add(Provider(id="p1", user_id=USER_ID, name="openai", base_url="http://x", api_key="k"))
+            db.add(Provider(id="p1", name="openai", base_url="http://x", api_key="k"))
             db.add(
                 Model(
                     id="m_text",
-                    user_id=USER_ID,
                     name="text-model",
                     category=ModelCategoryKey.text,
                     provider_id="p1",

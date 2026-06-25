@@ -151,6 +151,14 @@ const makeBillingColumns = (modelMap: Record<string, string>): TableColumnsType<
     },
   },
   {
+    title: '业务类型',
+    dataIndex: 'business_type',
+    width: 110,
+    render: (v?: string | null) => (
+      <span className="text-xs text-gray-600">{formatBusinessType(v)}</span>
+    ),
+  },
+  {
     title: '模型',
     dataIndex: 'model_id',
     ellipsis: true,

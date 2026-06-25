@@ -130,8 +130,8 @@ def test_resolve_provider_key_from_name_supports_known_aliases() -> None:
 async def test_resolve_default_video_model_requires_video_category() -> None:
     db, engine = await _build_session()
     async with db:
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k", user_id="test-user")
-        wrong_model = Model(id="m1", name="gpt-4o-mini", category=ModelCategoryKey.text, provider_id="p1", user_id="test-user")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        wrong_model = Model(id="m1", name="gpt-4o-mini", category=ModelCategoryKey.text, provider_id="p1")
         settings = ModelSettings(id=1, default_video_model_id="m1", user_id="test-user")
         db.add_all([provider, wrong_model, settings])
         await db.commit()
@@ -209,8 +209,8 @@ async def test_build_run_args_maps_reference_images(monkeypatch: pytest.MonkeyPa
     db, engine = await _build_session()
     async with db:
         await _seed_shot_graph(db)
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k", user_id="test-user")
-        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", user_id="test-user")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1")
         settings = ModelSettings(id=1, default_video_model_id="m_video", user_id="test-user")
         db.add_all([provider, model, settings])
         await db.commit()
@@ -253,8 +253,8 @@ async def test_build_run_args_clamps_legacy_duration_to_studio_range(monkeypatch
         detail = await db.get(ShotDetail, "s1")
         assert detail is not None
         detail.duration = 30
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k", user_id="test-user")
-        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", user_id="test-user")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1")
         settings = ModelSettings(id=1, default_video_model_id="m_video", user_id="test-user")
         db.add_all([provider, model, settings])
         await db.commit()
@@ -287,20 +287,18 @@ async def test_build_run_args_uses_explicit_video_model_over_default() -> None:
     db, engine = await _build_session()
     async with db:
         await _seed_shot_graph(db)
-        provider = Provider(id="p1", name="Vidu", base_url="https://api.vidu.example", api_key="k", user_id="test-user")
+        provider = Provider(id="p1", name="Vidu", base_url="https://api.vidu.example", api_key="k")
         default_model = Model(
             id="happyhorse-t2v",
             name="happyhorse-1.0-t2v",
             category=ModelCategoryKey.video,
             provider_id="p1",
-            user_id="test-user",
         )
         selected_model = Model(
             id="happyhorse-r2v",
             name="happyhorse-1.0-r2v",
             category=ModelCategoryKey.video,
             provider_id="p1",
-            user_id="test-user",
         )
         settings = ModelSettings(id=1, default_video_model_id=default_model.id, user_id="test-user")
         db.add_all([provider, default_model, selected_model, settings])
@@ -328,13 +326,12 @@ async def test_build_run_args_adds_r2v_asset_reference_images(monkeypatch: pytes
     async with db:
         await _seed_shot_graph(db)
         bootstrap_all_registries()
-        provider = Provider(id="p1", name="bailian", base_url="https://dashscope.aliyuncs.com", api_key="k", user_id="test-user")
+        provider = Provider(id="p1", name="bailian", base_url="https://dashscope.aliyuncs.com", api_key="k")
         model = Model(
             id="happyhorse-r2v",
             name="happyhorse-1.0-r2v",
             category=ModelCategoryKey.video,
             provider_id="p1",
-            user_id="test-user",
         )
         db.add_all(
             [
@@ -424,13 +421,12 @@ async def test_build_run_args_adds_vidu_subject_asset_reference_images(monkeypat
     async with db:
         await _seed_shot_graph(db)
         bootstrap_all_registries()
-        provider = Provider(id="p1", name="Vidu", base_url="https://api.vidu.cn", api_key="k", user_id="test-user")
+        provider = Provider(id="p1", name="Vidu", base_url="https://api.vidu.cn", api_key="k")
         model = Model(
             id="vidu-subject",
             name="viduq3",
             category=ModelCategoryKey.video,
             provider_id="p1",
-            user_id="test-user",
         )
         db.add_all(
             [
@@ -654,8 +650,8 @@ async def test_build_run_args_uses_prompt_pack_when_prompt_missing(monkeypatch: 
     db, engine = await _build_session()
     async with db:
         await _seed_shot_graph(db)
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k", user_id="test-user")
-        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", user_id="test-user")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1")
         settings = ModelSettings(id=1, default_video_model_id="m_video", user_id="test-user")
         db.add_all([provider, model, settings])
         await db.commit()
@@ -799,9 +795,8 @@ async def test_build_run_args_rejects_disabled_provider() -> None:
             base_url="https://api.openai.com/v1",
             api_key="k",
             status=ProviderStatus.disabled,
-            user_id="test-user",
         )
-        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", user_id="test-user")
+        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1")
         settings = ModelSettings(id=1, default_video_model_id="m_video", user_id="test-user")
         db.add_all([provider, model, settings])
         await db.commit()
@@ -830,8 +825,8 @@ async def test_shot_video_readiness_reports_ready_for_text_only() -> None:
         shot = await db.get(Shot, "s1")
         assert shot is not None
         shot.last_extracted_at = datetime.now(timezone.utc)
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k", user_id="test-user")
-        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", user_id="test-user")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1")
         settings = ModelSettings(id=1, default_video_model_id="m_video", user_id="test-user")
         db.add_all([provider, model, settings])
         await db.flush()
@@ -852,8 +847,8 @@ async def test_shot_video_readiness_reports_missing_reference_frame() -> None:
         shot = await db.get(Shot, "s1")
         assert shot is not None
         shot.last_extracted_at = datetime.now(timezone.utc)
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k", user_id="test-user")
-        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", user_id="test-user")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1")
         settings = ModelSettings(id=1, default_video_model_id="m_video", user_id="test-user")
         db.add_all([provider, model, settings])
         await db.flush()
@@ -872,8 +867,8 @@ async def test_build_run_args_uses_request_ratio_as_final_value(monkeypatch: pyt
     db, engine = await _build_session()
     async with db:
         await _seed_shot_graph(db)
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k", user_id="test-user")
-        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", user_id="test-user")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1")
         settings = ModelSettings(id=1, default_video_model_id="m_video", user_id="test-user")
         db.add_all([provider, model, settings])
         await db.commit()
@@ -905,8 +900,8 @@ async def test_build_run_args_rejects_missing_ratio(monkeypatch: pytest.MonkeyPa
     db, engine = await _build_session()
     async with db:
         await _seed_shot_graph(db)
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k", user_id="test-user")
-        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", user_id="test-user")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1")
         settings = ModelSettings(id=1, default_video_model_id="m_video", user_id="test-user")
         db.add_all([provider, model, settings])
         await db.commit()
@@ -943,8 +938,8 @@ async def test_build_run_args_does_not_read_shot_override_ratio(monkeypatch: pyt
         detail = await db.get(ShotDetail, "s1")
         assert detail is not None
         detail.override_video_ratio = "9:16"
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k", user_id="test-user")
-        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", user_id="test-user")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1")
         settings = ModelSettings(id=1, default_video_model_id="m_video", user_id="test-user")
         db.add_all([provider, model, settings])
         await db.commit()
@@ -976,8 +971,8 @@ async def test_build_run_args_accepts_supported_ratio_without_size(monkeypatch: 
     db, engine = await _build_session()
     async with db:
         await _seed_shot_graph(db)
-        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k", user_id="test-user")
-        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1", user_id="test-user")
+        provider = Provider(id="p1", name="OpenAI", base_url="https://api.openai.com/v1", api_key="k")
+        model = Model(id="m_video", name="sora-mini", category=ModelCategoryKey.video, provider_id="p1")
         settings = ModelSettings(id=1, default_video_model_id="m_video", user_id="test-user")
         db.add_all([provider, model, settings])
         await db.commit()

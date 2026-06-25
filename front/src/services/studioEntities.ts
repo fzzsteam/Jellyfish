@@ -4,7 +4,7 @@ import type { AssetImageCandidateAttachRequest } from './generated'
 type EntityType = 'actor' | 'character' | 'scene' | 'prop' | 'costume'
 
 export const StudioEntitiesApi = {
-  list(entityType: EntityType, params: { q?: string | null; page?: number; pageSize?: number; order?: string | null; isDesc?: boolean }) {
+  list(entityType: EntityType, params: { q?: string | null; page?: number; pageSize?: number; order?: string | null; isDesc?: boolean; projectId?: string | null }) {
     return StudioEntitiesService.listEntitiesApiV1StudioEntitiesEntityTypeGet({
       entityType,
       q: params.q ?? null,
@@ -12,6 +12,7 @@ export const StudioEntitiesApi = {
       pageSize: params.pageSize ?? 10,
       order: params.order ?? null,
       isDesc: params.isDesc ?? false,
+      projectId: params.projectId ?? null,
     })
   },
   get(entityType: EntityType, entityId: string) {

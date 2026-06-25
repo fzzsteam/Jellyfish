@@ -30,13 +30,12 @@ from app.services.points import ledger as ledger_module
 
 
 def _seed_provider_and_models(s: AsyncSession, user_id: str) -> tuple[Model, Model, Model]:
-    """为一个用户预置 provider + text/image/video 三个模型，并写入 ModelSettings 默认值。
+    """预置全局 provider + text/image/video 三个模型，并为指定用户写入 ModelSettings 默认值。
 
-    返回 (text_model, image_model, video_model)。模型按用户隔离（user_id 指向归属用户）。
+    返回 (text_model, image_model, video_model)。
     """
     provider = Provider(
         id="prov-1",
-        user_id=user_id,
         name="p",
         base_url="http://x",
         api_key="k",
@@ -44,7 +43,6 @@ def _seed_provider_and_models(s: AsyncSession, user_id: str) -> tuple[Model, Mod
     s.add(provider)
     text_model = Model(
         id="m-text",
-        user_id=user_id,
         name="text-model",
         category=ModelCategoryKey.text,
         provider_id="prov-1",
@@ -52,7 +50,6 @@ def _seed_provider_and_models(s: AsyncSession, user_id: str) -> tuple[Model, Mod
     )
     image_model = Model(
         id="m-image",
-        user_id=user_id,
         name="image-model",
         category=ModelCategoryKey.image,
         provider_id="prov-1",
@@ -60,7 +57,6 @@ def _seed_provider_and_models(s: AsyncSession, user_id: str) -> tuple[Model, Mod
     )
     video_model = Model(
         id="m-video",
-        user_id=user_id,
         name="video-model",
         category=ModelCategoryKey.video,
         provider_id="prov-1",
@@ -115,25 +111,6 @@ def points_client(monkeypatch) -> TestClient:
             )
             await s.flush()
             _seed_provider_and_models(s, "user-1")
-            # 为 admin 预置一个属于 admin 的文本模型，用于跨用户归属测试。
-            admin_provider = Provider(
-                id="prov-admin",
-                user_id="admin-1",
-                name="admin-p",
-                base_url="http://y",
-                api_key="k2",
-            )
-            s.add(admin_provider)
-            s.add(
-                Model(
-                    id="m-admin-text",
-                    user_id="admin-1",
-                    name="admin-text-model",
-                    category=ModelCategoryKey.text,
-                    provider_id="prov-admin",
-                    unit_points=3,
-                )
-            )
             # 给普通用户预置 100 余额，0 冻结。
             s.add(UserPoints(user_id="user-1", balance=100, frozen=0))
             await s.commit()
@@ -298,25 +275,6 @@ def test_quote_explicit_model_owned_by_user_ok(points_client: TestClient) -> Non
     assert claims.required_points == data["required_points"]
     assert claims.model_id == data["resolved_model_id"]
     assert claims.business_type == "text_generation"
-
-
-def test_quote_explicit_model_owned_by_other_user_forbidden(points_client: TestClient) -> None:
-    """显式 model_id 归属另一用户时拒绝（403），避免借用他人模型计价。
-
-    fixture 已为 admin-1 预置模型 m-admin-text（user_id=admin-1）。普通用户 user-1 引用
-    该 model_id 时，quote_points 的归属校验应抛 PointsDomainError(MODEL_NOT_OWNED, 403)。
-    """
-    resp = points_client.post(
-        "/api/v1/points/quote",
-        json={
-            "business_type": "text_generation",
-            "category": "text",
-            "model_id": "m-admin-text",
-        },
-    )
-    assert resp.status_code == 403
-    data = resp.json()["data"]
-    assert data["error_code"] == "MODEL_NOT_OWNED"
 
 
 # ---------------------------------------------------------------------------

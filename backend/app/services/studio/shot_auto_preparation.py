@@ -199,13 +199,13 @@ def _dedupe_named_options(options: list[_AssetOption]) -> list[_AssetOption]:
     return list(by_name.values())
 
 
-def _load_asset_options(db: Session) -> dict[ShotCandidateType, list[_AssetOption]]:
+def _load_asset_options(db: Session, *, user_id: str) -> dict[ShotCandidateType, list[_AssetOption]]:
     """加载每种候选类型的可匹配资产，并标记是否已有可用 file_id 图片。
 
     角色类型使用 LEFT JOIN 且全局加载（不限项目）：角色为全局共享资产，
     分镜可关联资产库中任意角色；含无图片角色，has_image=False 的角色在
     第一轮匹配成功后会额外调度图片生成任务。同名角色会按归一化名去重。
-    场景/道具/服装仍使用 INNER JOIN，只匹配已有图片的资产。
+    场景/道具/服装仍使用 INNER JOIN，只匹配当前用户自有的已有图片资产。
     """
 
     character_rows = db.execute(
@@ -219,19 +219,19 @@ def _load_asset_options(db: Session) -> dict[ShotCandidateType, list[_AssetOptio
     scene_rows = db.execute(
         select(Scene.id, Scene.name, func.count(SceneImage.id))
         .join(SceneImage, SceneImage.scene_id == Scene.id)
-        .where(SceneImage.file_id.is_not(None))
+        .where(Scene.user_id == user_id, SceneImage.file_id.is_not(None))
         .group_by(Scene.id, Scene.name)
     ).all()
     prop_rows = db.execute(
         select(Prop.id, Prop.name, func.count(PropImage.id))
         .join(PropImage, PropImage.prop_id == Prop.id)
-        .where(PropImage.file_id.is_not(None))
+        .where(Prop.user_id == user_id, PropImage.file_id.is_not(None))
         .group_by(Prop.id, Prop.name)
     ).all()
     costume_rows = db.execute(
         select(Costume.id, Costume.name, func.count(CostumeImage.id))
         .join(CostumeImage, CostumeImage.costume_id == Costume.id)
-        .where(CostumeImage.file_id.is_not(None))
+        .where(Costume.user_id == user_id, CostumeImage.file_id.is_not(None))
         .group_by(Costume.id, Costume.name)
     ).all()
     return {
@@ -254,13 +254,13 @@ def _load_asset_options(db: Session) -> dict[ShotCandidateType, list[_AssetOptio
     }
 
 
-def _load_actor_options(db: Session) -> list[_AssetOption]:
-    """加载已有可用图片的演员资产，用于角色候选自动关联演员。"""
+def _load_actor_options(db: Session, *, user_id: str) -> list[_AssetOption]:
+    """加载当前用户已有可用图片的演员资产，用于角色候选自动关联演员。"""
 
     actor_rows = db.execute(
         select(Actor.id, Actor.name, func.count(ActorImage.id))
         .join(ActorImage, ActorImage.actor_id == Actor.id)
-        .where(ActorImage.file_id.is_not(None))
+        .where(Actor.user_id == user_id, ActorImage.file_id.is_not(None))
         .group_by(Actor.id, Actor.name)
     ).all()
     return [
@@ -387,6 +387,7 @@ def _ensure_project_asset_link(
 def _link_candidate(
     db: Session,
     *,
+    user_id: str,
     project_id: str,
     chapter_id: str,
     candidate: ShotExtractedCandidate,
@@ -401,7 +402,7 @@ def _link_candidate(
             db,
             project_id=project_id,
             character_id=option.entity_id,
-            actor_option=_pick_unique_match(str(candidate.candidate_name), _load_actor_options(db)),
+            actor_option=_pick_unique_match(str(candidate.candidate_name), _load_actor_options(db, user_id=user_id)),
         )
     else:
         _ensure_project_asset_link(
@@ -487,8 +488,9 @@ def _find_entity_by_name_sync(
     candidate_type: ShotCandidateType,
     candidate_name: str,
     project_id: str,
+    user_id: str,
 ) -> str | None:
-    """按归一化名称精确匹配现有资产实体，返回 entity_id 或 None。"""
+    """按归一化名称精确匹配当前用户的资产实体，返回 entity_id 或 None。"""
     norm = _normalize_name(candidate_name)
     if not norm:
         return None
@@ -506,11 +508,11 @@ def _find_entity_by_name_sync(
         return matches[0][0]
 
     if candidate_type == ShotCandidateType.scene:
-        rows = db.execute(select(Scene.id, Scene.name)).all()
+        rows = db.execute(select(Scene.id, Scene.name).where(Scene.user_id == user_id)).all()
     elif candidate_type == ShotCandidateType.prop:
-        rows = db.execute(select(Prop.id, Prop.name)).all()
+        rows = db.execute(select(Prop.id, Prop.name).where(Prop.user_id == user_id)).all()
     elif candidate_type == ShotCandidateType.costume:
-        rows = db.execute(select(Costume.id, Costume.name)).all()
+        rows = db.execute(select(Costume.id, Costume.name).where(Costume.user_id == user_id)).all()
     else:
         return None
 
@@ -949,7 +951,7 @@ def _auto_create_and_link_sync(
     prompt = style_prefix + (description or candidate_name)
 
     entity_id = _find_entity_by_name_sync(
-        db, candidate_type=candidate_type, candidate_name=candidate_name, project_id=project_id
+        db, candidate_type=candidate_type, candidate_name=candidate_name, project_id=project_id, user_id=user_id
     )
     created_new_entity = False
     if entity_id is None:
@@ -957,15 +959,16 @@ def _auto_create_and_link_sync(
         # name-overlap relationship with this candidate (substring in either direction).
         # If so, the candidate is likely an abbreviated reference to an existing entity,
         # not a genuinely new asset — leave it pending for manual resolution.
+        # 重叠检测仅在当前用户自有资产范围内进行，避免误用其他用户资产名称阻断建档。
         if candidate_type == ShotCandidateType.character:
             # 角色全局共享：重叠检测纳入全部角色名（跨项目），避免新建与库内已有角色重名/近似
             existing_names = [str(r[0]) for r in db.execute(select(Character.name)).all()]
         elif candidate_type == ShotCandidateType.scene:
-            existing_names = [str(r[0]) for r in db.execute(select(Scene.name)).all()]
+            existing_names = [str(r[0]) for r in db.execute(select(Scene.name).where(Scene.user_id == user_id)).all()]
         elif candidate_type == ShotCandidateType.prop:
-            existing_names = [str(r[0]) for r in db.execute(select(Prop.name)).all()]
+            existing_names = [str(r[0]) for r in db.execute(select(Prop.name).where(Prop.user_id == user_id)).all()]
         elif candidate_type == ShotCandidateType.costume:
-            existing_names = [str(r[0]) for r in db.execute(select(Costume.name)).all()]
+            existing_names = [str(r[0]) for r in db.execute(select(Costume.name).where(Costume.user_id == user_id)).all()]
         else:
             existing_names = []
         # 同批次内其他仍为 pending 的候选名也纳入重叠检测，避免两个互相重叠的
@@ -1019,7 +1022,7 @@ def _auto_create_and_link_sync(
                 _logger.warning("auto_prep: 图片生成调度失败，候选 '%s' 仍将完成关联", candidate_name)
 
             option = _AssetOption(entity_id=entity_id, name=candidate_name, has_image=False)
-            _link_candidate(db, project_id=project_id, chapter_id=chapter_id, candidate=candidate, option=option)
+            _link_candidate(db, user_id=user_id, project_id=project_id, chapter_id=chapter_id, candidate=candidate, option=option)
     except Exception:  # noqa: BLE001
         _logger.warning("auto_prep: 资产创建失败，候选 '%s'(%s) 保留 pending", candidate_name, candidate_type)
         return False
@@ -1058,7 +1061,7 @@ def auto_prepare_chapter_shots_sync(
     proj_style = project.style if project is not None else ProjectStyle.real_people_city
     proj_visual_style = project.visual_style if project is not None else ProjectVisualStyle.live_action
 
-    options_by_type = _load_asset_options(db)
+    options_by_type = _load_asset_options(db, user_id=user_id)
     candidates = list(
         db.execute(
             select(ShotExtractedCandidate)
@@ -1081,6 +1084,7 @@ def auto_prepare_chapter_shots_sync(
             continue
         _link_candidate(
             db,
+            user_id=user_id,
             project_id=project_id,
             chapter_id=chapter_id,
             candidate=candidate,

@@ -117,22 +117,31 @@ async def create_prompt_template(
     body: PromptTemplateCreate,
     *,
     user_id: str,
+    is_admin: bool = False,
 ) -> PromptTemplate:
-    """创建归属当前用户的模板（is_system 固定为 False）。"""
+    """创建提示词模板。
+
+    is_system 仅当调用方为管理员（is_admin=True）且 body.is_system=True 时生效：
+    系统模板的 user_id 置为 None，对所有用户可见。
+    """
+    is_system = is_admin and body.is_system
+    # 系统模板不归属任何用户，普通模板归属当前用户
+    owner_id: str | None = None if is_system else user_id
+
     # 若设为默认，先清除当前用户同类别其他默认
-    if body.is_default:
-        await _clear_category_default(db, user_id=user_id, category=body.category)
+    if body.is_default and owner_id is not None:
+        await _clear_category_default(db, user_id=owner_id, category=body.category)
 
     obj = PromptTemplate(
         id=str(uuid.uuid4()),
-        user_id=user_id,
+        user_id=owner_id,
         category=body.category,
         name=body.name,
         content=body.content,
         preview=body.preview,
         variables=body.variables,
         is_default=body.is_default,
-        is_system=False,  # 客户端不可设置
+        is_system=is_system,
     )
     db.add(obj)
     await db.flush()
@@ -146,10 +155,11 @@ async def update_prompt_template(
     body: PromptTemplateUpdate,
     *,
     user_id: str,
+    is_admin: bool = False,
 ) -> PromptTemplate:
-    """局部更新模板。系统模板禁止修改；他人模板按"未找到"处理。"""
+    """局部更新模板。系统模板禁止修改（管理员除外）；他人模板按"未找到"处理。"""
     obj = await get_prompt_template(db, template_id, user_id=user_id)
-    if obj.is_system:
+    if obj.is_system and not is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="系统预置提示词不可修改")
 
     # 若将当前记录设为默认，先清除当前用户同类别其他默认
@@ -162,6 +172,9 @@ async def update_prompt_template(
         )
 
     update_data = body.model_dump(exclude_unset=True)
+    # 非管理员不得修改 is_system 字段
+    if not is_admin:
+        update_data.pop("is_system", None)
     for field, value in update_data.items():
         setattr(obj, field, value)
 
@@ -170,10 +183,10 @@ async def update_prompt_template(
     return obj
 
 
-async def delete_prompt_template(db: AsyncSession, template_id: str, *, user_id: str) -> None:
-    """删除模板。系统模板禁止删除；默认模板禁止删除；他人模板按"未找到"处理。"""
+async def delete_prompt_template(db: AsyncSession, template_id: str, *, user_id: str, is_admin: bool = False) -> None:
+    """删除模板。系统模板禁止删除（管理员除外）；默认模板禁止删除；他人模板按"未找到"处理。"""
     obj = await get_prompt_template(db, template_id, user_id=user_id)
-    if obj.is_system:
+    if obj.is_system and not is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="系统预置提示词不可删除")
     if obj.is_default:
         raise HTTPException(
