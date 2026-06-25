@@ -47,20 +47,28 @@ class ViduVideoApiAdapter:
             "Content-Type": "application/json",
         }
         body = self._build_request_body(inp)
+        create_url = f"{base_url}{self._resolve_create_path(body)}"
 
         logger.info(
-            "[ViduVideo] Creating task: model=%s duration=%s ratio=%s subjects=%d images=%d",
+            "[ViduVideo] Creating task: model=%s duration=%s ratio=%s subjects=%d images=%d url=%s",
             body.get("model"),
             body.get("duration"),
             body.get("aspect_ratio"),
             len(body.get("subjects") or []),
             len(body.get("images") or []),
+            create_url,
         )
 
         async with httpx.AsyncClient(timeout=timeout_s) as client:
-            create_url = f"{base_url}{self._resolve_create_path(body)}"
             t0 = time.perf_counter()
-            response = await client.post(create_url, headers=headers, json=body)
+            try:
+                response = await client.post(create_url, headers=headers, json=body)
+            except Exception as exc:
+                elapsed_ms = int((time.perf_counter() - t0) * 1000)
+                raise RuntimeError(
+                    f"[ViduVideo] HTTP request failed after {elapsed_ms}ms:"
+                    f" {type(exc).__name__}: {exc or '(no message)'}"
+                ) from exc
             elapsed_ms = int((time.perf_counter() - t0) * 1000)
 
             logger.info(
@@ -222,8 +230,12 @@ class ViduVideoApiAdapter:
 
     @classmethod
     def _build_reference_images(cls, inp: VideoGenerationInput) -> list[str]:
-        """Collect Vidu reference images from frame fields plus r2v asset references."""
-        return [
+        """Collect Vidu reference images from frame fields plus r2v asset references.
+
+        Each image is compressed before inclusion so the JSON request body stays
+        within Vidu's limit (large base64 blobs trigger ReadError on their API).
+        """
+        raw = [
             cls._ensure_image_url(value)
             for value in (
                 inp.first_frame_base64,
@@ -233,6 +245,61 @@ class ViduVideoApiAdapter:
             )
             if value
         ]
+        return [cls._compress_image_for_vidu(url) for url in raw]
+
+    @staticmethod
+    def _compress_image_for_vidu(
+        data_url: str,
+        *,
+        max_px: int = 1024,
+        quality: int = 85,
+        size_threshold_bytes: int = 512 * 1024,
+    ) -> str:
+        """Resize and JPEG-compress a base64 data URL image before sending to Vidu.
+
+        HTTP/HTTPS URLs are returned unchanged so Vidu can fetch them directly.
+        Images smaller than size_threshold_bytes and within max_px are kept as-is.
+        Falls back to the original URL on any error so generation is not blocked.
+        """
+        if not data_url.startswith("data:"):
+            return data_url  # already an HTTP URL
+
+        try:
+            import base64
+            import io
+            from PIL import Image  # pillow must be in dependencies
+
+            _header, b64_data = data_url.split(",", 1)
+            raw_bytes = base64.b64decode(b64_data)
+
+            if len(raw_bytes) <= size_threshold_bytes:
+                # Already small — check pixel dimensions
+                img = Image.open(io.BytesIO(raw_bytes))
+                if max(img.width, img.height) <= max_px:
+                    img.close()
+                    return data_url
+
+            img = Image.open(io.BytesIO(raw_bytes))
+            original_size = (img.width, img.height)
+            img.thumbnail((max_px, max_px), Image.LANCZOS)
+
+            if img.mode in ("RGBA", "P", "LA"):
+                img = img.convert("RGB")
+
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=quality, optimize=True)
+            compressed_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+            logger.info(
+                "[ViduVideo] Compressed image: original_size=%s px, raw=%d B → compressed=%d B",
+                "x".join(map(str, original_size)),
+                len(raw_bytes),
+                len(buf.getvalue()),
+            )
+            return f"data:image/jpeg;base64,{compressed_b64}"
+        except Exception:  # noqa: BLE001
+            logger.exception("[ViduVideo] Image compression failed; using original")
+            return data_url
 
     @staticmethod
     def _uses_flat_images_payload(model: str) -> bool:

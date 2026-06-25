@@ -6,8 +6,11 @@ HTTP 细节在 `app.core.integrations`；本模块保留轮询节奏与 BaseTask
 from __future__ import annotations
 
 import asyncio
+import logging
 from abc import ABC, abstractmethod
 from typing import Any, AsyncIterator
+
+logger = logging.getLogger(__name__)
 
 from app.core.integrations.openai.video import OpenAIVideoApiAdapter
 from app.core.integrations.volcengine.video import VolcengineVideoApiAdapter
@@ -67,7 +70,15 @@ class AbstractVideoGenerationTask(BaseTask, ABC):
             if self._result is not None:
                 self._provider_task_id = self._result.provider_task_id
         except Exception as exc:  # noqa: BLE001
-            self._error = str(exc)
+            # str(exc) can be empty for some network exceptions (e.g. httpx.ConnectError);
+            # fall back to the exception type name so the error is never silently lost.
+            error_msg = str(exc) or f"{type(exc).__name__}: (no message)"
+            logger.exception(
+                "Video generation task failed: provider=%s error=%s",
+                self._cfg.provider,
+                error_msg,
+            )
+            self._error = error_msg
             self._result = None
         return None
 
@@ -245,7 +256,8 @@ class BailianVideoGenerationTask(AbstractVideoGenerationTask):
         self._deferred = await self._adapter.generate(self._input)
 
     async def _poll_and_get_result(self) -> VideoGenerationResult:
-        assert self._deferred is not None
+        if self._deferred is None:
+            raise RuntimeError("Bailian video generate() completed without setting deferred result")
         return self._deferred
 
 
@@ -278,7 +290,8 @@ class ViduVideoGenerationTask(AbstractVideoGenerationTask):
         )
 
     async def _poll_and_get_result(self) -> VideoGenerationResult:
-        assert self._deferred is not None
+        if self._deferred is None:
+            raise RuntimeError("Vidu video generate() completed without setting deferred result")
         return self._deferred
 
 
@@ -290,19 +303,21 @@ class VideoGenerationTask(BaseTask):
         *,
         provider_config: ProviderConfig,
         input_: VideoGenerationInput,
-        poll_interval_s: float = 2.0,
-        timeout_s: float = 120.0,
+        poll_interval_s: float | None = None,
+        timeout_s: float | None = None,
     ) -> None:
         from app.bootstrap import bootstrap_all_registries
 
         bootstrap_all_registries()
         factory = resolve_task_adapter("video_generation", provider_config.provider)
-        self._impl: AbstractVideoGenerationTask = factory(
-            provider_config=provider_config,
-            input_=input_,
-            poll_interval_s=poll_interval_s,
-            timeout_s=timeout_s,
-        )  # type: ignore[assignment]
+        # Only pass overrides that were explicitly provided; otherwise let each
+        # provider factory use its own defaults (e.g. Vidu uses 600 s, not 120 s).
+        kwargs: dict[str, Any] = {"provider_config": provider_config, "input_": input_}
+        if poll_interval_s is not None:
+            kwargs["poll_interval_s"] = poll_interval_s
+        if timeout_s is not None:
+            kwargs["timeout_s"] = timeout_s
+        self._impl: AbstractVideoGenerationTask = factory(**kwargs)  # type: ignore[assignment]
 
     @staticmethod
     def _build_openai_impl(
