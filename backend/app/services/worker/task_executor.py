@@ -1,10 +1,4 @@
-"""Worker 执行模板。
-
-职责边界：
-- 统一 Celery worker 内部的任务生命周期；
-- 不负责 API 入参、任务创建、任务关联；
-- 只负责：读取任务 → 执行 → 写 result / status / error → apply。
-"""
+"""Worker task execution templates."""
 
 from __future__ import annotations
 
@@ -24,8 +18,9 @@ from app.core.db import close_db, reset_db_runtime
 from app.core.db_sync import sync_session_maker
 from app.core.task_manager import SyncSqlAlchemyTaskStore
 from app.core.task_manager.types import TaskRecord, TaskStatus
+from app.models.studio import Chapter
 from app.models.task import GenerationTask
-from app.services.llm.runtime import build_default_text_llm_sync
+from app.services.llm.runtime import build_project_text_llm_sync
 from app.services.worker.task_logging import log_task_event
 
 
@@ -43,12 +38,18 @@ class WorkerTaskContext:
 class AbstractLLMResultGenerator(ABC):
     thinking: bool = True
 
-    def build_llm(self, db: Session, *, user_id: str) -> BaseChatModel:
-        # 按任务归属用户解析其默认文本模型（任务隔离）。
-        return build_default_text_llm_sync(db, user_id=user_id, thinking=self.thinking)
+    def build_llm(self, db: Session, *, user_id: str, run_args: dict[str, Any]) -> BaseChatModel:
+
+        project_id = str(run_args.get("project_id") or "").strip() or None
+        if project_id is None:
+            chapter_id = str(run_args.get("chapter_id") or "").strip()
+            if chapter_id:
+                chapter = db.get(Chapter, chapter_id)
+                project_id = chapter.project_id if chapter is not None else None
+        return build_project_text_llm_sync(db, user_id=user_id, project_id=project_id, thinking=self.thinking)
 
     def generate(self, db: Session, run_args: dict[str, Any], *, user_id: str) -> Any:
-        llm = self.build_llm(db, user_id=user_id)
+        llm = self.build_llm(db, user_id=user_id, run_args=run_args)
         return self.generate_with_llm(llm, run_args)
 
     @abstractmethod
@@ -67,7 +68,7 @@ class AbstractWorkerTaskExecutor(ABC):
         self._session_maker = session_maker
 
     def run(self, task_id: str) -> None:
-        """执行同步任务的加载、生成、应用与终态持久化生命周期。"""
+        """Run the synchronous task lifecycle."""
         started_at = time.monotonic()
         self._log_event("started", task_id)
         try:
@@ -136,7 +137,7 @@ class AbstractWorkerTaskExecutor(ABC):
         self.after_apply_commit(task_id, run_args, result)
 
     def after_apply_commit(self, task_id: str, run_args: dict[str, Any], result: Any) -> None:
-        """事务提交后的钩子，子类可覆盖以执行提交后副作用（如任务入队）。"""
+        """Hook for subclasses that need work after the DB transaction commits."""
 
     def _mark_failed(self, task_id: str, error: str) -> None:
         with self._session_maker() as db:
@@ -197,15 +198,7 @@ class AbstractWorkerTaskExecutor(ABC):
 
 
 class AbstractAsyncDelegatingExecutor(AbstractWorkerTaskExecutor):
-    """给 async 业务任务的 Celery 执行桥。
-
-    适用于图片生成、视频生成、分镜帧提示词这类仍以内置 async service 为主的任务。
-    它只负责：
-    - 每个任务执行前重建 async DB runtime；
-    - 从 GenerationTask.payload 读取 run_args；
-    - 在独立 event loop 中执行 async runner；
-    - 执行后主动释放 async engine。
-    """
+    """Bridge async business runners into the synchronous Celery executor."""
 
     def __init__(
         self,
@@ -221,7 +214,7 @@ class AbstractAsyncDelegatingExecutor(AbstractWorkerTaskExecutor):
         self.timeout_seconds = timeout_seconds
 
     def run(self, task_id: str) -> None:
-        """执行 async runner，并以数据库最终状态决定 Celery 执行结果。"""
+        """Run the async runner and validate the persisted terminal status."""
         started_at = time.monotonic()
         self._log_event("started", task_id)
         if self._mark_cancelled_if_requested(task_id):
@@ -260,7 +253,7 @@ class AbstractAsyncDelegatingExecutor(AbstractWorkerTaskExecutor):
             return dict((row.payload or {}).get("run_args") or {})
 
     def _load_persisted_outcome(self, task_id: str) -> tuple[TaskStatus, str]:
-        """读取 runner 落库的最终状态，使外层日志与任务状态保持一致。"""
+        """Read the final status persisted by the async runner."""
         with self._session_maker() as db:
             row = db.get(GenerationTask, task_id)
             if row is None:
@@ -311,5 +304,5 @@ class AbstractAsyncDelegatingExecutor(AbstractWorkerTaskExecutor):
             db.commit()
             return True
 
-    def execute(self, ctx: WorkerTaskContext, run_args: dict[str, Any]) -> Any:  # pragma: no cover - async 桥不会走这里
+    def execute(self, ctx: WorkerTaskContext, run_args: dict[str, Any]) -> Any:  # pragma: no cover - async 妗ヤ笉浼氳蛋杩欓噷
         raise NotImplementedError

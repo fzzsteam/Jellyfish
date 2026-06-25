@@ -8,7 +8,6 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from langchain_core.language_models.chat_models import BaseChatModel
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,7 +33,8 @@ from app.chains.agents.script_processing_agents import (
     ScriptSimplificationResult,
     StudioScriptExtractionDraft,
 )
-from app.dependencies import get_current_user, get_db, get_llm, get_nothinking_llm
+from app.dependencies import get_current_user, get_db
+from app.models.studio import Chapter, Project
 from app.models.user import User
 from app.schemas.common import ApiResponse, success_response
 from app.schemas.skills.character_portrait import CharacterPortraitAnalysisResult
@@ -42,6 +42,7 @@ from app.schemas.skills.costume_info_analysis import CostumeInfoAnalysisResult
 from app.schemas.skills.prop_info_analysis import PropInfoAnalysisResult
 from app.schemas.skills.scene_info_analysis import SceneInfoAnalysisResult
 from app.services.common import required_field
+from app.services.llm.resolver import build_project_text_llm
 from app.services.points.billing import (
     PointsDomainError,
     run_billed_text_operation,
@@ -102,6 +103,57 @@ def _require_quote_token(token: str | None) -> str:
     if not token:
         raise HTTPException(status_code=400, detail="quote_token is required")
     return token
+
+
+# ============================================================================
+async def _resolve_text_project_id(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str | None = None,
+    chapter_id: str | None = None,
+) -> str | None:
+    """Resolve which project's text model should drive script agents."""
+    normalized_project_id = (project_id or "").strip()
+    if normalized_project_id:
+        project = await db.get(Project, normalized_project_id)
+        if project is None or project.user_id != user_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+        return normalized_project_id
+
+    normalized_chapter_id = (chapter_id or "").strip()
+    if not normalized_chapter_id:
+        return None
+    chapter = await db.get(Chapter, normalized_chapter_id)
+    if chapter is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chapter not found")
+    project = await db.get(Project, chapter.project_id)
+    if project is None or project.user_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    return chapter.project_id
+
+
+async def _build_request_text_llm(
+    db: AsyncSession,
+    *,
+    user_id: str,
+    project_id: str | None = None,
+    chapter_id: str | None = None,
+    thinking: bool,
+):
+    """Build an LLM with project text-model preference before user default."""
+    resolved_project_id = await _resolve_text_project_id(
+        db,
+        user_id=user_id,
+        project_id=project_id,
+        chapter_id=chapter_id,
+    )
+    return await build_project_text_llm(
+        db,
+        user_id=user_id,
+        project_id=resolved_project_id,
+        thinking=thinking,
+    )
 
 
 # ============================================================================
@@ -173,7 +225,6 @@ async def divide_script_async(
 )
 async def divide_script(
     request: ScriptDividerRequest,
-    llm: BaseChatModel = Depends(get_nothinking_llm),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ScriptDivisionResult]:
@@ -193,6 +244,12 @@ async def divide_script(
     async def _operation() -> ScriptDivisionResult:
         # 同步 agent 调用放线程，避免阻塞事件循环；write_to_db 后处理同入 operation，
         # 任意阶段失败都由 run_billed_text_operation 走 unfreeze 分支。
+        llm = await _build_request_text_llm(
+            db,
+            user_id=current_user.id,
+            chapter_id=request.chapter_id,
+            thinking=False,
+        )
         agent = ScriptDividerAgent(llm)
         result = await asyncio.to_thread(agent.divide_script, script_text=request.script_text)
         if request.write_to_db:
@@ -277,6 +334,8 @@ async def merge_entities_async(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
+        project_id=request.project_id,
+        chapter_id=request.chapter_id,
         all_shot_extractions=request.all_shot_extractions,
         historical_library=request.historical_library,
         script_division=request.script_division,
@@ -312,7 +371,6 @@ async def merge_entities_async(
 )
 async def merge_entities(
     request: EntityMergerRequest,
-    llm: BaseChatModel = Depends(get_llm),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[EntityMergeResult]:
@@ -335,6 +393,13 @@ async def merge_entities(
     quote_token = _require_quote_token(request.quote_token)
 
     async def _operation() -> EntityMergeResult:
+        llm = await _build_request_text_llm(
+            db,
+            user_id=current_user.id,
+            project_id=request.project_id,
+            chapter_id=request.chapter_id,
+            thinking=True,
+        )
         agent = EntityMergerAgent(llm)
         # 同步 agent 调用放线程，避免阻塞事件循环。
         result = await asyncio.to_thread(
@@ -414,6 +479,8 @@ async def analyze_variants_async(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
+        project_id=request.project_id,
+        chapter_id=request.chapter_id,
         merged_library=request.merged_library,
         all_shot_extractions=request.all_shot_extractions,
         script_division=request.script_division,
@@ -441,7 +508,6 @@ async def analyze_variants_async(
 )
 async def analyze_variants(
     request: VariantAnalysisRequest,
-    llm: BaseChatModel = Depends(get_llm),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[VariantAnalysisResult]:
@@ -462,6 +528,13 @@ async def analyze_variants(
     quote_token = _require_quote_token(request.quote_token)
 
     async def _operation() -> VariantAnalysisResult:
+        llm = await _build_request_text_llm(
+            db,
+            user_id=current_user.id,
+            project_id=request.project_id,
+            chapter_id=request.chapter_id,
+            thinking=True,
+        )
         agent = VariantAnalyzerAgent(llm)
         result = await asyncio.to_thread(
             agent.extract,
@@ -527,6 +600,8 @@ async def check_consistency_async(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
+        project_id=request.project_id,
+        chapter_id=request.chapter_id,
         script_text=request.script_text,
         quote_token=quote_token,
     )
@@ -552,7 +627,6 @@ async def check_consistency_async(
 )
 async def check_consistency(
     request: ScriptConsistencyCheckRequest,
-    llm: BaseChatModel = Depends(get_llm),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ScriptConsistencyCheckResult]:
@@ -570,6 +644,13 @@ async def check_consistency(
     quote_token = _require_quote_token(request.quote_token)
 
     async def _operation() -> ScriptConsistencyCheckResult:
+        llm = await _build_request_text_llm(
+            db,
+            user_id=current_user.id,
+            project_id=request.project_id,
+            chapter_id=request.chapter_id,
+            thinking=True,
+        )
         agent = ConsistencyCheckerAgent(llm)
         result = await asyncio.to_thread(agent.extract, script_text=request.script_text)
         return result
@@ -637,6 +718,8 @@ async def analyze_character_portrait_async(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
+        project_id=request.project_id,
+        chapter_id=request.chapter_id,
         character_context=request.character_context,
         character_description=request.character_description,
         quote_token=quote_token,
@@ -663,13 +746,19 @@ async def analyze_character_portrait_async(
 )
 async def analyze_character_portrait(
     request: CharacterPortraitAnalysisRequest,
-    llm: BaseChatModel = Depends(get_llm),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[CharacterPortraitAnalysisResult]:
     quote_token = _require_quote_token(request.quote_token)
 
     async def _operation() -> CharacterPortraitAnalysisResult:
+        llm = await _build_request_text_llm(
+            db,
+            user_id=current_user.id,
+            project_id=request.project_id,
+            chapter_id=request.chapter_id,
+            thinking=True,
+        )
         agent = CharacterPortraitAnalysisAgent(llm)
         result = await asyncio.to_thread(
             agent.analyze_character_description,
@@ -741,6 +830,8 @@ async def analyze_prop_info_async(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
+        project_id=request.project_id,
+        chapter_id=request.chapter_id,
         prop_context=request.prop_context,
         prop_description=request.prop_description,
         quote_token=quote_token,
@@ -767,13 +858,19 @@ async def analyze_prop_info_async(
 )
 async def analyze_prop_info(
     request: PropInfoAnalysisRequest,
-    llm: BaseChatModel = Depends(get_llm),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[PropInfoAnalysisResult]:
     quote_token = _require_quote_token(request.quote_token)
 
     async def _operation() -> PropInfoAnalysisResult:
+        llm = await _build_request_text_llm(
+            db,
+            user_id=current_user.id,
+            project_id=request.project_id,
+            chapter_id=request.chapter_id,
+            thinking=True,
+        )
         agent = PropInfoAnalysisAgent(llm)
         result = await asyncio.to_thread(
             agent.analyze_prop_description,
@@ -845,6 +942,8 @@ async def analyze_scene_info_async(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
+        project_id=request.project_id,
+        chapter_id=request.chapter_id,
         scene_context=request.scene_context,
         scene_description=request.scene_description,
         quote_token=quote_token,
@@ -871,13 +970,19 @@ async def analyze_scene_info_async(
 )
 async def analyze_scene_info(
     request: SceneInfoAnalysisRequest,
-    llm: BaseChatModel = Depends(get_llm),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[SceneInfoAnalysisResult]:
     quote_token = _require_quote_token(request.quote_token)
 
     async def _operation() -> SceneInfoAnalysisResult:
+        llm = await _build_request_text_llm(
+            db,
+            user_id=current_user.id,
+            project_id=request.project_id,
+            chapter_id=request.chapter_id,
+            thinking=True,
+        )
         agent = SceneInfoAnalysisAgent(llm)
         result = await asyncio.to_thread(
             agent.analyze_scene_description,
@@ -949,6 +1054,8 @@ async def analyze_costume_info_async(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
+        project_id=request.project_id,
+        chapter_id=request.chapter_id,
         costume_context=request.costume_context,
         costume_description=request.costume_description,
         quote_token=quote_token,
@@ -975,13 +1082,19 @@ async def analyze_costume_info_async(
 )
 async def analyze_costume_info(
     request: CostumeInfoAnalysisRequest,
-    llm: BaseChatModel = Depends(get_llm),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[CostumeInfoAnalysisResult]:
     quote_token = _require_quote_token(request.quote_token)
 
     async def _operation() -> CostumeInfoAnalysisResult:
+        llm = await _build_request_text_llm(
+            db,
+            user_id=current_user.id,
+            project_id=request.project_id,
+            chapter_id=request.chapter_id,
+            thinking=True,
+        )
         agent = CostumeInfoAnalysisAgent(llm)
         result = await asyncio.to_thread(
             agent.analyze_costume_description,
@@ -1060,6 +1173,8 @@ async def optimize_script_async(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
+        project_id=request.project_id,
+        chapter_id=request.chapter_id,
         script_text=request.script_text,
         consistency=request.consistency,
         quote_token=quote_token,
@@ -1086,7 +1201,6 @@ async def optimize_script_async(
 )
 async def optimize_script(
     request: ScriptOptimizeRequest,
-    llm: BaseChatModel = Depends(get_llm),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ScriptOptimizationResult]:
@@ -1096,6 +1210,13 @@ async def optimize_script(
     quote_token = _require_quote_token(request.quote_token)
 
     async def _operation() -> ScriptOptimizationResult:
+        llm = await _build_request_text_llm(
+            db,
+            user_id=current_user.id,
+            project_id=request.project_id,
+            chapter_id=request.chapter_id,
+            thinking=True,
+        )
         agent = ScriptOptimizerAgent(llm)
         result = await asyncio.to_thread(
             agent.extract,
@@ -1133,7 +1254,6 @@ async def optimize_script(
 )
 async def simplify_script(
     request: ScriptSimplifyRequest,
-    llm: BaseChatModel = Depends(get_llm),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ScriptSimplificationResult]:
@@ -1141,6 +1261,13 @@ async def simplify_script(
     quote_token = _require_quote_token(request.quote_token)
 
     async def _operation() -> ScriptSimplificationResult:
+        llm = await _build_request_text_llm(
+            db,
+            user_id=current_user.id,
+            project_id=request.project_id,
+            chapter_id=request.chapter_id,
+            thinking=True,
+        )
         agent = ScriptSimplifierAgent(llm)
         result = await asyncio.to_thread(agent.extract, script_text=request.script_text)
         return result
@@ -1187,6 +1314,8 @@ async def simplify_script_async(
         db,
         user_id=current_user.id,
         relation_entity_id=relation_entity_id,
+        project_id=request.project_id,
+        chapter_id=request.chapter_id,
         script_text=request.script_text,
         quote_token=quote_token,
     )
@@ -1265,7 +1394,6 @@ async def extract_script_async(
 )
 async def extract_script(
     request: ScriptExtractRequest,
-    llm: BaseChatModel = Depends(get_nothinking_llm),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[StudioScriptExtractionDraft]:
@@ -1305,6 +1433,13 @@ async def extract_script(
         async def _operation() -> StudioScriptExtractionDraft:
             # 同步 agent 调用放线程；后续缓存写入与候选同步同入 operation，
             # 任意阶段失败由 run_billed_text_operation 走 unfreeze 分支。
+            llm = await _build_request_text_llm(
+                db,
+                user_id=current_user.id,
+                project_id=request.project_id,
+                chapter_id=request.chapter_id,
+                thinking=False,
+            )
             agent = ElementExtractorAgent(llm)
             result = await asyncio.to_thread(
                 agent.extract,

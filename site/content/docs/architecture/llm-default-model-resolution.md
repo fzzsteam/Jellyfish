@@ -18,6 +18,7 @@ description: "当前生效的 LLM 默认模型来源与解析顺序。"
 
 ## 解析规则
 
+- 项目级文本整理调用优先读取 `projects.text_model_id`；为空时才回退到当前用户的 `model_settings.default_text_model_id`。
 - 运行时按类别读取**当前用户**的 `model_settings` 行对应字段；生成任务执行时按任务归属用户（`generation_tasks.user_id`）解析。
 - 若对应默认模型 ID 未配置，服务返回 `503`（`No default model configured for category=...`）。
 - 若配置了模型 ID 但模型不存在，服务返回 `503`（`Configured default model not found: ...`）。
@@ -25,4 +26,5 @@ description: "当前生效的 LLM 默认模型来源与解析顺序。"
 ## 管理入口
 
 - 默认模型仅通过 `LLM Model Settings` 接口维护（`/api/v1/llm/model-settings`）。
+- 前端“模型管理”页面不再提供“设置”选项；模型选择改由资产编辑、分镜工作室等业务页面在发起生成时显式传入。
 - 模型列表（`/api/v1/llm/models`）仅维护模型实体信息（名称、类别、供应商、参数等），不再提供默认切换语义。

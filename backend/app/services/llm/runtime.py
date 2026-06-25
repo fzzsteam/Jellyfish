@@ -1,4 +1,4 @@
-"""给 Celery worker 使用的同步 LLM runtime。"""
+"""Synchronous LLM runtime helpers used by Celery workers."""
 
 from __future__ import annotations
 
@@ -6,15 +6,16 @@ from typing import Any
 
 from fastapi import HTTPException
 from langchain_core.language_models.chat_models import BaseChatModel
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from sqlalchemy import select
-
 from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider
+from app.models.studio import Project
 from app.services.llm.provider_resolver import resolve_effective_base_url
 
 
 def _default_model_id(settings_row: ModelSettings | None, category: ModelCategoryKey) -> str | None:
+    """Return the user's configured default model id for a model category."""
     if settings_row is None:
         return None
     if category == ModelCategoryKey.text:
@@ -29,18 +30,25 @@ def _require_provider_and_model_sync(
     *,
     user_id: str,
     category: ModelCategoryKey,
+    model_id: str | None = None,
 ) -> tuple[Provider, Model]:
-    # 按 user_id 读取该用户的模型设置行（每用户一行），解析其默认模型。
-    settings_row = db.execute(
-        select(ModelSettings).where(ModelSettings.user_id == user_id)
-    ).scalar_one_or_none()
-    model_id = _default_model_id(settings_row, category)
+    """Resolve an owned model and its provider for synchronous worker code.
+
+    Explicit ``model_id`` is used for project-level overrides. When it is empty,
+    the helper preserves the existing behavior and reads the user's default model
+    from ``model_settings``.
+    """
+    if model_id is None:
+        settings_row = db.execute(select(ModelSettings).where(ModelSettings.user_id == user_id)).scalar_one_or_none()
+        model_id = _default_model_id(settings_row, category)
     if not model_id:
         raise HTTPException(status_code=503, detail=f"No default model configured for category={category.value}")
 
     model = db.get(Model, model_id)
     if model is None:
         raise HTTPException(status_code=503, detail=f"Configured default model not found: {model_id}")
+    if model.user_id != user_id or model.category != category:
+        raise HTTPException(status_code=503, detail=f"Configured model is not usable for category={category.value}: {model_id}")
 
     provider = db.get(Provider, model.provider_id)
     if provider is None:
@@ -49,14 +57,24 @@ def _require_provider_and_model_sync(
     return provider, model
 
 
-def build_default_text_llm_sync(
-    db: Session,
+def _project_text_model_id_sync(db: Session, *, user_id: str, project_id: str | None) -> str | None:
+    """Return a project's selected text model id, or None to use user default."""
+    normalized_project_id = (project_id or "").strip()
+    if not normalized_project_id:
+        return None
+    project = db.get(Project, normalized_project_id)
+    if project is None or project.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project.text_model_id
+
+
+def _build_text_llm_from_model_sync(
     *,
-    user_id: str,
+    provider: Provider,
+    model: Model,
     thinking: bool,
 ) -> BaseChatModel:
-    provider, model = _require_provider_and_model_sync(db, user_id=user_id, category=ModelCategoryKey.text)
-
+    """Build a LangChain ChatOpenAI instance from persisted provider/model rows."""
     api_key = (provider.api_key or "").strip()
     if not api_key:
         raise HTTPException(status_code=503, detail=f"Provider api_key is empty for provider_id={provider.id}")
@@ -81,3 +99,31 @@ def build_default_text_llm_sync(
         kwargs["extra_body"] = extra_body
 
     return ChatOpenAI(**kwargs)
+
+
+def build_default_text_llm_sync(
+    db: Session,
+    *,
+    user_id: str,
+    thinking: bool,
+) -> BaseChatModel:
+    """Build the user's default text LLM for legacy worker callers."""
+    provider, model = _require_provider_and_model_sync(db, user_id=user_id, category=ModelCategoryKey.text)
+    return _build_text_llm_from_model_sync(provider=provider, model=model, thinking=thinking)
+
+
+def build_project_text_llm_sync(
+    db: Session,
+    *,
+    user_id: str,
+    project_id: str | None,
+    thinking: bool,
+) -> BaseChatModel:
+    """Build the project's selected text LLM, falling back to the user default."""
+    provider, model = _require_provider_and_model_sync(
+        db,
+        user_id=user_id,
+        category=ModelCategoryKey.text,
+        model_id=_project_text_model_id_sync(db, user_id=user_id, project_id=project_id),
+    )
+    return _build_text_llm_from_model_sync(provider=provider, model=model, thinking=thinking)

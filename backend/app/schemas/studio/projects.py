@@ -24,6 +24,9 @@ class ProjectBase(BaseModel):
     stats: dict[str, Any] = Field(default_factory=dict, description="聚合统计（JSON）")
 
 
+    text_model_id: str | None = Field(None, description="Project text model id; falls back to the user's default text model when empty")
+
+
 class ProjectCreate(ProjectBase):
     id: str = Field(..., description="项目 ID")
 
@@ -37,6 +40,7 @@ class ProjectUpdate(BaseModel):
     unify_style: bool | None = None
     progress: int | None = None
     default_video_ratio: str | None = None
+    text_model_id: str | None = None
     stats: dict[str, Any] | None = None
 
 

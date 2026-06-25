@@ -660,8 +660,16 @@ class SqlAlchemyTaskStore(TaskStore):
         return await self.get(task_id)
 
     async def is_cancel_requested(self, task_id: str) -> bool:
-        row = await self.db.get(GenerationTask, task_id)
-        return bool(row.cancel_requested) if row is not None else False
+        # 必须用 SELECT 查询而非 db.get()，否则会返回 identity map 中的缓存值。
+        # worker 的长 HTTP 调用期间 session 没有 commit，db.get() 始终返回
+        # "新鲜"对象（上次 commit 后加载），无法感知路由层在另一个 session
+        # 写入的 cancel_requested=True。SELECT 每次都真正走数据库，绕开缓存。
+        val = await self.db.scalar(
+            select(GenerationTask.cancel_requested)
+            .where(GenerationTask.id == task_id)
+            .limit(1)
+        )
+        return bool(val)
 
 
 class SyncSqlAlchemyTaskStore:
@@ -746,5 +754,11 @@ class SyncSqlAlchemyTaskStore:
         return self.get(task_id)
 
     def is_cancel_requested(self, task_id: str) -> bool:
-        row = self.db.get(GenerationTask, task_id)
-        return bool(row.cancel_requested) if row is not None else False
+        # 必须用 SELECT 查询而非 db.get()，原因同 SqlAlchemyTaskStore.is_cancel_requested：
+        # 同步 worker 的 session 可能持有过期的 identity map 缓存，导致取消检查失效。
+        val = self.db.scalar(
+            select(GenerationTask.cancel_requested)
+            .where(GenerationTask.id == task_id)
+            .limit(1)
+        )
+        return bool(val)

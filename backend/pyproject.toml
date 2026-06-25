@@ -21,6 +21,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "python-dotenv>=1.0.0",
+    "pillow>=10.0.0",               # 图片压缩：Vidu 等供应商对请求体大小有限制，需在上传前缩放参考图
     "boto3>=1.43.0,<2.0.0",        # S3 兼容对象存储客户端（boto3 通过 S3-compatible 接口对接 RustFS 本地和阿里云 OSS）
     "python-multipart>=0.0.5",
     "jinja2",

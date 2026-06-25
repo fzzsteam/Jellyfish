@@ -44,6 +44,14 @@ class Project(Base, UserOwnedMixin, TimestampMixin):
     )
     stats: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict, comment="聚合统计（JSON）")
 
+    text_model_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("models.id", ondelete="SET NULL"),
+        nullable=True,
+        default=None,
+        comment="Project text model id; falls back to the user's default text model when empty",
+    )
+
     chapters: Mapped[list["Chapter"]] = relationship(
         back_populates="project",
         cascade="all, delete-orphan",
@@ -84,6 +92,7 @@ class Project(Base, UserOwnedMixin, TimestampMixin):
         Index("ix_projects_updated_at", "updated_at"),
         Index("ix_projects_style", "style"),
         Index("ix_projects_visual_style", "visual_style"),
+        Index("ix_projects_text_model_id", "text_model_id"),
     )
 
 
