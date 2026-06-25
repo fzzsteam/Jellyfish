@@ -26,6 +26,12 @@ logger = logging.getLogger(__name__)
 _POLL_INTERVAL_S = 3.0
 _TERMINAL_STATES = {"success", "failed"}
 
+# Vidu API 限制：reference2video subjects 每个最多 3 张图，最多 5 个 subjects；
+# viduq3-mix flat images 最多 7 张。超出部分静默截断并打印 warning。
+_VIDU_MAX_IMAGES_PER_SUBJECT = 3
+_VIDU_MAX_SUBJECTS = 5
+_VIDU_MAX_FLAT_IMAGES = 7
+
 
 class ViduVideoApiAdapter:
     """HTTP adapter for Vidu subject reference-to-video generation."""
@@ -49,12 +55,15 @@ class ViduVideoApiAdapter:
         body = self._build_request_body(inp)
         create_url = f"{base_url}{self._resolve_create_path(body)}"
 
+        subjects = body.get("subjects") or []
+        subject_img_counts = [len(s.get("images") or []) for s in subjects]
         logger.info(
-            "[ViduVideo] Creating task: model=%s duration=%s ratio=%s subjects=%d images=%d url=%s",
+            "[ViduVideo] Creating task: model=%s duration=%s ratio=%s subjects=%d(%s) flat_images=%d url=%s",
             body.get("model"),
             body.get("duration"),
             body.get("aspect_ratio"),
-            len(body.get("subjects") or []),
+            len(subjects),
+            "+".join(str(n) for n in subject_img_counts) if subject_img_counts else "0",
             len(body.get("images") or []),
             create_url,
         )
@@ -144,7 +153,7 @@ class ViduVideoApiAdapter:
                 "resolution": resolution,
             }
 
-        if self._uses_text2video_payload(model, images):
+        if self._uses_text2video_payload(model, images, inp):
             body: dict[str, Any] = {
                 "model": model,
                 "style": "general",
@@ -159,7 +168,7 @@ class ViduVideoApiAdapter:
                 body["seed"] = int(inp.seed)
             return body
 
-        if self._uses_start_end2video_payload(model, images):
+        if self._uses_start_end2video_payload(model, images, inp):
             body = {
                 "model": model,
                 "images": images[:2],
@@ -173,7 +182,7 @@ class ViduVideoApiAdapter:
                 body["seed"] = int(inp.seed)
             return body
 
-        if self._uses_img2video_payload(model, images):
+        if self._uses_img2video_payload(model, images, inp):
             body = {
                 "model": model,
                 "images": images[:1],
@@ -201,9 +210,34 @@ class ViduVideoApiAdapter:
         }
 
         if self._uses_flat_images_payload(model):
-            body["images"] = images
+            # viduq3-mix: flat images array, max 7 images.
+            if len(images) > _VIDU_MAX_FLAT_IMAGES:
+                logger.warning(
+                    "[ViduVideo] Clipping flat images from %d to %d for model=%s",
+                    len(images),
+                    _VIDU_MAX_FLAT_IMAGES,
+                    model,
+                )
+            body["images"] = images[:_VIDU_MAX_FLAT_IMAGES]
         else:
-            body["subjects"] = [{"name": "subject_1", "images": images, "voice_id": ""}]
+            # viduq3 / viduq3-turbo: split images across subjects (max 3 per subject, max 5 subjects).
+            # Characters are ordered first in `images`, so chunking preserves per-character grouping.
+            chunks = [
+                images[i : i + _VIDU_MAX_IMAGES_PER_SUBJECT]
+                for i in range(0, len(images), _VIDU_MAX_IMAGES_PER_SUBJECT)
+            ]
+            if len(chunks) > _VIDU_MAX_SUBJECTS:
+                logger.warning(
+                    "[ViduVideo] Clipping subjects from %d to %d (too many ref images, model=%s)",
+                    len(chunks),
+                    _VIDU_MAX_SUBJECTS,
+                    model,
+                )
+                chunks = chunks[:_VIDU_MAX_SUBJECTS]
+            body["subjects"] = [
+                {"name": f"subject_{i + 1}", "images": chunk, "voice_id": ""}
+                for i, chunk in enumerate(chunks)
+            ]
             body["audio"] = True
 
         if inp.seed is not None:
@@ -343,30 +377,54 @@ class ViduVideoApiAdapter:
         return name
 
     @staticmethod
-    def _is_standard_vidu_model(model: str) -> bool:
-        """Return True for Vidu models that use text2video/img2video/start-end2video routing.
+    def _is_standard_vidu_model(
+        model: str,
+        inp: VideoGenerationInput | None = None,
+    ) -> bool:
+        """Return True when the model routes via text/img/start-end2video (not reference2video).
 
-        -pro 和 -turbo 后缀的 viduq3 系列均通过标准 API（text2video / img2video /
-        start-end2video）接入，由图片数量自动分流。viduq2-turbo 在更早的 multiframe
-        分支已被捕获，不会到达此处。
+        -pro 后缀：始终走标准 API（text/img/start-end2video）。
+        -turbo 后缀：当 inp.reference_image_base64s 为空时走标准 API；有角色参考图时
+        改走 reference2video + subjects，以保持人物一致性。
+        viduq2-turbo 已在 multiframe 分支提前被捕获，不会到达此处。
         """
         m = model.strip().lower()
-        return m.endswith("-pro") or m.endswith("-turbo")
+        if m.endswith("-pro"):
+            return True
+        if m.endswith("-turbo"):
+            # With character reference images present, prefer reference2video for
+            # subject consistency rather than treating refs as frame boundaries.
+            if inp is not None and inp.reference_image_base64s:
+                return False
+            return True
+        return False
 
     @staticmethod
-    def _uses_text2video_payload(model: str, images: list[str]) -> bool:
+    def _uses_text2video_payload(
+        model: str,
+        images: list[str],
+        inp: VideoGenerationInput | None = None,
+    ) -> bool:
         """Return True for Vidu text-to-video models without reference images."""
-        return not images and ViduVideoApiAdapter._is_standard_vidu_model(model)
+        return not images and ViduVideoApiAdapter._is_standard_vidu_model(model, inp)
 
     @staticmethod
-    def _uses_img2video_payload(model: str, images: list[str]) -> bool:
-        """Return True for Vidu image-to-video models with one reference image."""
-        return len(images) == 1 and ViduVideoApiAdapter._is_standard_vidu_model(model)
+    def _uses_img2video_payload(
+        model: str,
+        images: list[str],
+        inp: VideoGenerationInput | None = None,
+    ) -> bool:
+        """Return True for Vidu image-to-video (first-frame) models with one frame image."""
+        return len(images) == 1 and ViduVideoApiAdapter._is_standard_vidu_model(model, inp)
 
     @staticmethod
-    def _uses_start_end2video_payload(model: str, images: list[str]) -> bool:
-        """Return True for Vidu first/last-frame video generation."""
-        return len(images) >= 2 and ViduVideoApiAdapter._is_standard_vidu_model(model)
+    def _uses_start_end2video_payload(
+        model: str,
+        images: list[str],
+        inp: VideoGenerationInput | None = None,
+    ) -> bool:
+        """Return True for Vidu start/end-frame interpolation models."""
+        return len(images) >= 2 and ViduVideoApiAdapter._is_standard_vidu_model(model, inp)
 
     @staticmethod
     def _resolve_resolution(

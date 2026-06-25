@@ -10,7 +10,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider
-from app.models.studio import Project
 from app.services.llm.provider_resolver import resolve_effective_base_url
 
 
@@ -30,17 +29,10 @@ def _require_provider_and_model_sync(
     *,
     user_id: str,
     category: ModelCategoryKey,
-    model_id: str | None = None,
 ) -> tuple[Provider, Model]:
-    """Resolve an owned model and its provider for synchronous worker code.
-
-    Explicit ``model_id`` is used for project-level overrides. When it is empty,
-    the helper preserves the existing behavior and reads the user's default model
-    from ``model_settings``.
-    """
-    if model_id is None:
-        settings_row = db.execute(select(ModelSettings).where(ModelSettings.user_id == user_id)).scalar_one_or_none()
-        model_id = _default_model_id(settings_row, category)
+    """Resolve a user's default model and provider for synchronous worker code."""
+    settings_row = db.execute(select(ModelSettings).where(ModelSettings.user_id == user_id)).scalar_one_or_none()
+    model_id = _default_model_id(settings_row, category)
     if not model_id:
         raise HTTPException(status_code=503, detail=f"No default model configured for category={category.value}")
 
@@ -55,17 +47,6 @@ def _require_provider_and_model_sync(
         raise HTTPException(status_code=503, detail=f"Provider not found for model_id={model.id}")
 
     return provider, model
-
-
-def _project_text_model_id_sync(db: Session, *, user_id: str, project_id: str | None) -> str | None:
-    """Return a project's selected text model id, or None to use user default."""
-    normalized_project_id = (project_id or "").strip()
-    if not normalized_project_id:
-        return None
-    project = db.get(Project, normalized_project_id)
-    if project is None or project.user_id != user_id:
-        raise HTTPException(status_code=404, detail="Project not found")
-    return project.text_model_id
 
 
 def _build_text_llm_from_model_sync(
@@ -109,21 +90,4 @@ def build_default_text_llm_sync(
 ) -> BaseChatModel:
     """Build the user's default text LLM for legacy worker callers."""
     provider, model = _require_provider_and_model_sync(db, user_id=user_id, category=ModelCategoryKey.text)
-    return _build_text_llm_from_model_sync(provider=provider, model=model, thinking=thinking)
-
-
-def build_project_text_llm_sync(
-    db: Session,
-    *,
-    user_id: str,
-    project_id: str | None,
-    thinking: bool,
-) -> BaseChatModel:
-    """Build the project's selected text LLM, falling back to the user default."""
-    provider, model = _require_provider_and_model_sync(
-        db,
-        user_id=user_id,
-        category=ModelCategoryKey.text,
-        model_id=_project_text_model_id_sync(db, user_id=user_id, project_id=project_id),
-    )
     return _build_text_llm_from_model_sync(provider=provider, model=model, thinking=thinking)

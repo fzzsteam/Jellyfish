@@ -170,9 +170,13 @@ def _normalize_optional_text(value: str | None) -> str | None:
 
 
 def is_reference_to_video_model(model_name: str | None) -> bool:
-    """Return whether a video model should receive linked asset images as r2v references."""
+    """Return whether a video model should receive linked asset images as r2v references.
+
+    viduq3 / viduq3-turbo / viduq3-mix all support reference2video from the Vidu API.
+    viduq3-pro is text/img/start-end only and does NOT support character references.
+    """
     name = (model_name or "").strip().lower()
-    vidu_subject_names = {"viduq3", "vidu-q3"}
+    vidu_subject_names = {"viduq3", "vidu-q3", "viduq3-turbo", "viduq3-mix"}
     vidu_subject_prefixes = (
         "viduq3-reference",
         "viduq3-ref",

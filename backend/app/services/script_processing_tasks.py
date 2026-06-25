@@ -16,7 +16,7 @@ from app.chains.agents.script_processing_agents import (
 from app.core.db import async_session_maker
 from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore, TaskManager
 from app.core.task_manager.types import TaskStatus
-from app.services.llm.resolver import build_project_text_llm
+from app.services.llm.resolver import build_default_text_llm
 from app.models.task import GenerationTask, GenerationTaskStatus
 from app.models.task_links import GenerationTaskLink
 from app.chains.agents import EntityMergerAgent, VariantAnalyzerAgent
@@ -844,10 +844,9 @@ async def run_merge_task(task_id: str) -> None:
                 return
 
             # 按任务归属用户解析其默认文本模型（任务隔离：执行器使用该用户的模型配置）。
-            llm = await build_project_text_llm(
+            llm = await build_default_text_llm(
                 db,
                 user_id=task_user_id,
-                project_id=run_args.get("project_id"),
                 thinking=True,
             )
             agent = EntityMergerAgent(llm)
@@ -934,10 +933,9 @@ async def run_variant_task(task_id: str) -> None:
                 return
 
             # 按任务归属用户解析其默认文本模型（任务隔离）。
-            llm = await build_project_text_llm(
+            llm = await build_default_text_llm(
                 db,
                 user_id=task_user_id,
-                project_id=run_args.get("project_id"),
                 thinking=True,
             )
             agent = VariantAnalyzerAgent(llm)

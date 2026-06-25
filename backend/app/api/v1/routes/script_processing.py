@@ -34,7 +34,6 @@ from app.chains.agents.script_processing_agents import (
     StudioScriptExtractionDraft,
 )
 from app.dependencies import get_current_user, get_db
-from app.models.studio import Chapter, Project
 from app.models.user import User
 from app.schemas.common import ApiResponse, success_response
 from app.schemas.skills.character_portrait import CharacterPortraitAnalysisResult
@@ -42,7 +41,7 @@ from app.schemas.skills.costume_info_analysis import CostumeInfoAnalysisResult
 from app.schemas.skills.prop_info_analysis import PropInfoAnalysisResult
 from app.schemas.skills.scene_info_analysis import SceneInfoAnalysisResult
 from app.services.common import required_field
-from app.services.llm.resolver import build_project_text_llm
+from app.services.llm.resolver import build_default_text_llm
 from app.services.points.billing import (
     PointsDomainError,
     run_billed_text_operation,
@@ -106,33 +105,6 @@ def _require_quote_token(token: str | None) -> str:
 
 
 # ============================================================================
-async def _resolve_text_project_id(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    project_id: str | None = None,
-    chapter_id: str | None = None,
-) -> str | None:
-    """Resolve which project's text model should drive script agents."""
-    normalized_project_id = (project_id or "").strip()
-    if normalized_project_id:
-        project = await db.get(Project, normalized_project_id)
-        if project is None or project.user_id != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-        return normalized_project_id
-
-    normalized_chapter_id = (chapter_id or "").strip()
-    if not normalized_chapter_id:
-        return None
-    chapter = await db.get(Chapter, normalized_chapter_id)
-    if chapter is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Chapter not found")
-    project = await db.get(Project, chapter.project_id)
-    if project is None or project.user_id != user_id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    return chapter.project_id
-
-
 async def _build_request_text_llm(
     db: AsyncSession,
     *,
@@ -141,19 +113,9 @@ async def _build_request_text_llm(
     chapter_id: str | None = None,
     thinking: bool,
 ):
-    """Build an LLM with project text-model preference before user default."""
-    resolved_project_id = await _resolve_text_project_id(
-        db,
-        user_id=user_id,
-        project_id=project_id,
-        chapter_id=chapter_id,
-    )
-    return await build_project_text_llm(
-        db,
-        user_id=user_id,
-        project_id=resolved_project_id,
-        thinking=thinking,
-    )
+    """Build the current user's default text LLM for script-processing agents."""
+    _ = (project_id, chapter_id)
+    return await build_default_text_llm(db, user_id=user_id, thinking=thinking)
 
 
 # ============================================================================

@@ -28,8 +28,8 @@ import {
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { chapters as mockChapters, projects as mockProjects, type Project } from '../../../mocks/data'
-import { LlmService, StudioChaptersService, StudioProjectsService } from '../../../services/generated'
-import type { ChapterRead, ModelRead, ProjectRead, ProjectStyle } from '../../../services/generated'
+import { StudioChaptersService, StudioProjectsService } from '../../../services/generated'
+import type { ChapterRead, ProjectRead, ProjectStyle } from '../../../services/generated'
 import {
   ProjectVisualStyleAndStyleFields,
   type ProjectVisualStyleChoice,
@@ -58,7 +58,6 @@ type ProjectFlowStatsMap = Record<string, ProjectFlowStats>
 type ProjectView = Project & {
   visualStyle?: ProjectVisualStyleChoice
   defaultVideoRatio?: string | null
-  textModelId?: string | null
 }
 
 const ProjectLobby: React.FC = () => {
@@ -76,7 +75,6 @@ const ProjectLobby: React.FC = () => {
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [editingProject, setEditingProject] = useState<ProjectView | null>(null)
-  const [textModelOptions, setTextModelOptions] = useState<{ value: string; label: string }[]>([])
   const [projectStageMap, setProjectStageMap] = useState<Record<string, ProjectStageSummary>>({})
   const [projectFlowStatsMap, setProjectFlowStatsMap] = useState<ProjectFlowStatsMap>({})
   const {
@@ -118,7 +116,6 @@ const ProjectLobby: React.FC = () => {
       updatedAt,
       visualStyle: (p.visual_style as ProjectVisualStyleChoice | undefined) ?? '现实',
       defaultVideoRatio: p.default_video_ratio ?? null,
-      textModelId: p.text_model_id ?? null,
     }
   }
 
@@ -147,27 +144,6 @@ const ProjectLobby: React.FC = () => {
   useEffect(() => {
     void load()
   }, [])
-
-  useEffect(() => {
-    if (useMock) {
-      setTextModelOptions([])
-      return
-    }
-    const loadTextModels = async () => {
-      try {
-        const res = await LlmService.listModelsApiV1LlmModelsGet({
-          category: 'text',
-          page: 1,
-          pageSize: 100,
-        })
-        const items = (res.data?.items ?? []) as ModelRead[]
-        setTextModelOptions(items.map((model) => ({ value: model.id, label: model.name })))
-      } catch {
-        setTextModelOptions([])
-      }
-    }
-    void loadTextModels()
-  }, [useMock])
 
   const getProjectStatus = (p: ProjectView): 'draft' | 'inProgress' | 'completed' => {
     if (p.progress >= 90) return 'completed'
@@ -399,7 +375,6 @@ const ProjectLobby: React.FC = () => {
       seed: Math.floor(Math.random() * 99999),
       unifyStyle: true,
       default_video_ratio: defaultVideoRatio,
-      text_model_id: undefined,
     })
     setCreateModalOpen(true)
   }
@@ -412,7 +387,6 @@ const ProjectLobby: React.FC = () => {
     seed: number
     unifyStyle: boolean
     default_video_ratio?: string
-    text_model_id?: string
   }) => {
     try {
       const createdId = newProjectId()
@@ -426,7 +400,6 @@ const ProjectLobby: React.FC = () => {
           seed: values.seed,
           unify_style: values.unifyStyle,
           default_video_ratio: values.default_video_ratio || null,
-          text_model_id: values.text_model_id || null,
           progress: 0,
         },
       })
@@ -453,7 +426,6 @@ const ProjectLobby: React.FC = () => {
       seed: p.seed,
       unifyStyle: p.unifyStyle,
       default_video_ratio: p.defaultVideoRatio ?? undefined,
-      text_model_id: p.textModelId ?? undefined,
     })
     setEditModalOpen(true)
   }
@@ -466,7 +438,6 @@ const ProjectLobby: React.FC = () => {
     seed: number
     unifyStyle: boolean
     default_video_ratio?: string
-    text_model_id?: string
   }) => {
     if (!editingProject) return
     try {
@@ -480,7 +451,6 @@ const ProjectLobby: React.FC = () => {
           seed: values.seed,
           unify_style: values.unifyStyle,
           default_video_ratio: values.default_video_ratio || null,
-          text_model_id: values.text_model_id || null,
         },
       })
       const updated = res.data
@@ -1057,13 +1027,6 @@ const ProjectLobby: React.FC = () => {
             <Input.TextArea rows={4} placeholder="项目简介与风格说明，建议 80–120 字" />
           </Form.Item>
           <ProjectVisualStyleAndStyleFields form={form} options={projectStyleOptions} />
-          <Form.Item name="text_model_id" label="文本模型" rules={[{ required: true, message: '请选择文本模型' }]}>
-            <Select
-              placeholder="请选择文本模型"
-              options={textModelOptions}
-              disabled={!textModelOptions.length}
-            />
-          </Form.Item>
           <Form.Item
             name="seed"
             label="全局种子值"
@@ -1113,13 +1076,6 @@ const ProjectLobby: React.FC = () => {
             <Input.TextArea rows={3} placeholder="项目简介与风格说明" />
           </Form.Item>
           <ProjectVisualStyleAndStyleFields form={editForm} options={projectStyleOptions} />
-          <Form.Item name="text_model_id" label="文本模型" rules={[{ required: true, message: '请选择文本模型' }]}>
-            <Select
-              placeholder="请选择文本模型"
-              options={textModelOptions}
-              disabled={!textModelOptions.length}
-            />
-          </Form.Item>
           <Form.Item name="seed" label="全局种子值" tooltip="固定种子可确保整部短剧视觉调性一致">
             <InputNumber min={0} className="w-full" />
           </Form.Item>

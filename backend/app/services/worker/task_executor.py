@@ -18,9 +18,8 @@ from app.core.db import close_db, reset_db_runtime
 from app.core.db_sync import sync_session_maker
 from app.core.task_manager import SyncSqlAlchemyTaskStore
 from app.core.task_manager.types import TaskRecord, TaskStatus
-from app.models.studio import Chapter
 from app.models.task import GenerationTask
-from app.services.llm.runtime import build_project_text_llm_sync
+from app.services.llm.runtime import build_default_text_llm_sync
 from app.services.worker.task_logging import log_task_event
 
 
@@ -38,18 +37,12 @@ class WorkerTaskContext:
 class AbstractLLMResultGenerator(ABC):
     thinking: bool = True
 
-    def build_llm(self, db: Session, *, user_id: str, run_args: dict[str, Any]) -> BaseChatModel:
-
-        project_id = str(run_args.get("project_id") or "").strip() or None
-        if project_id is None:
-            chapter_id = str(run_args.get("chapter_id") or "").strip()
-            if chapter_id:
-                chapter = db.get(Chapter, chapter_id)
-                project_id = chapter.project_id if chapter is not None else None
-        return build_project_text_llm_sync(db, user_id=user_id, project_id=project_id, thinking=self.thinking)
+    def build_llm(self, db: Session, *, user_id: str) -> BaseChatModel:
+        """Build the user's default text model for worker-side LLM tasks."""
+        return build_default_text_llm_sync(db, user_id=user_id, thinking=self.thinking)
 
     def generate(self, db: Session, run_args: dict[str, Any], *, user_id: str) -> Any:
-        llm = self.build_llm(db, user_id=user_id, run_args=run_args)
+        llm = self.build_llm(db, user_id=user_id)
         return self.generate_with_llm(llm, run_args)
 
     @abstractmethod

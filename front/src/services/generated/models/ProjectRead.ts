@@ -38,10 +38,6 @@ export type ProjectRead = {
      */
     default_video_ratio?: (string | null);
     /**
-     * Project text model id; falls back to the user's default text model when empty
-     */
-    text_model_id?: (string | null);
-    /**
      * 聚合统计（JSON）
      */
     stats?: Record<string, any>;

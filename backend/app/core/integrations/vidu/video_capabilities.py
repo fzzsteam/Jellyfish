@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from app.core.integrations.video_capabilities import VideoModelCapability
 
-# Vidu subject reference2video currently uses viduq3 in the official examples.
+# viduq3: reference2video 主力模型，多机位人物一致性最优。文档：3-16s，540p/720p/1080p。
 DEFAULT_VIDU_VIDEO_CAPABILITY = VideoModelCapability(
     supports_seed=True,
     supports_watermark=False,
@@ -18,9 +18,10 @@ DEFAULT_VIDU_VIDEO_CAPABILITY = VideoModelCapability(
         "9:16": "1080p",
     },
     min_seconds=1,
-    max_seconds=8,
+    max_seconds=16,
 )
 
+# viduq3-mix: reference2video 混合模式，使用 images 字段（非 subjects），720p/1080p，3-16s。
 VIDU_MIX_VIDEO_CAPABILITY = VideoModelCapability(
     supports_seed=True,
     supports_watermark=False,
@@ -34,9 +35,11 @@ VIDU_MIX_VIDEO_CAPABILITY = VideoModelCapability(
         "9:16": "720p",
     },
     min_seconds=1,
-    max_seconds=8,
+    max_seconds=16,
 )
 
+# viduq3-pro: text2video / img2video（首帧）专用，不支持 reference2video subjects。
+# 文档：1-16s，540p/720p/1080p；成本比 viduq3 低，适合纯文字镜头。
 VIDU_TEXT_VIDEO_CAPABILITY = VideoModelCapability(
     supports_seed=True,
     supports_watermark=False,
@@ -50,7 +53,25 @@ VIDU_TEXT_VIDEO_CAPABILITY = VideoModelCapability(
         "9:16": "540p",
     },
     min_seconds=1,
-    max_seconds=8,
+    max_seconds=16,
+)
+
+# viduq3-turbo: 速度最快，同时支持 reference2video（subjects）和 text/img/start-end2video。
+# 文档：1-16s，540p/720p/1080p；作为参考图生成时默认 720p，兼顾速度与质量。
+VIDU_TURBO_VIDEO_CAPABILITY = VideoModelCapability(
+    supports_seed=True,
+    supports_watermark=False,
+    allowed_ratios={"16:9", "4:3", "1:1", "3:4", "9:16"},
+    default_ratio="4:3",
+    ratio_to_size_mapping={
+        "16:9": "720p",
+        "4:3": "720p",
+        "1:1": "720p",
+        "3:4": "720p",
+        "9:16": "720p",
+    },
+    min_seconds=1,
+    max_seconds=16,
 )
 
 VIDU_MULTIFRAME_VIDEO_CAPABILITY = VideoModelCapability(
@@ -115,7 +136,9 @@ def resolve_vidu_video_capability(model: str | None) -> VideoModelCapability:
         return VIDU_MULTIFRAME_VIDEO_CAPABILITY
     if model_lower.startswith("viduq3-mix"):
         return VIDU_MIX_VIDEO_CAPABILITY
-    if model_lower.startswith("viduq3-pro") or model_lower.startswith("viduq3-turbo"):
+    if model_lower.startswith("viduq3-turbo"):
+        return VIDU_TURBO_VIDEO_CAPABILITY
+    if model_lower.startswith("viduq3-pro"):
         return VIDU_TEXT_VIDEO_CAPABILITY
 
     matches = [

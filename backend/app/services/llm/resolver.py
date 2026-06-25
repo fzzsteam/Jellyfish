@@ -8,7 +8,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider
-from app.models.studio import Project
 from app.services.common import entity_not_found
 from app.services.llm.provider_resolver import resolve_effective_base_url
 
@@ -80,32 +79,6 @@ async def get_default_model_by_category(db: AsyncSession, category: ModelCategor
     return await get_model_by_category(db, category, user_id=user_id, allow_default_fallback=True)
 
 
-async def get_project_text_model_or_default(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    project_id: str | None,
-) -> Model:
-    """Resolve the text model for project-scoped script agents.
-
-    Project selection takes precedence so text整理 calls under one video project
-    use the selected model. Empty selection keeps the user default fallback.
-    """
-    normalized_project_id = (project_id or "").strip()
-    if normalized_project_id:
-        project = await db.get(Project, normalized_project_id)
-        if project is None or project.user_id != user_id:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=entity_not_found("Project"))
-        if project.text_model_id:
-            return await get_model_by_category(
-                db,
-                ModelCategoryKey.text,
-                user_id=user_id,
-                model_or_id=project.text_model_id,
-            )
-    return await get_default_model_by_category(db, ModelCategoryKey.text, user_id=user_id)
-
-
 async def _resolve_model(db: AsyncSession, model_or_id: Model | str) -> Model:
     if not isinstance(model_or_id, str):
         return model_or_id
@@ -175,24 +148,6 @@ async def build_default_text_llm(
 ) -> BaseChatModel:
     """基于某用户的默认文本模型构造 ChatOpenAI。"""
     model = await get_default_model_by_category(db, ModelCategoryKey.text, user_id=user_id)
-    provider = await get_provider_by_model_or_id(db, model)
-    return _build_chat_openai_model(
-        provider=provider,
-        model=model,
-        thinking=thinking,
-        import_error_detail="Install langchain-openai (e.g. uv sync --group dev) to use film extraction endpoints",
-    )
-
-
-async def build_project_text_llm(
-    db: AsyncSession,
-    *,
-    user_id: str,
-    project_id: str | None,
-    thinking: bool,
-) -> BaseChatModel:
-    """Build the chat LLM selected by a project, falling back to user default."""
-    model = await get_project_text_model_or_default(db, user_id=user_id, project_id=project_id)
     provider = await get_provider_by_model_or_id(db, model)
     return _build_chat_openai_model(
         provider=provider,

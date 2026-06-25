@@ -15,7 +15,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.utils import apply_keyword_filter, apply_order, paginate
-from app.models.llm import Model, ModelCategoryKey
 from app.models.studio import FileUsage, Project
 from app.models.types import ProjectStyle, ProjectVisualStyle
 from app.schemas.studio.projects import ProjectCreate, ProjectUpdate
@@ -64,26 +63,6 @@ def _validate_project_style_combo(*, visual_style: ProjectVisualStyle, style: Pr
         )
 
 
-async def _validate_project_text_model(db: AsyncSession, *, model_id: str | None, user_id: str) -> None:
-    """Validate that a project text model exists and is a text-category model.
-
-    The project-level model is optional so legacy projects and callers can keep
-    falling back to the user's default text model. Models are now globally shared
-    (admin-only write), so ownership check is not required—only existence and category.
-    """
-    normalized = (model_id or "").strip()
-    if not normalized:
-        return
-    model = await db.get(Model, normalized)
-    if model is None:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=entity_not_found("Model"))
-    if model.category != ModelCategoryKey.text:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"text_model_id must reference a text model: {normalized}",
-        )
-
-
 async def list_projects(
     db: AsyncSession,
     *,
@@ -129,7 +108,6 @@ async def create_project(db: AsyncSession, body: ProjectCreate, *, user_id: str)
         detail=entity_already_exists("Project"),
     )
     _validate_project_style_combo(visual_style=body.visual_style, style=body.style)
-    await _validate_project_text_model(db, model_id=body.text_model_id, user_id=user_id)
     obj = await create_and_refresh(db, Project(**body.model_dump(), user_id=user_id))
     return obj
 
@@ -148,8 +126,6 @@ async def update_project(
     style = update_data.get("style", obj.style)
     if visual_style is not None and style is not None:
         _validate_project_style_combo(visual_style=visual_style, style=style)
-    if "text_model_id" in update_data:
-        await _validate_project_text_model(db, model_id=update_data["text_model_id"], user_id=user_id)
     patch_model(obj, update_data)
     await flush_and_refresh(db, obj)
     return obj

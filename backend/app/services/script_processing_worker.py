@@ -28,13 +28,13 @@ from app.chains.agents.script_processing_agents import (
     ScriptSimplificationResult,
 )
 from app.core.db_sync import sync_session_maker
-from app.models.studio import Chapter, Project
+from app.models.studio import Chapter
 from app.services.script_extraction_cache import (
     build_script_extract_cache_key,
     get_cached_script_extract,
     set_cached_script_extract,
 )
-from app.services.llm.runtime import build_project_text_llm_sync
+from app.services.llm.runtime import build_default_text_llm_sync
 from app.services.studio.script_division import write_division_result_to_chapter_sync
 from app.services.studio.shot_extracted_candidates import (
     sync_from_extraction_draft_sync as sync_shot_extracted_candidates_from_draft_sync,
@@ -293,7 +293,7 @@ def generate_division_result(
     user_id: str,
     script_text: str,
 ) -> ScriptDivisionResult:
-    llm = build_project_text_llm_sync(db, user_id=user_id, project_id=None, thinking=False)
+    llm = build_default_text_llm_sync(db, user_id=user_id, thinking=False)
     agent = ScriptDividerAgent(llm)
     return agent.divide_script(script_text=script_text)
 
@@ -331,7 +331,7 @@ def generate_extraction_result(
         from_cache = result is not None
 
     if result is None:
-        llm = build_project_text_llm_sync(db, user_id=user_id, project_id=project_id, thinking=False)
+        llm = build_default_text_llm_sync(db, user_id=user_id, thinking=False)
         agent = ElementExtractorAgent(llm)
         result = agent.extract(
             project_id=project_id,
@@ -387,12 +387,10 @@ def apply_auto_extraction_after_division(
     try:
         from app.services.llm.runtime import _require_provider_and_model_sync
         from app.models.llm import ModelCategoryKey
-        project = db.get(Project, chapter.project_id)
         _provider, text_model = _require_provider_and_model_sync(
             db,
             user_id=user_id,
             category=ModelCategoryKey.text,
-            model_id=project.text_model_id if project is not None else None,
         )
     except Exception:  # noqa: BLE001 - 无默认文本模型：跳过计费但保留提取（缓存可能命中）
         logger.debug(
