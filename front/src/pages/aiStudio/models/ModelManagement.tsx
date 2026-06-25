@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Layout, Tabs } from 'antd'
 import ProvidersTab from './ProvidersTab'
 import ModelsTab from './ModelsTab'
-import SettingsTab from './SettingsTab'
 
 export default function ModelManagement() {
   const [activeTab, setActiveTab] = useState<string>('providers')
@@ -20,7 +19,6 @@ export default function ModelManagement() {
           items={[
             { key: 'providers', label: '供应商' },
             { key: 'models', label: '模型' },
-            { key: 'settings', label: '设置' },
           ]}
         />
       </div>
@@ -28,7 +26,6 @@ export default function ModelManagement() {
       <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
         {activeTab === 'providers' && <ProvidersTab />}
         {activeTab === 'models' && <ModelsTab />}
-        {activeTab === 'settings' && <SettingsTab />}
       </div>
     </Layout>
   )

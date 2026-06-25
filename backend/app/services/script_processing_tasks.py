@@ -16,7 +16,7 @@ from app.chains.agents.script_processing_agents import (
 from app.core.db import async_session_maker
 from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore, TaskManager
 from app.core.task_manager.types import TaskStatus
-from app.services.llm.resolver import build_default_text_llm
+from app.services.llm.resolver import build_project_text_llm
 from app.models.task import GenerationTask, GenerationTaskStatus
 from app.models.task_links import GenerationTaskLink
 from app.chains.agents import EntityMergerAgent, VariantAnalyzerAgent
@@ -405,6 +405,8 @@ async def create_merge_task(
     *,
     user_id: str,
     relation_entity_id: str,
+    project_id: str | None = None,
+    chapter_id: str | None = None,
     all_shot_extractions: list[dict],
     historical_library: dict | None,
     script_division: dict | None,
@@ -429,6 +431,8 @@ async def create_merge_task(
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
     run_args = {
+        "project_id": project_id,
+        "chapter_id": chapter_id,
         "all_shot_extractions": all_shot_extractions,
         "historical_library": historical_library,
         "script_division": script_division,
@@ -470,6 +474,8 @@ async def create_consistency_task(
     *,
     user_id: str,
     relation_entity_id: str,
+    project_id: str | None = None,
+    chapter_id: str | None = None,
     script_text: str,
     quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
@@ -495,7 +501,7 @@ async def create_consistency_task(
             mode=DeliveryMode.async_polling,
             user_id=user_id,
             task_kind=SCRIPT_CONSISTENCY_TASK_KIND,
-            run_args={"script_text": script_text},
+            run_args={"project_id": project_id, "chapter_id": chapter_id, "script_text": script_text},
             billing_id=billing_id,
         )
     except Exception:
@@ -524,6 +530,8 @@ async def create_variant_task(
     *,
     user_id: str,
     relation_entity_id: str,
+    project_id: str | None = None,
+    chapter_id: str | None = None,
     merged_library: dict,
     all_shot_extractions: list[dict],
     script_division: dict | None,
@@ -552,6 +560,8 @@ async def create_variant_task(
             user_id=user_id,
             task_kind=SCRIPT_VARIANT_TASK_KIND,
             run_args={
+                "project_id": project_id,
+                "chapter_id": chapter_id,
                 "merged_library": merged_library,
                 "all_shot_extractions": all_shot_extractions,
                 "script_division": script_division,
@@ -587,6 +597,8 @@ async def _create_analysis_task(
     relation_type: str,
     relation_entity_id: str,
     run_args: dict,
+    project_id: str | None = None,
+    chapter_id: str | None = None,
     quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
     existing = await _find_active_analysis_task(db, relation_type=relation_type, relation_entity_id=relation_entity_id)
@@ -611,7 +623,7 @@ async def _create_analysis_task(
             mode=DeliveryMode.async_polling,
             user_id=user_id,
             task_kind=task_kind,
-            run_args=run_args,
+            run_args={**run_args, "project_id": project_id, "chapter_id": chapter_id},
             billing_id=billing_id,
         )
     except Exception:
@@ -640,6 +652,8 @@ async def create_character_portrait_task(
     *,
     user_id: str,
     relation_entity_id: str,
+    project_id: str | None = None,
+    chapter_id: str | None = None,
     character_context: str | None,
     character_description: str,
     quote_token: str | None = None,
@@ -654,6 +668,8 @@ async def create_character_portrait_task(
             "character_context": character_context,
             "character_description": character_description,
         },
+        project_id=project_id,
+        chapter_id=chapter_id,
         quote_token=quote_token,
     )
 
@@ -663,6 +679,8 @@ async def create_prop_info_task(
     *,
     user_id: str,
     relation_entity_id: str,
+    project_id: str | None = None,
+    chapter_id: str | None = None,
     prop_context: str | None,
     prop_description: str,
     quote_token: str | None = None,
@@ -677,6 +695,8 @@ async def create_prop_info_task(
             "prop_context": prop_context,
             "prop_description": prop_description,
         },
+        project_id=project_id,
+        chapter_id=chapter_id,
         quote_token=quote_token,
     )
 
@@ -686,6 +706,8 @@ async def create_scene_info_task(
     *,
     user_id: str,
     relation_entity_id: str,
+    project_id: str | None = None,
+    chapter_id: str | None = None,
     scene_context: str | None,
     scene_description: str,
     quote_token: str | None = None,
@@ -700,6 +722,8 @@ async def create_scene_info_task(
             "scene_context": scene_context,
             "scene_description": scene_description,
         },
+        project_id=project_id,
+        chapter_id=chapter_id,
         quote_token=quote_token,
     )
 
@@ -709,6 +733,8 @@ async def create_costume_info_task(
     *,
     user_id: str,
     relation_entity_id: str,
+    project_id: str | None = None,
+    chapter_id: str | None = None,
     costume_context: str | None,
     costume_description: str,
     quote_token: str | None = None,
@@ -723,6 +749,8 @@ async def create_costume_info_task(
             "costume_context": costume_context,
             "costume_description": costume_description,
         },
+        project_id=project_id,
+        chapter_id=chapter_id,
         quote_token=quote_token,
     )
 
@@ -732,6 +760,8 @@ async def create_script_optimization_task(
     *,
     user_id: str,
     relation_entity_id: str,
+    project_id: str | None = None,
+    chapter_id: str | None = None,
     script_text: str,
     consistency: dict,
     quote_token: str | None = None,
@@ -746,6 +776,8 @@ async def create_script_optimization_task(
             "script_text": script_text,
             "consistency": consistency,
         },
+        project_id=project_id,
+        chapter_id=chapter_id,
         quote_token=quote_token,
     )
 
@@ -755,6 +787,8 @@ async def create_script_simplification_task(
     *,
     user_id: str,
     relation_entity_id: str,
+    project_id: str | None = None,
+    chapter_id: str | None = None,
     script_text: str,
     quote_token: str | None = None,
 ) -> AsyncTaskCreateResult:
@@ -767,6 +801,8 @@ async def create_script_simplification_task(
         run_args={
             "script_text": script_text,
         },
+        project_id=project_id,
+        chapter_id=chapter_id,
         quote_token=quote_token,
     )
 
@@ -808,7 +844,12 @@ async def run_merge_task(task_id: str) -> None:
                 return
 
             # 按任务归属用户解析其默认文本模型（任务隔离：执行器使用该用户的模型配置）。
-            llm = await build_default_text_llm(db, user_id=task_user_id, thinking=True)
+            llm = await build_project_text_llm(
+                db,
+                user_id=task_user_id,
+                project_id=run_args.get("project_id"),
+                thinking=True,
+            )
             agent = EntityMergerAgent(llm)
             result: EntityMergeResult = agent.extract(
                 all_extractions_json=json.dumps(run_args.get("all_shot_extractions") or [], ensure_ascii=False),
@@ -893,7 +934,12 @@ async def run_variant_task(task_id: str) -> None:
                 return
 
             # 按任务归属用户解析其默认文本模型（任务隔离）。
-            llm = await build_default_text_llm(db, user_id=task_user_id, thinking=True)
+            llm = await build_project_text_llm(
+                db,
+                user_id=task_user_id,
+                project_id=run_args.get("project_id"),
+                thinking=True,
+            )
             agent = VariantAnalyzerAgent(llm)
             result: VariantAnalysisResult = agent.extract(
                 merged_library_json=json.dumps(run_args.get("merged_library") or {}, ensure_ascii=False),
