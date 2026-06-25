@@ -65,17 +65,17 @@ def _validate_project_style_combo(*, visual_style: ProjectVisualStyle, style: Pr
 
 
 async def _validate_project_text_model(db: AsyncSession, *, model_id: str | None, user_id: str) -> None:
-    """Validate that a project text model is usable by the current user.
+    """Validate that a project text model exists and is a text-category model.
 
     The project-level model is optional so legacy projects and callers can keep
-    falling back to the user's default text model. When provided, it must be an
-    owned text model because downstream script agents build a chat LLM from it.
+    falling back to the user's default text model. Models are now globally shared
+    (admin-only write), so ownership check is not required—only existence and category.
     """
     normalized = (model_id or "").strip()
     if not normalized:
         return
     model = await db.get(Model, normalized)
-    if model is None or model.user_id != user_id:
+    if model is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=entity_not_found("Model"))
     if model.category != ModelCategoryKey.text:
         raise HTTPException(

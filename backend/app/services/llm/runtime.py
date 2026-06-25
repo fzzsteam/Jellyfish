@@ -47,7 +47,7 @@ def _require_provider_and_model_sync(
     model = db.get(Model, model_id)
     if model is None:
         raise HTTPException(status_code=503, detail=f"Configured default model not found: {model_id}")
-    if model.user_id != user_id or model.category != category:
+    if model.category != category:
         raise HTTPException(status_code=503, detail=f"Configured model is not usable for category={category.value}: {model_id}")
 
     provider = db.get(Provider, model.provider_id)
