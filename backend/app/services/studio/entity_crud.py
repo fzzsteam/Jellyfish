@@ -81,16 +81,20 @@ async def list_entities_paginated(
 ) -> tuple[list[dict[str, Any]], int]:
     entity_type_norm = normalize_entity_type(entity_type)
     spec = entity_spec(entity_type_norm)
-    # character 是项目级实体，必须传 project_id 才能做用户隔离（自身无 user_id 列）。
-    if entity_type_norm == "character" and not project_id:
-        raise HTTPException(status_code=400, detail="project_id is required for character entity type")
     stmt = select(spec.model)
     # 资产类型按 user_id 隔离：用户只能看到自己的 actor/scene/prop/costume。
     if entity_type_norm in USER_OWNED_ENTITY_TYPES:
         stmt = stmt.where(spec.model.user_id == user_id)
-    stmt = apply_keyword_filter(stmt, q=q, fields=[spec.model.name, spec.model.description])
-    if project_id and entity_type_norm in {"actor", "character"} and hasattr(spec.model, "project_id"):
+    # character 无 user_id 列，通过 project_id → projects.user_id 间接做用户隔离。
+    # 传 project_id：只查该项目内的角色；不传：JOIN projects 表按用户跨项目查询（"资产库"浏览场景）。
+    if entity_type_norm == "character":
+        if project_id:
+            stmt = stmt.where(spec.model.project_id == project_id)
+        else:
+            stmt = stmt.join(Project, spec.model.project_id == Project.id).where(Project.user_id == user_id)
+    elif project_id and entity_type_norm == "actor" and hasattr(spec.model, "project_id"):
         stmt = stmt.where(getattr(spec.model, "project_id") == project_id)
+    stmt = apply_keyword_filter(stmt, q=q, fields=[spec.model.name, spec.model.description])
     if style:
         stmt = stmt.where(getattr(spec.model, "style") == style)
     if visual_style:
