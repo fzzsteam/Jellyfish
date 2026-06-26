@@ -24,6 +24,7 @@ from app.models.studio import (
     CostumeImage,
     Project,
     ProjectActorLink,
+    ProjectCharacterLink,
     ProjectCostumeLink,
     ProjectPropLink,
     ProjectSceneLink,
@@ -324,6 +325,23 @@ def _ensure_project_actor_link(db: Session, *, project_id: str, actor_id: str) -
     db.flush()
 
 
+def _ensure_project_character_link(db: Session, *, project_id: str, character_id: str) -> None:
+    """幂等写入项目级角色关联，使角色出现在项目的角色列表中。"""
+
+    existing = db.scalar(
+        select(ProjectCharacterLink).where(
+            ProjectCharacterLink.project_id == project_id,
+            ProjectCharacterLink.chapter_id.is_(None),
+            ProjectCharacterLink.shot_id.is_(None),
+            ProjectCharacterLink.character_id == character_id,
+        )
+    )
+    if existing is not None:
+        return
+    db.add(ProjectCharacterLink(project_id=project_id, character_id=character_id))
+    db.flush()
+
+
 def _ensure_character_actor_link(
     db: Session,
     *,
@@ -398,6 +416,7 @@ def _link_candidate(
     candidate_type = ShotCandidateType(str(candidate.candidate_type))
     if candidate_type == ShotCandidateType.character:
         _ensure_character_link(db, shot_id=candidate.shot_id, character_id=option.entity_id)
+        _ensure_project_character_link(db, project_id=project_id, character_id=option.entity_id)
         _ensure_character_actor_link(
             db,
             project_id=project_id,
@@ -496,16 +515,20 @@ def _find_entity_by_name_sync(
         return None
 
     if candidate_type == ShotCandidateType.character:
-        # 角色全局共享：跨项目查找同名角色；同名多个时优先归属当前项目者，
-        # 否则复用任意一个全局同名角色，避免重复新建。
-        rows = db.execute(select(Character.id, Character.name, Character.project_id)).all()
-        matches = [(str(r[0]), str(r[2])) for r in rows if _normalize_name(str(r[1])) == norm]
+        # 在当前用户名下查找同名角色，优先复用已关联当前项目者，避免重复新建。
+        char_rows = db.execute(
+            select(Character.id, Character.name).where(Character.user_id == user_id)
+        ).all()
+        matches = [str(r[0]) for r in char_rows if _normalize_name(str(r[1])) == norm]
         if not matches:
             return None
-        for cid, pid in matches:
-            if pid == project_id:
-                return cid
-        return matches[0][0]
+        linked = db.execute(
+            select(ProjectCharacterLink.character_id).where(
+                ProjectCharacterLink.character_id.in_(matches),
+                ProjectCharacterLink.project_id == project_id,
+            ).limit(1)
+        ).scalar_one_or_none()
+        return str(linked) if linked else matches[0]
 
     if candidate_type == ShotCandidateType.scene:
         rows = db.execute(select(Scene.id, Scene.name).where(Scene.user_id == user_id)).all()
@@ -588,7 +611,7 @@ def _create_entity_sync(
     """同步创建资产实体，scene/prop/costume 同时初始化正面视角图片槽位，返回 entity_id。"""
     entity_id = str(_uuid_mod.uuid4())
     if candidate_type == ShotCandidateType.character:
-        db.add(Character(id=entity_id, project_id=project_id, name=name, description=description, style=style, visual_style=visual_style))
+        db.add(Character(id=entity_id, user_id=user_id, name=name, description=description, style=style, visual_style=visual_style))
         db.flush()
         db.add(CharacterImage(character_id=entity_id, view_angle=AssetViewAngle.front))
         db.flush()
@@ -961,8 +984,8 @@ def _auto_create_and_link_sync(
         # not a genuinely new asset — leave it pending for manual resolution.
         # 重叠检测仅在当前用户自有资产范围内进行，避免误用其他用户资产名称阻断建档。
         if candidate_type == ShotCandidateType.character:
-            # 角色全局共享：重叠检测纳入全部角色名（跨项目），避免新建与库内已有角色重名/近似
-            existing_names = [str(r[0]) for r in db.execute(select(Character.name)).all()]
+            # 重叠检测限定在当前用户名下，避免误用其他用户角色名阻断建档
+            existing_names = [str(r[0]) for r in db.execute(select(Character.name).where(Character.user_id == user_id)).all()]
         elif candidate_type == ShotCandidateType.scene:
             existing_names = [str(r[0]) for r in db.execute(select(Scene.name).where(Scene.user_id == user_id)).all()]
         elif candidate_type == ShotCandidateType.prop:

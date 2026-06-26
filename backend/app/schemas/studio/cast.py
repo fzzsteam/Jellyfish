@@ -61,7 +61,6 @@ class ActorRead(ActorBase):
 
 class CharacterBase(BaseModel):
     id: str = Field(..., description="角色 ID")
-    project_id: str = Field(..., description="所属项目 ID")
     name: str = Field(..., description="角色名称")
     description: str = Field("", description="角色描述")
     style: ProjectStyle = Field(ProjectStyle.real_people_city, description="题材/风格")
@@ -71,6 +70,8 @@ class CharacterBase(BaseModel):
 
 
 class CharacterCreate(CharacterBase):
+    # project_id 可选：传入时自动创建对应项目级 ProjectCharacterLink
+    project_id: str | None = Field(None, description="可选：关联项目 ID")
     chapter_id: str | None = Field(None, description="可选：章节 ID")
     shot_id: str | None = Field(None, description="可选：创建成功后自动绑定的分镜 ID")
 
@@ -83,17 +84,8 @@ class CharacterCreate(CharacterBase):
             return None
         return v
 
-    @model_validator(mode="after")
-    def _link_scope(self) -> Self:
-        if self.chapter_id and not self.project_id:
-            raise ValueError("project_id is required when chapter_id is set")
-        if self.shot_id and not self.project_id:
-            raise ValueError("project_id is required when shot_id is set")
-        return self
-
 
 class CharacterUpdate(BaseModel):
-    project_id: str | None = None
     name: str | None = None
     description: str | None = None
     style: ProjectStyle | None = None

@@ -14,6 +14,7 @@ from app.models.studio import (
     Character,
     Costume,
     ProjectActorLink,
+    ProjectCharacterLink,
     ProjectCostumeLink,
     ProjectPropLink,
     ProjectSceneLink,
@@ -26,6 +27,7 @@ from app.schemas.common import ApiResponse, PaginatedData, paginated_response
 from app.schemas.studio.shots import (
     ProjectAssetLinkCreate,
     ProjectActorLinkRead,
+    ProjectCharacterLinkRead,
     ProjectCostumeLinkRead,
     ProjectPropLinkRead,
     ProjectSceneLinkRead,
@@ -40,6 +42,14 @@ from app.utils.project_links import upsert_project_link
 
 def _link_spec(entity_type: str) -> dict[str, Any]:
     t = normalize_entity_type(entity_type)
+    if t == "character":
+        return {
+            "model": ProjectCharacterLink,
+            "field": "character_id",
+            "read_model": ProjectCharacterLinkRead,
+            "asset_model": Character,
+            "not_found": entity_not_found("Character"),
+        }
     if t == "actor":
         return {
             "model": ProjectActorLink,
@@ -72,7 +82,7 @@ def _link_spec(entity_type: str) -> dict[str, Any]:
             "asset_model": Costume,
             "not_found": entity_not_found("Costume"),
         }
-    raise HTTPException(status_code=400, detail=invalid_choice("entity_type", ["actor", "scene", "prop", "costume"]))
+    raise HTTPException(status_code=400, detail=invalid_choice("entity_type", ["actor", "character", "scene", "prop", "costume"]))
 
 
 async def create_project_asset_link(

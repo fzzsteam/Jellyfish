@@ -143,13 +143,14 @@ export function useProjectCharacters(projectId: string | undefined) {
     }
     setLoading(true)
     try {
+      // projectId 传给后端：通过 EXISTS(ProjectCharacterLink) 过滤只属于本项目的角色
       const res = await StudioEntitiesApi.list('character', {
         page: 1,
         pageSize: 100,
         q: null,
+        projectId,
       })
-      const items = (res.data?.items ?? []).filter((x) => x.project_id === projectId)
-      setCharacters(items)
+      setCharacters(res.data?.items ?? [])
     } catch {
       setCharacters([])
     } finally {

@@ -21,6 +21,7 @@ from app.models.studio_image_candidates import AssetImageCandidate, AssetImageCa
 from app.models.studio_projects import (
     Chapter,
     Project,
+    ProjectCharacterLink,
     ProjectActorLink,
     ProjectCostumeLink,
     ProjectPropLink,
@@ -99,6 +100,7 @@ __all__ = [
     "SceneImage",
     "PropImage",
     "CostumeImage",
+    "ProjectCharacterLink",
     "ProjectActorLink",
     "ProjectSceneLink",
     "ProjectPropLink",

@@ -1,6 +1,6 @@
 services:
   mysql:
-    image: mysql:9.0
+    image: mysql:8.0
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: ${MYSQL_DATABASE}
@@ -39,6 +39,24 @@ services:
     volumes:
       - rustfs_data:/data
 
+  rustfs-init:
+    image: minio/mc:latest
+    depends_on:
+      rustfs:
+        condition: service_started
+    environment:
+      MC_HOST_rustfs: http://${RUSTFS_ACCESS_KEY}:${RUSTFS_SECRET_KEY}@rustfs:9000
+    entrypoint: >
+      /bin/sh -c "
+      until mc ls rustfs > /dev/null 2>&1; do
+        echo '[rustfs-init] waiting for rustfs...';
+        sleep 2;
+      done;
+      mc mb --ignore-existing rustfs/${S3_BUCKET_NAME};
+      echo '[rustfs-init] bucket ${S3_BUCKET_NAME} ready';
+      "
+    restart: "no"
+
   backend-init-db:
     build:
       context: ../..
@@ -46,6 +64,8 @@ services:
     environment:
       DATABASE_URL: mysql+aiomysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
       DEBUG: "false"
+      INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-admin}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD}
       # S3 / RustFS
       S3_ENDPOINT_URL: http://rustfs:9000
       S3_REGION_NAME: us-east-1
@@ -59,11 +79,13 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
     command: ["uv", "run", "python", "init_db.py"]
     restart: "no"
 
   mysql-init-sql:
-    image: mysql:9.0
+    image: mysql:8.0
     depends_on:
       mysql:
         condition: service_healthy
@@ -79,7 +101,7 @@ services:
       [
         "bash",
         "-lc",
-        "set -e; for f in $$(find /sql -maxdepth 1 -type f -name '*.sql' | sort); do echo \"[mysql-init-sql] applying $$f\"; mysql --default-character-set=utf8mb4 -h mysql -u\"$$MYSQL_USER\" -p\"$$MYSQL_PASSWORD\" \"$$MYSQL_DATABASE\" < \"$$f\"; done",
+        "for f in $$(find /sql -maxdepth 1 -type f -name '*.sql' | sort); do echo \"[mysql-init-sql] applying $$f\"; mysql --force --default-character-set=utf8mb4 -h mysql -u\"$$MYSQL_USER\" -p\"$$MYSQL_PASSWORD\" \"$$MYSQL_DATABASE\" < \"$$f\" || true; done",
       ]
     restart: "no"
 
@@ -96,6 +118,8 @@ services:
       CELERY_BROKER_URL: ${CELERY_BROKER_URL:-}
       DEBUG: "false"
       API_V1_PREFIX: /api/v1
+      INITIAL_ADMIN_USERNAME: ${INITIAL_ADMIN_USERNAME:-admin}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD}
       # S3 / RustFS
       S3_ENDPOINT_URL: http://rustfs:9000
       S3_REGION_NAME: us-east-1
@@ -113,6 +137,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
       backend-init-db:
         condition: service_completed_successfully
       mysql-init-sql:
@@ -143,6 +169,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
       backend-init-db:
         condition: service_completed_successfully
       mysql-init-sql:
@@ -178,6 +206,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      rustfs-init:
+        condition: service_completed_successfully
       backend-init-db:
         condition: service_completed_successfully
       mysql-init-sql:

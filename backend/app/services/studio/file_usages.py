@@ -11,6 +11,7 @@ from app.models.studio import (
     FileItem,
     FileUsage,
     ProjectActorLink,
+    ProjectCharacterLink,
     ProjectCostumeLink,
     ProjectPropLink,
     ProjectSceneLink,
@@ -103,15 +104,13 @@ async def sync_usage_from_character(
     usage_kind: FileUsageKind | str,
     source_ref: str | None = None,
 ) -> FileUsage | None:
-    from app.models.studio import Character
-
-    char = await session.get(Character, character_id)
-    if char is None:
+    pid = await first_project_id_for_character(session, character_id)
+    if pid is None:
         return None
     return await upsert_file_usage(
         session,
         file_id=file_id,
-        project_id=char.project_id,
+        project_id=pid,
         chapter_id=None,
         shot_id=None,
         usage_kind=usage_kind,
@@ -257,6 +256,11 @@ async def first_project_id_for_actor(session: AsyncSession, actor_id: str) -> st
     return (await session.execute(stmt)).scalars().first()
 
 
+async def first_project_id_for_character(session: AsyncSession, character_id: str) -> str | None:
+    stmt = select(ProjectCharacterLink.project_id).where(ProjectCharacterLink.character_id == character_id).limit(1)
+    return (await session.execute(stmt)).scalars().first()
+
+
 __all__ = [
     "upsert_file_usage",
     "delete_usages_by_file_id",
@@ -267,4 +271,5 @@ __all__ = [
     "first_project_id_for_prop",
     "first_project_id_for_costume",
     "first_project_id_for_actor",
+    "first_project_id_for_character",
 ]

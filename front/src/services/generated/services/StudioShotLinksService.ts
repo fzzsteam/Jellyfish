@@ -5,6 +5,7 @@
 import type { ApiResponse_NoneType_ } from '../models/ApiResponse_NoneType_';
 import type { ApiResponse_PaginatedData_Any__ } from '../models/ApiResponse_PaginatedData_Any__';
 import type { ApiResponse_ProjectActorLinkRead_ } from '../models/ApiResponse_ProjectActorLinkRead_';
+import type { ApiResponse_ProjectCharacterLinkRead_ } from '../models/ApiResponse_ProjectCharacterLinkRead_';
 import type { ApiResponse_ProjectCostumeLinkRead_ } from '../models/ApiResponse_ProjectCostumeLinkRead_';
 import type { ApiResponse_ProjectPropLinkRead_ } from '../models/ApiResponse_ProjectPropLinkRead_';
 import type { ApiResponse_ProjectSceneLinkRead_ } from '../models/ApiResponse_ProjectSceneLinkRead_';
@@ -258,6 +259,57 @@ export class StudioShotLinksService {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/v1/studio/shot-links/costume/{link_id}',
+            path: {
+                'link_id': linkId,
+            },
+            headers: {
+                'authorization': authorization,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 创建项目-章节-镜头-角色关联
+     * @returns ApiResponse_ProjectCharacterLinkRead_ Successful Response
+     * @throws ApiError
+     */
+    public static createProjectCharacterLinkApiV1StudioShotLinksCharacterPost({
+        requestBody,
+        authorization,
+    }: {
+        requestBody: ProjectAssetLinkCreate,
+        authorization?: (string | null),
+    }): CancelablePromise<ApiResponse_ProjectCharacterLinkRead_> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/studio/shot-links/character',
+            headers: {
+                'authorization': authorization,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * 删除项目-章节-镜头-角色关联
+     * @returns ApiResponse_NoneType_ Successful Response
+     * @throws ApiError
+     */
+    public static deleteProjectCharacterLinkApiV1StudioShotLinksCharacterLinkIdDelete({
+        linkId,
+        authorization,
+    }: {
+        linkId: number,
+        authorization?: (string | null),
+    }): CancelablePromise<ApiResponse_NoneType_> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/v1/studio/shot-links/character/{link_id}',
             path: {
                 'link_id': linkId,
             },

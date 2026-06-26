@@ -56,6 +56,7 @@ export type { ApiResponse_PointsQuoteResponse_ } from './models/ApiResponse_Poin
 export type { ApiResponse_PointsSummaryRead_ } from './models/ApiResponse_PointsSummaryRead_';
 export type { ApiResponse_PointTransactionRead_ } from './models/ApiResponse_PointTransactionRead_';
 export type { ApiResponse_ProjectActorLinkRead_ } from './models/ApiResponse_ProjectActorLinkRead_';
+export type { ApiResponse_ProjectCharacterLinkRead_ } from './models/ApiResponse_ProjectCharacterLinkRead_';
 export type { ApiResponse_ProjectCostumeLinkRead_ } from './models/ApiResponse_ProjectCostumeLinkRead_';
 export type { ApiResponse_ProjectPropLinkRead_ } from './models/ApiResponse_ProjectPropLinkRead_';
 export type { ApiResponse_ProjectRead_ } from './models/ApiResponse_ProjectRead_';
@@ -172,6 +173,7 @@ export type { PointTransactionRead } from './models/PointTransactionRead';
 export type { PointTransactionType } from './models/PointTransactionType';
 export type { ProjectActorLinkRead } from './models/ProjectActorLinkRead';
 export type { ProjectAssetLinkCreate } from './models/ProjectAssetLinkCreate';
+export type { ProjectCharacterLinkRead } from './models/ProjectCharacterLinkRead';
 export type { ProjectCostumeLinkRead } from './models/ProjectCostumeLinkRead';
 export type { ProjectCreate } from './models/ProjectCreate';
 export type { ProjectPropLinkRead } from './models/ProjectPropLinkRead';

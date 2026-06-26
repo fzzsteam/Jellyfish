@@ -49,11 +49,11 @@ class Project(Base, UserOwnedMixin, TimestampMixin):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
-    characters: Mapped[list["Character"]] = relationship(
+    character_links: Mapped[list["ProjectCharacterLink"]] = relationship(
         back_populates="project",
         cascade="all, delete-orphan",
         passive_deletes=True,
-        order_by="Character.id",
+        order_by="ProjectCharacterLink.id",
     )
     actor_links: Mapped[list["ProjectActorLink"]] = relationship(
         back_populates="project",
@@ -129,6 +129,50 @@ class Chapter(Base, TimestampMixin):
         Index("ix_chapters_updated_at", "updated_at"),
         Index("ix_chapters_status", "status"),
         Index("ix_chapters_project_title", "project_id", "title"),
+    )
+
+
+class ProjectCharacterLink(Base, TimestampMixin):
+    """项目/章节/镜头 -> 角色关联。"""
+
+    __tablename__ = "project_character_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True, comment="关联行 ID")
+    project_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="项目 ID",
+    )
+    chapter_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("chapters.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="章节 ID",
+    )
+    shot_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey("shots.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="镜头 ID",
+    )
+    character_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("characters.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="角色 ID",
+    )
+
+    project: Mapped["Project"] = relationship(back_populates="character_links")
+    shot: Mapped["Shot"] = relationship(back_populates="project_character_links")
+    character: Mapped["Character"] = relationship()
+
+    __table_args__ = (
+        UniqueConstraint("character_id", "project_id", "chapter_id", "shot_id", name="uq_project_character_links_scope"),
     )
 
 
@@ -239,6 +283,7 @@ class ProjectCostumeLink(Base, TimestampMixin):
 __all__ = [
     "Project",
     "Chapter",
+    "ProjectCharacterLink",
     "ProjectActorLink",
     "ProjectSceneLink",
     "ProjectPropLink",

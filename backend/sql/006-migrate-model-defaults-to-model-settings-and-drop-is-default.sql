@@ -38,7 +38,8 @@ SET @insert_model_settings_default = IF(
   @has_model_settings_user_id > 0,
   "INSERT INTO model_settings (id, user_id, api_timeout, log_level)
    SELECT 1, @admin_id, 30, 'info'
-   WHERE NOT EXISTS (SELECT 1 FROM model_settings WHERE id = 1)",
+   WHERE NOT EXISTS (SELECT 1 FROM model_settings WHERE id = 1)
+   AND @admin_id IS NOT NULL",
   "INSERT INTO model_settings (id, api_timeout, log_level)
    SELECT 1, 30, 'info'
    WHERE NOT EXISTS (SELECT 1 FROM model_settings WHERE id = 1)"

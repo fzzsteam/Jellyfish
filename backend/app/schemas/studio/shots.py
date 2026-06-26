@@ -260,6 +260,13 @@ class ProjectCostumeLinkRead(ProjectLinkBase):
     thumbnail: str = Field("", description="服装缩略图下载地址")
 
 
+class ProjectCharacterLinkRead(ProjectLinkBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    character_id: str
+    thumbnail: str = Field("", description="角色缩略图下载地址")
+
+
 class ShotFrameImageBase(BaseModel):
     id: int = Field(..., description="图片行 ID")
     shot_detail_id: str = Field(..., description="所属镜头细节 ID")

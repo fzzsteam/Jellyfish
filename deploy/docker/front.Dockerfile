@@ -6,7 +6,7 @@ RUN corepack enable
 RUN corepack prepare pnpm@9.15.9 --activate
 
 COPY front/package.json front/pnpm-lock.yaml ./
-RUN pnpm install --frozen-lockfile
+RUN echo "node-linker=hoisted" > .npmrc && pnpm install --frozen-lockfile
 
 COPY front/ ./
 RUN pnpm run build

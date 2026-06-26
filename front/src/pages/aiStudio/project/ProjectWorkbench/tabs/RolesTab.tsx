@@ -37,7 +37,6 @@ type CharacterLike = {
   name: string
   description?: string | null
   thumbnail?: string
-  project_id?: string | null
 }
 
 function notifyShotAssetCreatedAndLinked(payload: {
@@ -299,7 +298,7 @@ export function RolesTab() {
 
   const currentCharacterIds = useMemo(() => new Set(characters.map((c) => c.id)), [characters])
 
-  // 加载资产库中未关联到本项目的角色
+  // 加载用户全部角色资产（由 availableLibraryCharacters memo 过滤掉已关联的）
   const loadLibraryCharacters = async (searchQuery?: string) => {
     setLibraryLoading(true)
     try {
@@ -311,8 +310,7 @@ export function RolesTab() {
         page: 1,
         pageSize: 100,
       })
-      const all = (res.data?.items ?? []) as CharacterLike[]
-      setLibraryCharacters(all.filter((c) => c.project_id !== projectId))
+      setLibraryCharacters((res.data?.items ?? []) as CharacterLike[])
     } catch {
       message.error('加载角色资产库失败')
       setLibraryCharacters([])
@@ -326,12 +324,14 @@ export function RolesTab() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [linkModalOpen])
 
-  // 关联角色到项目（更新 project_id）
+  // 关联角色到项目（创建 ProjectCharacterLink）
   const handleLinkCharacter = async (character: CharacterLike) => {
     if (!projectId) return
     setLinkingId(character.id)
     try {
-      await StudioEntitiesApi.update('character', character.id, { project_id: projectId })
+      await StudioShotLinksService.createProjectCharacterLinkApiV1StudioShotLinksCharacterPost({
+        requestBody: { project_id: projectId, asset_id: character.id },
+      })
       message.success(`已关联角色「${character.name}」到项目`)
       setLinkModalOpen(false)
       await refresh()
@@ -466,13 +466,26 @@ export function RolesTab() {
                       onClick={() => {
                         Modal.confirm({
                           title: `取消关联角色「${c.name}」？`,
-                          content: '取消关联后该角色将从本项目中移除。',
+                          content: '取消关联后该角色将从本项目中移除（角色本身不会被删除）。',
                           okText: '取消关联',
                           cancelText: '取消',
                           okButtonProps: { danger: true },
                           onOk: async () => {
                             try {
-                              await StudioEntitiesApi.remove('character', c.id)
+                              const linksRes = await StudioShotLinksService.listProjectEntityLinksApiV1StudioShotLinksEntityTypeGet({
+                                entityType: 'character',
+                                projectId: projectId ?? '',
+                                chapterId: null,
+                                shotId: null,
+                                assetId: c.id,
+                                order: null,
+                                isDesc: false,
+                                page: 1,
+                                pageSize: 1,
+                              })
+                              const link = linksRes.data?.items?.[0] as { id: number } | undefined
+                              if (!link) { message.error('未找到关联记录'); return }
+                              await StudioShotLinksService.deleteProjectCharacterLinkApiV1StudioShotLinksCharacterLinkIdDelete({ linkId: link.id })
                               message.success('已取消关联')
                               await refresh()
                             } catch {

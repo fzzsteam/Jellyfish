@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.utils import apply_keyword_filter, apply_order, paginate
-from app.models.studio import Actor, Chapter, Costume, Project, Shot, ShotCharacterLink
+from app.models.studio import Actor, Chapter, Costume, ProjectCharacterLink, Shot, ShotCharacterLink
 from app.schemas.studio.cast import ShotCharacterLinkCreate
 from app.services.common import entity_already_exists, entity_not_found
 from app.services.studio.entity_specs import DEFAULT_VIEW_ANGLES, LINK_MODEL_BY_ENTITY, entity_spec, normalize_entity_type
@@ -19,8 +19,7 @@ from app.utils.project_links import upsert_project_link
 
 ENTITY_ORDER_FIELDS = {"name", "style", "visual_style", "created_at", "updated_at"}
 # 直接归属用户的资产类型：模型自身带 user_id 列，按用户隔离/判重。
-# character 不在其中——它通过 project_id → projects.user_id 间接隔离，自身无 user_id 列。
-USER_OWNED_ENTITY_TYPES = {"actor", "scene", "prop", "costume"}
+USER_OWNED_ENTITY_TYPES = {"actor", "character", "scene", "prop", "costume"}
 # 历史命名保留：原"全局判重"集合即现在的"按用户判重"集合。
 GLOBAL_NAME_UNIQUE_ENTITY_TYPES = USER_OWNED_ENTITY_TYPES
 
@@ -82,18 +81,21 @@ async def list_entities_paginated(
     entity_type_norm = normalize_entity_type(entity_type)
     spec = entity_spec(entity_type_norm)
     stmt = select(spec.model)
-    # 资产类型按 user_id 隔离：用户只能看到自己的 actor/scene/prop/costume。
+    # 所有资产类型（含 character）均有 user_id，按用户隔离。
     if entity_type_norm in USER_OWNED_ENTITY_TYPES:
         stmt = stmt.where(spec.model.user_id == user_id)
-    # character 无 user_id 列，通过 project_id → projects.user_id 间接做用户隔离。
-    # 传 project_id：只查该项目内的角色；不传：JOIN projects 表按用户跨项目查询（"资产库"浏览场景）。
-    if entity_type_norm == "character":
-        if project_id:
-            stmt = stmt.where(spec.model.project_id == project_id)
-        else:
-            stmt = stmt.join(Project, spec.model.project_id == Project.id).where(Project.user_id == user_id)
-    elif project_id and entity_type_norm == "actor" and hasattr(spec.model, "project_id"):
-        stmt = stmt.where(getattr(spec.model, "project_id") == project_id)
+    # 按项目过滤：character 通过 ProjectCharacterLink 做 EXISTS 子查询；actor 直接匹配字段（兼容旧逻辑）。
+    if project_id:
+        if entity_type_norm == "character":
+            from sqlalchemy import exists as _exists
+            stmt = stmt.where(
+                _exists().where(
+                    ProjectCharacterLink.character_id == spec.model.id,
+                    ProjectCharacterLink.project_id == project_id,
+                )
+            )
+        elif entity_type_norm == "actor" and hasattr(spec.model, "project_id"):
+            stmt = stmt.where(getattr(spec.model, "project_id") == project_id)
     stmt = apply_keyword_filter(stmt, q=q, fields=[spec.model.name, spec.model.description])
     if style:
         stmt = stmt.where(getattr(spec.model, "style") == style)
@@ -141,12 +143,9 @@ async def create_entity(
     link_project_id: str | None = None
     link_chapter_id: str | None = None
     link_shot_id: str | None = None
+    # character 已加入 LINK_MODEL_BY_ENTITY，与 actor/scene/prop/costume 统一走 upsert_project_link
     if entity_type_norm in LINK_MODEL_BY_ENTITY:
         link_project_id = data.pop("project_id", None)
-        link_chapter_id = data.pop("chapter_id", None)
-        link_shot_id = data.pop("shot_id", None)
-    elif entity_type_norm == "character":
-        link_project_id = data.get("project_id")
         link_chapter_id = data.pop("chapter_id", None)
         link_shot_id = data.pop("shot_id", None)
 
@@ -162,31 +161,11 @@ async def create_entity(
     )
 
     if entity_type_norm == "character":
-        if await db.get(Project, data["project_id"]) is None:
-            raise HTTPException(status_code=400, detail=entity_not_found("Project"))
+        # project/chapter/shot 的存在性与归属校验由 upsert_project_link 统一负责
         if data.get("actor_id") and await db.get(Actor, data["actor_id"]) is None:
             raise HTTPException(status_code=400, detail=entity_not_found("Actor"))
         if data.get("costume_id") and await db.get(Costume, data["costume_id"]) is None:
             raise HTTPException(status_code=400, detail=entity_not_found("Costume"))
-        chapter: Chapter | None = None
-        shot: Shot | None = None
-        if link_chapter_id is not None:
-            chapter = await db.get(Chapter, link_chapter_id)
-            if chapter is None:
-                raise HTTPException(status_code=400, detail=entity_not_found("Chapter"))
-            if chapter.project_id != data["project_id"]:
-                raise HTTPException(status_code=400, detail="Chapter does not belong to the same project")
-        if link_shot_id is not None:
-            shot = await db.get(Shot, link_shot_id)
-            if shot is None:
-                raise HTTPException(status_code=400, detail=entity_not_found("Shot"))
-            shot_chapter = await db.get(Chapter, shot.chapter_id)
-            if shot_chapter is None:
-                raise HTTPException(status_code=400, detail=f"{entity_not_found('Chapter')} for shot")
-            if shot_chapter.project_id != data["project_id"]:
-                raise HTTPException(status_code=400, detail="Shot does not belong to the same project")
-            if chapter is not None and shot.chapter_id != chapter.id:
-                raise HTTPException(status_code=400, detail="Shot does not belong to the specified chapter")
 
     # 资产类型写入归属用户；character 无 user_id 列，不注入。
     if entity_type_norm in USER_OWNED_ENTITY_TYPES:
@@ -298,8 +277,6 @@ async def update_entity(
         exclude_id=entity_id,
     )
     if entity_type_norm == "character":
-        if "project_id" in update_data and await db.get(Project, update_data["project_id"]) is None:
-            raise HTTPException(status_code=400, detail=entity_not_found("Project"))
         if "actor_id" in update_data and update_data["actor_id"] is not None and await db.get(Actor, update_data["actor_id"]) is None:
             raise HTTPException(status_code=400, detail=entity_not_found("Actor"))
         if "costume_id" in update_data and update_data["costume_id"] is not None and await db.get(Costume, update_data["costume_id"]) is None:

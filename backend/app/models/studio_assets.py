@@ -196,27 +196,18 @@ class Actor(Base, UserOwnedMixin, TimestampMixin):
     )
 
 
-class Character(Base, TimestampMixin):
-    """角色表（归属项目）。
+class Character(Base, UserOwnedMixin, TimestampMixin):
+    """角色表（归属用户，通过 ProjectCharacterLink 与项目关联）。
 
     组成约定：
     - 角色由：Actor（演员） + Costume（服装） + Props（道具）组成。
     - 最终在分镜中引用角色：`ShotCharacterLink`（shot_character_links）。
-
-    应用层保证：
-    - `costume_id` 所指服装应为该角色所属项目或全局资产，避免跨项目误用。
+    - 与项目的关联通过 `project_character_links` 表维护，角色可被关联到任意项目。
     """
 
     __tablename__ = "characters"
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="角色 ID")
-    project_id: Mapped[str] = mapped_column(
-        String(64),
-        ForeignKey("projects.id", ondelete="CASCADE"),
-        nullable=False,
-        index=True,
-        comment="所属项目 ID",
-    )
     name: Mapped[str] = mapped_column(String(255), nullable=False, comment="角色名称")
     description: Mapped[str] = mapped_column(Text, nullable=False, default="", comment="角色描述")
     style: Mapped[ProjectStyle] = mapped_column(String(32), nullable=False, comment="题材/风格")
@@ -241,7 +232,6 @@ class Character(Base, TimestampMixin):
         comment="服装 ID（可空）；应用层需保证与角色同项目或全局",
     )
 
-    project: Mapped["Project"] = relationship(back_populates="characters")
     actor: Mapped["Actor"] = relationship(back_populates="characters")
     costume: Mapped["Costume | None"] = relationship(back_populates="characters")
     prop_links: Mapped[list["CharacterPropLink"]] = relationship(
@@ -264,7 +254,7 @@ class Character(Base, TimestampMixin):
 
     __table_args__ = (
         Index("ix_characters_name", "name"),
-        UniqueConstraint("project_id", "name", name="uq_characters_project_name"),
+        UniqueConstraint("user_id", "name", name="uq_characters_user_name"),
     )
 
 

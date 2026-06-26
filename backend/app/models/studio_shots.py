@@ -102,6 +102,12 @@ class Shot(Base,TimestampMixin):
         passive_deletes=True,
         order_by="ProjectCostumeLink.id",
     )
+    project_character_links: Mapped[list["ProjectCharacterLink"]] = relationship(
+        back_populates="shot",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="ProjectCharacterLink.id",
+    )
     character_links: Mapped[list["ShotCharacterLink"]] = relationship(
         back_populates="shot",
         cascade="all, delete-orphan",
