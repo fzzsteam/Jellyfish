@@ -259,6 +259,22 @@ async def build_run_args(
             await file_id_to_data_url(db, file_id=file_id)
             for file_id in asset_reference_file_ids
         ]
+        # Vidu reference2video 总参考图上限为 7 张（含首/尾/关键帧）。
+        # 超出时在任务创建阶段即报错，避免 worker 侧触发无法恢复的 400。
+        _VIDU_MAX_TOTAL_REF = 7
+        frame_count = sum(
+            1 for ft in (ShotFrameType.first, ShotFrameType.last, ShotFrameType.key)
+            if ft in frame_map
+        )
+        total_ref = frame_count + len(asset_reference_data_urls)
+        if total_ref > _VIDU_MAX_TOTAL_REF:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"参考图数量超过模型上限（{model.name} 最多支持 {_VIDU_MAX_TOTAL_REF} 张），"
+                    f"当前已关联 {total_ref} 张，请在分镜工作室中减少关联资产后重试。"
+                ),
+            )
 
     # 按供应商能力决定是否传 watermark=False，避免生成带水印的视频
     cap = resolve_video_capability(provider=provider_cfg.provider, model=model.name)

@@ -26,11 +26,13 @@ logger = logging.getLogger(__name__)
 _POLL_INTERVAL_S = 3.0
 _TERMINAL_STATES = {"success", "failed"}
 
-# Vidu API 限制：reference2video subjects 每个最多 3 张图，最多 5 个 subjects；
-# viduq3-mix flat images 最多 7 张。超出部分静默截断并打印 warning。
+# Vidu API reference2video 双重限制（实测确认）：
+#   - 每个 subject：1–3 张图
+#   - 全部 subjects 合计：不超过 7 张（fields=images 错误）
+# viduq3-mix flat images 同样最多 7 张。
+# 因此三个模型的总参考图上限均为 7 张。
 _VIDU_MAX_IMAGES_PER_SUBJECT = 3
-_VIDU_MAX_SUBJECTS = 5
-_VIDU_MAX_FLAT_IMAGES = 7
+_VIDU_MAX_TOTAL_REFERENCE_IMAGES = 7  # subjects 模式下所有 subject 图片总量上限，也是 flat images 上限
 
 
 class ViduVideoApiAdapter:
@@ -210,30 +212,32 @@ class ViduVideoApiAdapter:
         }
 
         if self._uses_flat_images_payload(model):
-            # viduq3-mix: flat images array, max 7 images.
-            if len(images) > _VIDU_MAX_FLAT_IMAGES:
+            # viduq3-mix: flat images array, Vidu hard limit is 7 total.
+            if len(images) > _VIDU_MAX_TOTAL_REFERENCE_IMAGES:
                 logger.warning(
                     "[ViduVideo] Clipping flat images from %d to %d for model=%s",
                     len(images),
-                    _VIDU_MAX_FLAT_IMAGES,
+                    _VIDU_MAX_TOTAL_REFERENCE_IMAGES,
                     model,
                 )
-            body["images"] = images[:_VIDU_MAX_FLAT_IMAGES]
+            body["images"] = images[:_VIDU_MAX_TOTAL_REFERENCE_IMAGES]
         else:
-            # viduq3 / viduq3-turbo: split images across subjects (max 3 per subject, max 5 subjects).
-            # Characters are ordered first in `images`, so chunking preserves per-character grouping.
-            chunks = [
-                images[i : i + _VIDU_MAX_IMAGES_PER_SUBJECT]
-                for i in range(0, len(images), _VIDU_MAX_IMAGES_PER_SUBJECT)
-            ]
-            if len(chunks) > _VIDU_MAX_SUBJECTS:
+            # viduq3 / viduq3-turbo: Vidu reference2video has two limits:
+            #   1. per-subject: max 3 images
+            #   2. total across all subjects: max 7 images
+            # Strategy: clamp total to 7 first, then split into groups of 3.
+            clamped = images[:_VIDU_MAX_TOTAL_REFERENCE_IMAGES]
+            if len(images) > _VIDU_MAX_TOTAL_REFERENCE_IMAGES:
                 logger.warning(
-                    "[ViduVideo] Clipping subjects from %d to %d (too many ref images, model=%s)",
-                    len(chunks),
-                    _VIDU_MAX_SUBJECTS,
+                    "[ViduVideo] Clipping reference images from %d to %d (Vidu total limit, model=%s)",
+                    len(images),
+                    _VIDU_MAX_TOTAL_REFERENCE_IMAGES,
                     model,
                 )
-                chunks = chunks[:_VIDU_MAX_SUBJECTS]
+            chunks = [
+                clamped[i : i + _VIDU_MAX_IMAGES_PER_SUBJECT]
+                for i in range(0, len(clamped), _VIDU_MAX_IMAGES_PER_SUBJECT)
+            ]
             body["subjects"] = [
                 {"name": f"subject_{i + 1}", "images": chunk, "voice_id": ""}
                 for i, chunk in enumerate(chunks)

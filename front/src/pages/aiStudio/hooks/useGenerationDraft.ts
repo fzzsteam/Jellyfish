@@ -147,7 +147,9 @@ export function useGenerationDraft<TBase, TContext, TDerived, TSubmitResult = vo
     } catch (err) {
       setState('error')
       setError(err instanceof Error ? err.message : 'submit failed')
-      return null
+      // Re-throw so callers can surface specific backend error messages
+      // (e.g. HTTPException 400 detail field) rather than a generic fallback.
+      throw err
     }
   }, [base, context, deriveNow, derived, submit])
 

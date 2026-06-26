@@ -45,6 +45,13 @@ export function makePointsAwareGetErrorMessage(
         refresh()
         return '可用积分不足，请充值后再试'
       }
+      // 非积分业务错误：提取后端统一 ApiResponse 的 message 字段。
+      // http_exception_handler 把所有 HTTPException 包成 { code, message, data: null }，
+      // 因此用户可读的错误文案在 body.message 而非原始 FastAPI 的 body.detail。
+      const msg = (error.body as { message?: unknown } | undefined)?.message
+      if (typeof msg === 'string' && msg) {
+        return msg
+      }
     }
     return fallbackErrorMessage
   }
