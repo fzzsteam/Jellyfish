@@ -23,6 +23,7 @@ from app.models.studio import (
     FileType,
     Project,
     ProjectActorLink,
+    ProjectCharacterLink,
     ProjectCostumeLink,
     ProjectPropLink,
     ProjectSceneLink,
@@ -128,7 +129,7 @@ def _seed_project_graph(db: Session) -> None:
     )
     character = Character(
         id="character-1",
-        project_id=project.id,
+        user_id="test-user",
         name="小明",
         description="",
         style=ProjectStyle.guoman,
@@ -583,7 +584,7 @@ def test_auto_prepare_links_character_to_matching_actor_and_project_actor_link()
                 ActorImage(actor_id="actor-green", file_id="file-actor-green"),
                 Character(
                     id="character-green",
-                    project_id="project-1",
+                    user_id="test-user",
                     name="青衣少女",
                     description="",
                     style=ProjectStyle.guoman,
@@ -621,8 +622,8 @@ def test_auto_prepare_links_character_to_matching_actor_and_project_actor_link()
         engine.dispose()
 
 
-def test_auto_prepare_links_to_existing_cross_project_character() -> None:
-    """角色全局共享：资产库已有同名角色（归属其它项目）时应直接关联，不新建重复角色。"""
+def test_auto_prepare_links_user_character_into_project_character_library() -> None:
+    """自动匹配用户资产库角色后，应同步写入项目角色关联表。"""
     db, engine = _build_session()
     try:
         _seed_project_graph(db)
@@ -639,7 +640,7 @@ def test_auto_prepare_links_to_existing_cross_project_character() -> None:
                 FileItem(id="file-sdp", type=FileType.image, name="sdp.png", storage_key="files/sdp.png", user_id="test-user"),
                 Character(
                     id="char-sudongpo",
-                    project_id="project-2",
+                    user_id="test-user",
                     name="苏东坡",
                     description="",
                     style=ProjectStyle.guoman,
@@ -670,6 +671,63 @@ def test_auto_prepare_links_to_existing_cross_project_character() -> None:
         link = db.scalar(select(ShotCharacterLink).where(ShotCharacterLink.shot_id == "shot-1"))
         assert link is not None
         assert link.character_id == "char-sudongpo"
+        project_link = db.scalar(
+            select(ProjectCharacterLink).where(
+                ProjectCharacterLink.project_id == "project-1",
+                ProjectCharacterLink.character_id == "char-sudongpo",
+                ProjectCharacterLink.chapter_id.is_(None),
+                ProjectCharacterLink.shot_id.is_(None),
+            )
+        )
+        assert project_link is not None
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_auto_prepare_does_not_link_character_owned_by_other_user() -> None:
+    """自动匹配角色时只能使用当前用户资产，不能关联其他用户的同名角色。"""
+    db, engine = _build_session()
+    try:
+        _seed_project_graph(db)
+        db.add_all(
+            [
+                User(id="other-user", username="other-user", hashed_password="x"),
+                FileItem(id="file-other-sdp", type=FileType.image, name="sdp.png", storage_key="files/other-sdp.png", user_id="other-user"),
+                Character(
+                    id="char-other-sudongpo",
+                    user_id="other-user",
+                    name="苏东坡",
+                    description="",
+                    style=ProjectStyle.guoman,
+                    visual_style=ProjectVisualStyle.anime,
+                ),
+                CharacterImage(character_id="char-other-sudongpo", file_id="file-other-sdp"),
+                ShotExtractedCandidate(
+                    shot_id="shot-1",
+                    candidate_type=ShotCandidateType.character,
+                    candidate_name="苏东坡",
+                ),
+            ]
+        )
+        db.flush()
+
+        auto_prepare_chapter_shots_sync(db, user_id="test-user", project_id="project-1", chapter_id="chapter-1")
+
+        candidate = db.scalar(
+            select(ShotExtractedCandidate).where(
+                ShotExtractedCandidate.shot_id == "shot-1",
+                ShotExtractedCandidate.candidate_type == ShotCandidateType.character,
+            )
+        )
+        assert candidate is not None
+        assert candidate.linked_entity_id != "char-other-sudongpo"
+        assert db.scalar(
+            select(ShotCharacterLink).where(
+                ShotCharacterLink.shot_id == "shot-1",
+                ShotCharacterLink.character_id == "char-other-sudongpo",
+            )
+        ) is None
     finally:
         db.close()
         engine.dispose()
@@ -684,7 +742,7 @@ def test_auto_prepare_leaves_character_actor_empty_without_unique_actor_match() 
                 FileItem(id="file-character-lone", type=FileType.image, name="character.png", storage_key="files/character-lone.png", user_id="test-user"),
                 Character(
                     id="character-lone",
-                    project_id="project-1",
+                    user_id="test-user",
                     name="无演员角色",
                     description="",
                     style=ProjectStyle.guoman,

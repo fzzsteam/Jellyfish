@@ -16,20 +16,28 @@ from app.services.studio.entity_specs import entity_spec, normalize_entity_type
 IMAGE_ORDER_FIELDS = {"id", "quality_level", "view_angle", "created_at", "updated_at"}
 
 
+async def _require_owned_parent(db: AsyncSession, *, spec: Any, entity_id: str, user_id: str) -> Any:
+    """加载父资产并校验其归属当前用户。"""
+
+    parent = await db.get(spec.model, entity_id)
+    if parent is None or getattr(parent, "user_id", None) != user_id:
+        raise HTTPException(status_code=404, detail=entity_not_found(spec.model.__name__))
+    return parent
+
+
 async def list_entity_images_paginated(
     db: AsyncSession,
     *,
     entity_type: str,
     entity_id: str,
+    user_id: str,
     order: str | None,
     is_desc: bool,
     page: int,
     page_size: int,
 ) -> tuple[list[dict[str, Any]], int]:
     spec = entity_spec(entity_type)
-    parent = await db.get(spec.model, entity_id)
-    if parent is None:
-        raise HTTPException(status_code=404, detail=entity_not_found(spec.model.__name__))
+    await _require_owned_parent(db, spec=spec, entity_id=entity_id, user_id=user_id)
 
     id_field = getattr(spec.image_model, spec.id_field)
     stmt = select(spec.image_model).where(id_field == entity_id)
@@ -51,13 +59,12 @@ async def create_entity_image(
     *,
     entity_type: str,
     entity_id: str,
+    user_id: str,
     body: dict[str, Any],
 ) -> dict[str, Any]:
     entity_type_norm = normalize_entity_type(entity_type)
     spec = entity_spec(entity_type_norm)
-    parent = await db.get(spec.model, entity_id)
-    if parent is None:
-        raise HTTPException(status_code=404, detail=entity_not_found(spec.model.__name__))
+    await _require_owned_parent(db, spec=spec, entity_id=entity_id, user_id=user_id)
 
     parsed = spec.image_create_model.model_validate(body).model_dump()
     obj = spec.image_model(**{spec.id_field: entity_id, **parsed})
@@ -82,11 +89,13 @@ async def update_entity_image(
     *,
     entity_type: str,
     entity_id: str,
+    user_id: str,
     image_id: int,
     body: dict[str, Any],
 ) -> dict[str, Any]:
     entity_type_norm = normalize_entity_type(entity_type)
     spec = entity_spec(entity_type_norm)
+    await _require_owned_parent(db, spec=spec, entity_id=entity_id, user_id=user_id)
     obj = await db.get(spec.image_model, image_id)
     if obj is None or getattr(obj, spec.id_field) != entity_id:
         raise HTTPException(status_code=404, detail=entity_not_found(spec.image_model.__name__))
@@ -114,9 +123,11 @@ async def delete_entity_image(
     *,
     entity_type: str,
     entity_id: str,
+    user_id: str,
     image_id: int,
 ) -> None:
     spec = entity_spec(entity_type)
+    await _require_owned_parent(db, spec=spec, entity_id=entity_id, user_id=user_id)
     obj = await db.get(spec.image_model, image_id)
     if obj is None or getattr(obj, spec.id_field) != entity_id:
         return

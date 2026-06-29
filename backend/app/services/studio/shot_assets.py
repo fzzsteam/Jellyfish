@@ -13,6 +13,7 @@ from app.models.studio import (
     Actor,
     Character,
     Costume,
+    Project,
     ProjectActorLink,
     ProjectCharacterLink,
     ProjectCostumeLink,
@@ -85,11 +86,29 @@ def _link_spec(entity_type: str) -> dict[str, Any]:
     raise HTTPException(status_code=400, detail=invalid_choice("entity_type", ["actor", "character", "scene", "prop", "costume"]))
 
 
+async def _load_project_for_user(db: AsyncSession, *, project_id: str, user_id: str | None) -> Project:
+    """加载项目，并在路由传入当前用户时校验项目归属。"""
+
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=400, detail=entity_not_found("Project"))
+    if user_id is not None and project.user_id != user_id:
+        raise HTTPException(status_code=404, detail=entity_not_found("Project"))
+    return project
+
+
+def _asset_belongs_to_project_user(asset_obj: Any, *, project: Project) -> bool:
+    """确认资产与项目同属一个用户，阻止跨用户资产被挂入项目。"""
+
+    return getattr(asset_obj, "user_id", None) == project.user_id
+
+
 async def create_project_asset_link(
     db: AsyncSession,
     *,
     entity_type: str,
     body: ProjectAssetLinkCreate,
+    user_id: str | None = None,
 ) -> Any:
     """创建或补全项目-章节-镜头-资产关联。"""
     spec = _link_spec(entity_type)
@@ -100,7 +119,10 @@ async def create_project_asset_link(
         detail=spec["not_found"],
         status_code=400,
     )
+    project = await _load_project_for_user(db, project_id=body.project_id, user_id=user_id)
     asset_obj = await db.get(spec["asset_model"], body.asset_id)
+    if asset_obj is None or not _asset_belongs_to_project_user(asset_obj, project=project):
+        raise HTTPException(status_code=400, detail=spec["not_found"])
     row = await upsert_project_link(
         db,
         model=spec["model"],
@@ -127,12 +149,14 @@ async def delete_project_asset_link(
     *,
     entity_type: str,
     link_id: int,
+    user_id: str | None = None,
 ) -> None:
     """删除项目-章节-镜头-资产关联。"""
     spec = _link_spec(entity_type)
     row = await db.get(spec["model"], link_id)
     if row is None:
         return
+    await _load_project_for_user(db, project_id=row.project_id, user_id=user_id)
     shot_id = getattr(row, "shot_id", None)
     asset_id = getattr(row, spec["field"], None)
     asset_obj = await db.get(spec["asset_model"], asset_id) if asset_id else None
@@ -343,6 +367,7 @@ async def list_project_asset_links_paginated(
     page: int,
     page_size: int,
     allow_fields: set[str],
+    user_id: str | None = None,
 ) -> ApiResponse[PaginatedData[Any]]:
     """查询项目-章节-镜头-实体关联列表（分页）。"""
     spec = _link_spec(entity_type)
@@ -350,7 +375,11 @@ async def list_project_asset_links_paginated(
     field_name = spec["field"]
 
     stmt = select(model)
+    if user_id is not None:
+        stmt = stmt.join(Project, Project.id == model.project_id).where(Project.user_id == user_id)
     if project_id is not None:
+        if user_id is not None:
+            await _load_project_for_user(db, project_id=project_id, user_id=user_id)
         stmt = stmt.where(model.project_id == project_id)
     if chapter_id is not None:
         stmt = stmt.where(model.chapter_id == chapter_id)

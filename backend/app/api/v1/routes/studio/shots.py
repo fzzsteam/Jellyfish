@@ -764,6 +764,7 @@ async def list_project_entity_links(
     is_desc: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[PaginatedData[Any]]:
     return await list_project_asset_links_paginated(
         db=db,
@@ -777,6 +778,7 @@ async def list_project_entity_links(
         page=page,
         page_size=page_size,
         allow_fields=LINK_ORDER_FIELDS,
+        user_id=current_user.id,
     )
 
 
@@ -789,8 +791,9 @@ async def list_project_entity_links(
 async def create_project_actor_link(
     body: ProjectAssetLinkCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ProjectActorLinkRead]:
-    obj = await create_project_asset_link_service(db, entity_type="actor", body=body)
+    obj = await create_project_asset_link_service(db, entity_type="actor", body=body, user_id=current_user.id)
     return created_response(ProjectActorLinkRead.model_validate(obj))
 
 
@@ -803,8 +806,9 @@ async def create_project_actor_link(
 async def delete_project_actor_link(
     link_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[None]:
-    await delete_project_asset_link_service(db, entity_type="actor", link_id=link_id)
+    await delete_project_asset_link_service(db, entity_type="actor", link_id=link_id, user_id=current_user.id)
     return empty_response()
 
 
@@ -817,8 +821,9 @@ async def delete_project_actor_link(
 async def create_project_scene_link(
     body: ProjectAssetLinkCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ProjectSceneLinkRead]:
-    obj = await create_project_asset_link_service(db, entity_type="scene", body=body)
+    obj = await create_project_asset_link_service(db, entity_type="scene", body=body, user_id=current_user.id)
     return created_response(ProjectSceneLinkRead.model_validate(obj))
 
 
@@ -831,8 +836,9 @@ async def create_project_scene_link(
 async def delete_project_scene_link(
     link_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[None]:
-    await delete_project_asset_link_service(db, entity_type="scene", link_id=link_id)
+    await delete_project_asset_link_service(db, entity_type="scene", link_id=link_id, user_id=current_user.id)
     return empty_response()
 
 
@@ -845,8 +851,9 @@ async def delete_project_scene_link(
 async def create_project_prop_link(
     body: ProjectAssetLinkCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ProjectPropLinkRead]:
-    obj = await create_project_asset_link_service(db, entity_type="prop", body=body)
+    obj = await create_project_asset_link_service(db, entity_type="prop", body=body, user_id=current_user.id)
     return created_response(ProjectPropLinkRead.model_validate(obj))
 
 
@@ -859,8 +866,9 @@ async def create_project_prop_link(
 async def delete_project_prop_link(
     link_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[None]:
-    await delete_project_asset_link_service(db, entity_type="prop", link_id=link_id)
+    await delete_project_asset_link_service(db, entity_type="prop", link_id=link_id, user_id=current_user.id)
     return empty_response()
 
 
@@ -873,8 +881,9 @@ async def delete_project_prop_link(
 async def create_project_costume_link(
     body: ProjectAssetLinkCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ProjectCostumeLinkRead]:
-    obj = await create_project_asset_link_service(db, entity_type="costume", body=body)
+    obj = await create_project_asset_link_service(db, entity_type="costume", body=body, user_id=current_user.id)
     return created_response(ProjectCostumeLinkRead.model_validate(obj))
 
 
@@ -886,8 +895,9 @@ async def create_project_costume_link(
 async def delete_project_costume_link(
     link_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[None]:
-    await delete_project_asset_link_service(db, entity_type="costume", link_id=link_id)
+    await delete_project_asset_link_service(db, entity_type="costume", link_id=link_id, user_id=current_user.id)
     return empty_response()
 
 
@@ -900,8 +910,9 @@ async def delete_project_costume_link(
 async def create_project_character_link(
     body: ProjectAssetLinkCreate,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[ProjectCharacterLinkRead]:
-    obj = await create_project_asset_link_service(db, entity_type="character", body=body)
+    obj = await create_project_asset_link_service(db, entity_type="character", body=body, user_id=current_user.id)
     return created_response(ProjectCharacterLinkRead.model_validate(obj))
 
 
@@ -913,6 +924,7 @@ async def create_project_character_link(
 async def delete_project_character_link(
     link_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ) -> ApiResponse[None]:
-    await delete_project_asset_link_service(db, entity_type="character", link_id=link_id)
+    await delete_project_asset_link_service(db, entity_type="character", link_id=link_id, user_id=current_user.id)
     return empty_response()

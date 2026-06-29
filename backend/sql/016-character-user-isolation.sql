@@ -21,10 +21,15 @@ SET @sql = IF(@has_col = 0,
 PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
 
 -- 从 projects.user_id 回填（通过现有 project_id 外键）
-UPDATE characters c
-  JOIN projects p ON c.project_id = p.id
-  SET c.user_id = p.user_id
-  WHERE c.user_id IS NULL;
+SET @has_project_col = (SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'characters' AND COLUMN_NAME = 'project_id');
+SET @sql = IF(@has_project_col > 0,
+  "UPDATE characters c
+    JOIN projects p ON c.project_id = p.id
+    SET c.user_id = p.user_id
+    WHERE c.user_id IS NULL",
+  'SELECT 1');
+PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
 
 SET @is_null = (SELECT IS_NULLABLE FROM information_schema.COLUMNS
   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'characters' AND COLUMN_NAME = 'user_id');
@@ -71,10 +76,15 @@ PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
 -- Step 3: 将现有 characters.project_id 迁移为 project_character_links 行（项目级）
 -- ============================================================================
 -- 仅插入尚未存在的行（避免重复执行报唯一约束冲突）
-INSERT IGNORE INTO project_character_links (project_id, chapter_id, shot_id, character_id)
-SELECT c.project_id, NULL, NULL, c.id
-FROM characters c
-WHERE c.project_id IS NOT NULL;
+SET @has_project_col = (SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'characters' AND COLUMN_NAME = 'project_id');
+SET @sql = IF(@has_project_col > 0,
+  "INSERT IGNORE INTO project_character_links (project_id, chapter_id, shot_id, character_id)
+    SELECT c.project_id, NULL, NULL, c.id
+    FROM characters c
+    WHERE c.project_id IS NOT NULL",
+  'SELECT 1');
+PREPARE s FROM @sql; EXECUTE s; DEALLOCATE PREPARE s;
 
 -- ============================================================================
 -- Step 4: 更新 characters 唯一约束：(project_id, name) → (user_id, name)

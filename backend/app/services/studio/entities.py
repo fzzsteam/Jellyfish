@@ -40,6 +40,7 @@ class StudioEntitiesService:
     ) -> dict[str, list[dict[str, object]]]:
         return await check_names_existence_service(
             self._db,
+            user_id=self._user_id,
             project_id=project_id,
             shot_id=shot_id,
             character_names=character_names,
@@ -113,6 +114,7 @@ class StudioEntitiesService:
             self._db,
             entity_type=entity_type,
             entity_id=entity_id,
+            user_id=self._user_id,
             order=order,
             is_desc=is_desc,
             page=page,
@@ -130,6 +132,7 @@ class StudioEntitiesService:
             self._db,
             entity_type=entity_type,
             entity_id=entity_id,
+            user_id=self._user_id,
             body=body,
         )
 
@@ -145,6 +148,7 @@ class StudioEntitiesService:
             self._db,
             entity_type=entity_type,
             entity_id=entity_id,
+            user_id=self._user_id,
             image_id=image_id,
             body=body,
         )
@@ -154,5 +158,6 @@ class StudioEntitiesService:
             self._db,
             entity_type=entity_type,
             entity_id=entity_id,
+            user_id=self._user_id,
             image_id=image_id,
         )

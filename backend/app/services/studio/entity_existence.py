@@ -12,6 +12,7 @@ from app.models.studio import (
     Chapter,
     Character,
     Costume,
+    Project,
     ProjectCostumeLink,
     ProjectPropLink,
     ProjectSceneLink,
@@ -26,6 +27,7 @@ from app.services.common import relation_mismatch
 async def check_names_existence(
     db: AsyncSession,
     *,
+    user_id: str,
     project_id: str,
     shot_id: str | None = None,
     character_names: list[str],
@@ -34,6 +36,10 @@ async def check_names_existence(
     costume_names: list[str],
 ) -> dict[str, list[dict[str, Any]]]:
     """批量检测名称是否存在，并返回项目/镜头关联状态。"""
+
+    project = await db.get(Project, project_id)
+    if project is None or project.user_id != user_id:
+        raise HTTPException(status_code=404, detail=relation_mismatch("project_id", "user_id"))
 
     effective_shot_id = shot_id.strip() if shot_id and str(shot_id).strip() else None
     if effective_shot_id:
@@ -49,17 +55,21 @@ async def check_names_existence(
             raise HTTPException(status_code=404, detail=relation_mismatch("shot_id", "project_id"))
 
     async def _find_character_id(q: str) -> str | None:
-        # 角色为全局共享资产，不限定 project_id，与 shot_auto_preparation 保持一致
+        # 角色是用户级资产：只在当前用户资产库内做模糊匹配。
         stmt = (
             select(Character.id)
-            .where(Character.name.ilike(f"%{q}%"))
+            .where(Character.user_id == user_id, Character.name.ilike(f"%{q}%"))
             .limit(1)
         )
         row = (await db.execute(stmt)).scalar_one_or_none()
         return str(row) if row is not None else None
 
     async def _find_asset_id(model: type, q: str) -> str | None:
-        stmt = select(getattr(model, "id")).where(getattr(model, "name").ilike(f"%{q}%")).limit(1)
+        stmt = (
+            select(getattr(model, "id"))
+            .where(getattr(model, "user_id") == user_id, getattr(model, "name").ilike(f"%{q}%"))
+            .limit(1)
+        )
         row = (await db.execute(stmt)).scalar_one_or_none()
         return str(row) if row is not None else None
 
@@ -67,7 +77,7 @@ async def check_names_existence(
         stmt = (
             select(ProjectPropLink.id, Prop.id)
             .join(Prop, Prop.id == ProjectPropLink.prop_id)
-            .where(ProjectPropLink.project_id == project_id, Prop.name.ilike(f"%{q}%"))
+            .where(ProjectPropLink.project_id == project_id, Prop.user_id == user_id, Prop.name.ilike(f"%{q}%"))
             .limit(1)
         )
         row = (await db.execute(stmt)).first()
@@ -80,7 +90,7 @@ async def check_names_existence(
         stmt = (
             select(ProjectSceneLink.id, Scene.id)
             .join(Scene, Scene.id == ProjectSceneLink.scene_id)
-            .where(ProjectSceneLink.project_id == project_id, Scene.name.ilike(f"%{q}%"))
+            .where(ProjectSceneLink.project_id == project_id, Scene.user_id == user_id, Scene.name.ilike(f"%{q}%"))
             .limit(1)
         )
         row = (await db.execute(stmt)).first()
@@ -93,7 +103,7 @@ async def check_names_existence(
         stmt = (
             select(ProjectCostumeLink.id, Costume.id)
             .join(Costume, Costume.id == ProjectCostumeLink.costume_id)
-            .where(ProjectCostumeLink.project_id == project_id, Costume.name.ilike(f"%{q}%"))
+            .where(ProjectCostumeLink.project_id == project_id, Costume.user_id == user_id, Costume.name.ilike(f"%{q}%"))
             .limit(1)
         )
         row = (await db.execute(stmt)).first()

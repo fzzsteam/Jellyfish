@@ -76,7 +76,7 @@ async def _seed_shot_graph(db: AsyncSession) -> None:
     )
     character = Character(
         id="char-1",
-        project_id="p1",
+        user_id="test-user",
         name="主角",
         description="克制、警惕，带着压迫感",
         style=ProjectStyle.real_people_city,

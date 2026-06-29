@@ -348,10 +348,10 @@ async def test_build_run_args_adds_r2v_asset_reference_images(monkeypatch: pytes
                 provider,
                 model,
                 ModelSettings(id=1, default_video_model_id=model.id, user_id="test-user"),
-                Character(
-                    id="char-1",
-                    project_id="p1",
-                    name="苏过",
+                    Character(
+                        id="char-1",
+                        user_id="test-user",
+                        name="苏过",
                     description="",
                     style=ProjectStyle.real_people_city,
                     visual_style=ProjectVisualStyle.live_action,
@@ -443,10 +443,10 @@ async def test_build_run_args_adds_vidu_subject_asset_reference_images(monkeypat
                 provider,
                 model,
                 ModelSettings(id=1, default_video_model_id=model.id, user_id="test-user"),
-                Character(
-                    id="char-1",
-                    project_id="p1",
-                    name="苏过",
+                    Character(
+                        id="char-1",
+                        user_id="test-user",
+                        name="苏过",
                     description="",
                     style=ProjectStyle.real_people_city,
                     visual_style=ProjectVisualStyle.live_action,

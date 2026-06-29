@@ -215,6 +215,7 @@ def _load_asset_options(db: Session, *, user_id: str) -> dict[ShotCandidateType,
             CharacterImage,
             (CharacterImage.character_id == Character.id) & CharacterImage.file_id.is_not(None),
         )
+        .where(Character.user_id == user_id)
         .group_by(Character.id, Character.name)
     ).all()
     scene_rows = db.execute(

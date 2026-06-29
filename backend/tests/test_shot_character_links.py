@@ -11,6 +11,7 @@ from app.models.studio import (
     Chapter,
     Character,
     Project,
+    ProjectCharacterLink,
     ProjectStyle,
     ProjectVisualStyle,
     Shot,
@@ -34,6 +35,7 @@ async def _build_session() -> tuple[AsyncSession, object]:
 
 async def _seed_base_graph(db: AsyncSession) -> None:
     db.add(User(id="test-user", username="test-user", hashed_password="x"))
+    db.add(User(id="other-user", username="other-user", hashed_password="x"))
     project = Project(
         id="p1",
         name="项目一",
@@ -54,7 +56,7 @@ async def _seed_base_graph(db: AsyncSession) -> None:
     shot = Shot(id="s1", chapter_id="c1", index=1, title="镜头一")
     character_1 = Character(
         id="char1",
-        project_id="p1",
+        user_id="test-user",
         name="角色一",
         description="",
         style=ProjectStyle.real_people_city,
@@ -62,7 +64,7 @@ async def _seed_base_graph(db: AsyncSession) -> None:
     )
     character_2 = Character(
         id="char2",
-        project_id="p1",
+        user_id="test-user",
         name="角色二",
         description="",
         style=ProjectStyle.real_people_city,
@@ -70,8 +72,8 @@ async def _seed_base_graph(db: AsyncSession) -> None:
     )
     foreign_character = Character(
         id="char3",
-        project_id="p2",
-        name="跨项目角色",
+        user_id="other-user",
+        name="其他用户角色",
         description="",
         style=ProjectStyle.real_people_city,
         visual_style=ProjectVisualStyle.live_action,
@@ -81,20 +83,45 @@ async def _seed_base_graph(db: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_upsert_allows_character_from_other_project() -> None:
-    """角色为全局共享资产：分镜可关联资产库中归属其它项目的角色，不再因跨项目被拒。"""
+async def test_upsert_rejects_character_from_other_user() -> None:
+    """分镜角色关联只能使用当前项目用户名下的角色资产。"""
+    db, engine = await _build_session()
+    async with db:
+        await _seed_base_graph(db)
+
+        with pytest.raises(Exception):
+            await upsert(
+                db,
+                body=ShotCharacterLinkCreate(shot_id="s1", character_id="char3", index=0, note="cross"),
+            )
+
+        rows = (await db.execute(select(ShotCharacterLink))).scalars().all()
+        assert rows == []
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_upsert_links_user_character_into_project_character_library() -> None:
+    """从用户资产库关联角色到分镜时，应同步补齐项目级角色资产关联。"""
     db, engine = await _build_session()
     async with db:
         await _seed_base_graph(db)
 
         created = await upsert(
             db,
-            body=ShotCharacterLinkCreate(shot_id="s1", character_id="char3", index=0, note="cross"),
+            body=ShotCharacterLinkCreate(shot_id="s1", character_id="char2", index=0, note=""),
         )
 
-        assert created.character_id == "char3"
-        rows = (await db.execute(select(ShotCharacterLink))).scalars().all()
-        assert len(rows) == 1
+        assert created.character_id == "char2"
+        project_link = (await db.execute(
+            select(ProjectCharacterLink).where(
+                ProjectCharacterLink.project_id == "p1",
+                ProjectCharacterLink.character_id == "char2",
+                ProjectCharacterLink.chapter_id.is_(None),
+                ProjectCharacterLink.shot_id.is_(None),
+            )
+        )).scalars().one_or_none()
+        assert project_link is not None
     await engine.dispose()
 
 
@@ -202,7 +229,7 @@ async def test_replace_without_existing_link_does_not_evict_other_characters(mon
             [
                 Character(
                     id="char4",
-                    project_id="p1",
+                    user_id="test-user",
                     name="角色四",
                     description="",
                     style=ProjectStyle.real_people_city,
@@ -210,7 +237,7 @@ async def test_replace_without_existing_link_does_not_evict_other_characters(mon
                 ),
                 Character(
                     id="char5",
-                    project_id="p1",
+                    user_id="test-user",
                     name="角色五",
                     description="",
                     style=ProjectStyle.real_people_city,

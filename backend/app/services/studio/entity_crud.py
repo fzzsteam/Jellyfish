@@ -64,6 +64,14 @@ async def _ensure_user_name_available(
         raise HTTPException(status_code=409, detail=f"{model.__name__} name already exists: {normalized_name}")
 
 
+async def _ensure_owned_reference(db: AsyncSession, model: type, entity_id: str, *, user_id: str) -> None:
+    """校验角色引用的演员/服装资产存在且归属当前用户。"""
+
+    obj = await db.get(model, entity_id)
+    if obj is None or getattr(obj, "user_id", None) != user_id:
+        raise HTTPException(status_code=400, detail=entity_not_found(model.__name__))
+
+
 async def list_entities_paginated(
     db: AsyncSession,
     *,
@@ -162,10 +170,10 @@ async def create_entity(
 
     if entity_type_norm == "character":
         # project/chapter/shot 的存在性与归属校验由 upsert_project_link 统一负责
-        if data.get("actor_id") and await db.get(Actor, data["actor_id"]) is None:
-            raise HTTPException(status_code=400, detail=entity_not_found("Actor"))
-        if data.get("costume_id") and await db.get(Costume, data["costume_id"]) is None:
-            raise HTTPException(status_code=400, detail=entity_not_found("Costume"))
+        if data.get("actor_id"):
+            await _ensure_owned_reference(db, Actor, str(data["actor_id"]), user_id=user_id)
+        if data.get("costume_id"):
+            await _ensure_owned_reference(db, Costume, str(data["costume_id"]), user_id=user_id)
 
     # 资产类型写入归属用户；character 无 user_id 列，不注入。
     if entity_type_norm in USER_OWNED_ENTITY_TYPES:
@@ -277,10 +285,10 @@ async def update_entity(
         exclude_id=entity_id,
     )
     if entity_type_norm == "character":
-        if "actor_id" in update_data and update_data["actor_id"] is not None and await db.get(Actor, update_data["actor_id"]) is None:
-            raise HTTPException(status_code=400, detail=entity_not_found("Actor"))
-        if "costume_id" in update_data and update_data["costume_id"] is not None and await db.get(Costume, update_data["costume_id"]) is None:
-            raise HTTPException(status_code=400, detail=entity_not_found("Costume"))
+        if "actor_id" in update_data and update_data["actor_id"] is not None:
+            await _ensure_owned_reference(db, Actor, str(update_data["actor_id"]), user_id=user_id)
+        if "costume_id" in update_data and update_data["costume_id"] is not None:
+            await _ensure_owned_reference(db, Costume, str(update_data["costume_id"]), user_id=user_id)
 
     for key, value in update_data.items():
         setattr(obj, key, value)
