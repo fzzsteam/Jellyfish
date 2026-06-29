@@ -229,6 +229,34 @@ async def test_vidu_image_reference2image_uses_official_payload(monkeypatch: pyt
     assert result.images[0].url == "https://cdn.example.com/out.png"
 
 
+def test_vidu_image_reference2image_defaults_seed_to_zero() -> None:
+    adapter = ViduImageApiAdapter()
+    inp = ImageGenerationInput(
+        model="viduq2",
+        prompt="asset prompt",
+        target_ratio="1:1",
+        resolution_profile="standard",
+        images=[InputImageRef(image_url="https://cdn.example.com/ref.png")],
+    )
+
+    body = adapter._build_request_body(inp)
+
+    assert body["seed"] == 0
+    assert body["images"] == ["https://cdn.example.com/ref.png"]
+    assert body["resolution"] == "1080P"
+
+
+def test_vidu_image_reference2image_supports_text_only_generation() -> None:
+    adapter = ViduImageApiAdapter()
+    inp = ImageGenerationInput(model="viduq2", prompt="asset prompt")
+
+    body = adapter._build_request_body(inp)
+
+    assert body["images"] == []
+    assert body["prompt"] == "asset prompt"
+    assert body["seed"] == 0
+
+
 @pytest.mark.asyncio
 async def test_openai_image_adapter_rejects_unsupported_watermark(monkeypatch: pytest.MonkeyPatch) -> None:
     """当能力配置不支持 watermark 时，adapter 在发请求前直接拒绝。"""

@@ -362,6 +362,9 @@ async def create_image_task_and_link(
     if existing is not None:
         return existing.id
 
+    model = await resolve_image_model(db, model_id, user_id=user_id)
+    provider_cfg = await load_provider_config(db, model.provider_id)
+
     # 2. 冻结积分（仅在传入 quote_token 时；freeze_for_task 内部已 COMMIT）。
     billing_id: str | None = None
     if quote_token:
@@ -381,9 +384,6 @@ async def create_image_task_and_link(
 
     store = SqlAlchemyTaskStore(db)
     tm = TaskManager(store=store, strategies={})
-
-    model = await resolve_image_model(db, model_id, user_id=user_id)
-    provider_cfg = await load_provider_config(db, model.provider_id)
 
     run_args: dict = {
         "provider": provider_cfg.provider,

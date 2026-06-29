@@ -272,3 +272,4 @@ front/src/pages/aiStudio/hooks/useGenerationDraft.ts
 - Vidu 模板成片通过模型名 `story:{story_name}` 或 `template-story:{story_name}` 触发；执行时走 `POST /ent/v2/template-story`，请求体只传 `story` 与参考图 `images`，不传普通 `model` 字段，也不依赖提示词字段。
 - Vidu 视频能力声明 `supports_watermark=False`，业务层不会向 Vidu 视频请求体传递 `watermark` 字段；当前视频生成统一以无水印为目标，只有供应商显式支持无水印参数时才传 `watermark=False`。
 - Vidu 图片生成走 `app/core/integrations/vidu/images.py`，使用 `POST /ent/v2/reference2image` 创建任务，请求体包含 `model`、`images`、`prompt`、`seed`、`aspect_ratio`、`resolution` 与空字符串 `payload`，并轮询同一套 `/ent/v2/tasks/{task_id}/creations` 结果接口。
+- `backend/sql/017-add-vidu-image-model.sql` 会补齐 `Vidu` provider 与 `viduq2` 图片模型；资产编辑页从模型管理的图片模型列表读取该模型，选中后提交的参考图会映射为 Vidu `images`，无参考图时以 `images: []` 兼容文生图。该模型基础单价为 1，沿用图片计价规则：`standard`/1K 为 1 积分，`high`/2K 为 2 积分。

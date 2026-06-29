@@ -156,7 +156,7 @@ class ViduImageApiAdapter:
         # 其次由 resolution_profile + ratio 从 capability 推导
         vidu_resolution = self._resolve_resolution(inp, cap, aspect_ratio)
 
-        # 参考图列表（取 image_url，Vidu 不支持 file_id 方式）
+        # 参考图列表（取 image_url，Vidu 不支持 file_id 方式）；viduq2 支持 0-7 张参考图。
         images: list[str] = [
             ref.image_url
             for ref in inp.images
@@ -165,17 +165,13 @@ class ViduImageApiAdapter:
 
         body: dict[str, Any] = {
             "model": model,
+            "images": images,
             "prompt": inp.prompt,
+            "seed": int(inp.seed) if inp.seed is not None else 0,
             "aspect_ratio": aspect_ratio,
             "resolution": vidu_resolution,
             "payload": "",
         }
-
-        if images:
-            body["images"] = images
-
-        if inp.seed is not None:
-            body["seed"] = int(inp.seed)
 
         return body
 
