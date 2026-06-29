@@ -1941,11 +1941,8 @@ def test_openai_video_payload_resolution_drives_size() -> None:
     assert body_none["size"] == "1280x720"
 
 
-def test_bailian_video_payload_rejects_1080p_before_vendor_call() -> None:
-    """百炼不支持 1080p：resolution=1080p → _build_payload 在调用前抛 ValueError。
-
-    保证不变式「不能按 1080p 收费却生成 720p」——百炼只支持 480P/720P，必须拒绝。
-    """
+def test_bailian_video_payload_maps_720p_and_1080p_to_vendor_resolution() -> None:
+    """百炼 HappyHorse 1.1 支持 720P/1080P，计费档位必须与提交分辨率一致。"""
     from app.core.contracts.video_generation import VideoGenerationInput
     from app.core.integrations.bailian.video import BailianVideoApiAdapter
     from app.core.contracts.provider import ProviderConfig
@@ -1953,15 +1950,15 @@ def test_bailian_video_payload_rejects_1080p_before_vendor_call() -> None:
     adapter = BailianVideoApiAdapter(
         provider_config=ProviderConfig(provider="aliyun_bailian", api_key="k"),
     )
-    inp = VideoGenerationInput.model_validate(
-        {"model": "happyhorse-1.0-t2v", "prompt": "x", "ratio": "16:9", "resolution": "1080p"}
+    inp_1080 = VideoGenerationInput.model_validate(
+        {"model": "happyhorse-1.1-t2v", "prompt": "x", "ratio": "16:9", "resolution": "1080p"}
     )
-    with pytest.raises(ValueError, match="1080p"):
-        adapter._build_payload(inp)
+    payload_1080 = adapter._build_payload(inp_1080)
+    assert payload_1080["parameters"]["resolution"] == "1080P"
 
     # 720p 通过，parameters.resolution = "720P"
     inp_720 = VideoGenerationInput.model_validate(
-        {"model": "happyhorse-1.0-t2v", "prompt": "x", "ratio": "16:9", "resolution": "720p"}
+        {"model": "happyhorse-1.1-t2v", "prompt": "x", "ratio": "16:9", "resolution": "720p"}
     )
     payload = adapter._build_payload(inp_720)
     assert payload["parameters"]["resolution"] == "720P"

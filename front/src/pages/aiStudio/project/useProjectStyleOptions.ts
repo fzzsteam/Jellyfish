@@ -64,10 +64,27 @@ type ProjectStyleOptionsSnapshot = {
 let cachedSnapshot: ProjectStyleOptionsSnapshot | null = null
 let loadingSnapshotPromise: Promise<ProjectStyleOptionsSnapshot> | null = null
 const FALLBACK_DEFAULT_VIDEO_RATIO = '16:9'
+const PROJECT_VIDEO_RATIO_OPTIONS = ['16:9', '4:3', '1:1', '3:4', '9:16']
 
 function normalizeOptionItems(items: OptionItem[] | null | undefined): OptionItem[] {
   if (!Array.isArray(items)) return []
   return items.filter((item) => item && typeof item.value === 'string' && typeof item.label === 'string')
+}
+
+/**
+ * Builds project video ratio options from the required baseline ratios and the active model capability.
+ * Keeping the baseline first makes the project editor stable even when the capability request is unavailable.
+ */
+function buildVideoRatioOptions(allowedRatios: string[] | null | undefined): OptionItem[] {
+  const seen = new Set<string>()
+  const options: OptionItem[] = []
+  for (const rawValue of [...PROJECT_VIDEO_RATIO_OPTIONS, ...(allowedRatios ?? [])]) {
+    const value = String(rawValue ?? '').trim()
+    if (!value || seen.has(value)) continue
+    seen.add(value)
+    options.push({ value, label: value })
+  }
+  return options
 }
 
 function normalizeStyleOptions(raw: ProjectStyleOptionsRead | null | undefined): ProjectStyleFieldOptions {
@@ -111,9 +128,7 @@ async function loadProjectStyleOptionsSnapshot(): Promise<ProjectStyleOptionsSna
       const videoData = videoRes.data
       const snapshot: ProjectStyleOptionsSnapshot = {
         options: normalizeStyleOptions(styleData ?? undefined),
-        videoRatioOptions: normalizeOptionItems(
-          (videoData?.allowed_ratios ?? []).map((value) => ({ value, label: value })),
-        ),
+        videoRatioOptions: buildVideoRatioOptions(videoData?.allowed_ratios ?? []),
         defaultVideoRatio: videoData?.default_ratio ?? FALLBACK_DEFAULT_VIDEO_RATIO,
       }
       cachedSnapshot = snapshot
@@ -121,7 +136,7 @@ async function loadProjectStyleOptionsSnapshot(): Promise<ProjectStyleOptionsSna
     } catch {
       const snapshot: ProjectStyleOptionsSnapshot = {
         options: FALLBACK_OPTIONS,
-        videoRatioOptions: [],
+        videoRatioOptions: buildVideoRatioOptions([]),
         defaultVideoRatio: FALLBACK_DEFAULT_VIDEO_RATIO,
       }
       cachedSnapshot = snapshot

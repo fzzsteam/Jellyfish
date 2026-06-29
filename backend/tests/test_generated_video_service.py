@@ -40,6 +40,7 @@ from app.models.studio import (
 from app.models.types import FileType
 from app.services.film.generated_video import (
     build_run_args,
+    is_reference_to_video_model,
     persist_generated_video_to_shot,
     preview_prompt_and_images,
     resolve_default_video_model,
@@ -48,6 +49,10 @@ from app.services.film.generated_video import (
 )
 from app.bootstrap import bootstrap_all_registries
 from app.services.llm import resolve_provider_key_from_name
+
+
+def test_happyhorse_11_r2v_uses_asset_references() -> None:
+    assert is_reference_to_video_model("happyhorse-1.1-r2v") is True
 from app.services.studio.generation.video.derive_preview import derive_video_preview
 from app.services.studio.generation.video.build_base import VideoBaseDraft
 from app.services.studio.generation.video.build_context import VideoGenerationContext
@@ -163,8 +168,10 @@ async def test_preview_prompt_and_images_uses_auto_frame_ids() -> None:
             shot_id="s1",
             reference_mode="first_last",
             prompt=None,
+            ratio="4:3",
         )
 
+        assert "4:3" in prompt
         assert "镜头标题：镜头一" in prompt
         assert "剧本摘录：角色推门而入。" in prompt
         assert "动作节拍：" in prompt
@@ -193,8 +200,10 @@ async def test_preview_prompt_and_images_prefers_request_images_when_provided() 
             reference_mode="first_last",
             prompt="自定义视频提示词",
             images=["manual-first", "manual-last"],
+            ratio="9:16",
         )
 
+        assert "9:16" in prompt
         assert "自定义视频提示词" in prompt
         assert "动作节拍：" in prompt
         assert "连续性要求：" in prompt
@@ -240,6 +249,7 @@ async def test_build_run_args_maps_reference_images(monkeypatch: pytest.MonkeyPa
         assert run_args["input"]["last_frame_base64"] == "data:image/png;base64,img-last"
         assert run_args["input"]["key_frame_base64"] is None
         assert run_args["input"]["ratio"] == "9:16"
+        assert "9:16" in run_args["input"]["prompt"]
         assert run_args["input"]["seconds"] == 6
     await engine.dispose()
 

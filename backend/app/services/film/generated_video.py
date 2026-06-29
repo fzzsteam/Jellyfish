@@ -95,6 +95,7 @@ async def preview_prompt_and_images(
     reference_mode: str,
     prompt: str | None,
     images: list[str] | None = None,
+    ratio: str | None = None,
 ) -> tuple[str, list[str], dict | None]:
     shot_detail = await validate_shot_and_duration(db, shot_id)
     base = build_video_base_draft(shot_id=shot_id, prompt=prompt)
@@ -103,6 +104,7 @@ async def preview_prompt_and_images(
         shot_id=shot_id,
         reference_mode=reference_mode,
         images=images,
+        ratio=ratio,
     )
     submission = await build_video_submission_payload(db, user_id=user_id, base=base, context=context)
     if not submission.prompt:
@@ -187,6 +189,7 @@ def is_reference_to_video_model(model_name: str | None) -> bool:
     )
     return (
         name.startswith("happyhorse-1.0-r2v")
+        or name.startswith("happyhorse-1.1-r2v")
         or name.startswith("r2v")
         or name in vidu_subject_names
         or name.startswith(vidu_subject_prefixes)
@@ -241,6 +244,7 @@ async def build_run_args(
         shot_id=shot_id,
         reference_mode=reference_mode,
         images=images,
+        ratio=resolved_ratio,
     )
     submission = await build_video_submission_payload(db, user_id=user_id, base=base, context=context)
     validate_images_count(reference_mode, submission.images)

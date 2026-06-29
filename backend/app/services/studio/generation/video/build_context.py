@@ -79,6 +79,7 @@ class VideoGenerationContext(GenerationContext):
     shot_id: str
     reference_mode: str
     images: list[str]
+    ratio: str | None = None
     template_id: str | None = None
 
 
@@ -88,8 +89,10 @@ async def build_video_context(
     shot_id: str,
     reference_mode: str,
     images: list[str] | None,
+    ratio: str | None = None,
     template_id: str | None = None,
 ) -> VideoGenerationContext:
+    """Builds a video generation context after resolving reference images and optional ratio metadata."""
     resolved_images = await resolve_video_reference_images(
         db,
         shot_id=shot_id,
@@ -100,6 +103,6 @@ async def build_video_context(
         shot_id=shot_id,
         reference_mode=reference_mode,
         images=resolved_images,
+        ratio=(ratio or "").strip() or None,
         template_id=template_id,
     )
-

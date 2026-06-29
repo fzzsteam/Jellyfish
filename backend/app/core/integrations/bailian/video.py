@@ -10,28 +10,28 @@ API 模式：
 
 支持的模型与输入模式:
 
-t2v (Text-to-Video): happyhorse-1.0-t2v — 仅需 prompt 文本
+t2v (Text-to-Video): happyhorse-1.1-t2v — 仅需 prompt 文本
   官方示例:
-    curl ... -d '{"model":"happyhorse-1.0-t2v","input":{"prompt":"..."},"parameters":{"resolution":"720P","ratio":"16:9","duration":5}}'
+    curl ... -d '{"model":"happyhorse-1.1-t2v","input":{"prompt":"..."},"parameters":{"resolution":"720P","ratio":"16:9","duration":5}}'
 
-i2v (Image-to-Video): happyhorse-1.0-i2v — prompt + 首帧图(可选尾帧/关键帧)
+i2v (Image-to-Video): happyhorse-1.1-i2v — prompt + 首帧图(可选尾帧/关键帧)
   官方示例:
-    curl ... -d '{"model":"happyhorse-1.0-i2v",
+    curl ... -d '{"model":"happyhorse-1.1-i2v",
       "input":{"prompt":"...","media":[{"type":"first_frame","url":"..."}]},
       "parameters":{"resolution":"720P","duration":5}}'
 
-r2v (Reference-to-Video): happyhorse-1.0-r2v — prompt + 多张参考图 + ratio
+r2v (Reference-to-Video): happyhorse-1.1-r2v — prompt + 多张参考图 + ratio
   官方示例:
-    curl ... -d '{"model":"happyhorse-1.0-r2v",
+    curl ... -d '{"model":"happyhorse-1.1-r2v",
       "input":{"prompt":"...","media":[
         {"type":"reference_image","url":"https://..."},
         {"type":"reference_image","url":"https://..."}
       ]},
       "parameters":{"resolution":"720P","ratio":"16:9","duration":5}}'
 
-video-edit (视频编辑): happyhorse-1.0-video-edit — prompt + 源视频 + 可选参考图
+video-edit (视频编辑): happyhorse-1.1-video-edit — prompt + 源视频 + 可选参考图
   官方示例:
-    curl ... -d '{"model":"happyhorse-1.0-video-edit",
+    curl ... -d '{"model":"happyhorse-1.1-video-edit",
       "input":{"prompt":"...","media":[
         {"type":"video","url":"https://...mp4"},
         {"type":"reference_image","url":"https://..."}
@@ -61,22 +61,18 @@ from app.core.contracts.video_generation import (
 
 logger = logging.getLogger(__name__)
 
-#: DashScope 视频合成提交端点
-VIDEO_SUBMIT_URL = (
-    "https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis"
-)
-
-#: DashScope 任务查询端点
-VIDEO_QUERY_URL_TEMPLATE = "https://dashscope.aliyuncs.com/api/v1/tasks/{task_id}"
+DEFAULT_VIDEO_API_ROOT = "https://dashscope.aliyuncs.com/api/v1"
+VIDEO_SUBMIT_PATH = "/services/aigc/video-generation/video-synthesis"
+VIDEO_QUERY_PATH_TEMPLATE = "/tasks/{task_id}"
 
 #: i2v 模型名称标识
-_I2V_MODEL_PREFIXES = ("happyhorse-1.0-i2v", "i2v")
+_I2V_MODEL_PREFIXES = ("happyhorse-1.0-i2v", "happyhorse-1.1-i2v", "i2v")
 
 #: r2v 模型名称标识
-_R2V_MODEL_PREFIXES = ("happyhorse-1.0-r2v", "r2v")
+_R2V_MODEL_PREFIXES = ("happyhorse-1.0-r2v", "happyhorse-1.1-r2v", "r2v")
 
 #: video-edit 模型名称标识
-_VIDEO_EDIT_PREFIXES = ("happyhorse-1.0-video-edit", "video-edit")
+_VIDEO_EDIT_PREFIXES = ("happyhorse-1.0-video-edit", "happyhorse-1.1-video-edit", "video-edit")
 
 HAPPYHORSE_MIN_DURATION_SECONDS = 3
 HAPPYHORSE_MAX_DURATION_SECONDS = 15
@@ -86,10 +82,10 @@ class BailianVideoApiAdapter:
     """阿里百炼视频生成适配器（DashScope 原生异步任务模式）。
 
     支持:
-    - HappyHorse-1.0-t2v       (文本→视频)
-    - HappyHorse-1.0-i2v       (首帧图→视频)
-    - HappyHorse-1.0-r2v       (参考图→视频)
-    - HappyHorse-1.0-video-edit (视频编辑)
+    - HappyHorse-1.1-t2v       (文本→视频)
+    - HappyHorse-1.1-i2v       (首帧图→视频)
+    - HappyHorse-1.1-r2v       (参考图→视频)
+    - HappyHorse-1.1-video-edit (视频编辑)
 
     Attributes:
         POLL_INTERVAL_S: 轮询间隔秒数（默认5秒）
@@ -107,6 +103,7 @@ class BailianVideoApiAdapter:
             "Content-Type": "application/json",
             "X-DashScope-Async": "enable",
         }
+        self._api_root = self._resolve_api_root(provider_config.base_url)
 
     async def generate(self, input_: VideoGenerationInput) -> VideoGenerationResult:
         """提交视频生成任务并轮询获取结果。"""
@@ -119,7 +116,7 @@ class BailianVideoApiAdapter:
         """提交视频生成任务，返回 task_id。"""
         payload = self._build_payload(input_)
 
-        model_name = input_.model or "happyhorse-1.0-t2v"
+        model_name = input_.model or "happyhorse-1.1-t2v"
         mode = self._detect_mode(model_name, input_)
 
         logger.info(
@@ -136,7 +133,7 @@ class BailianVideoApiAdapter:
         )
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(VIDEO_SUBMIT_URL, json=payload, headers=self._headers)
+            resp = await client.post(self._submit_url(), json=payload, headers=self._headers)
             resp.raise_for_status()
             data = resp.json()
 
@@ -208,7 +205,7 @@ class BailianVideoApiAdapter:
         if input_.watermark is not None:
             parameters["watermark"] = input_.watermark
 
-        model_name = input_.model or "happyhorse-1.0-t2v"
+        model_name = input_.model or "happyhorse-1.1-t2v"
         mode = self._detect_mode(model_name, input_)
 
         # ====== edit (视频编辑模式) ======
@@ -374,16 +371,34 @@ class BailianVideoApiAdapter:
             if normalized == "720p":
                 return "720P"
             if normalized == "1080p":
-                raise ValueError(
-                    "Bailian video does not support 1080p resolution; supported: 480P/720P"
-                )
+                return "1080P"
             raise ValueError(f"Unsupported business resolution for bailian: {business_resolution}")
         return "720P"
 
     @staticmethod
+    def _resolve_api_root(base_url: str | None) -> str:
+        """Resolve the DashScope/MAAS API root used by submit and polling endpoints."""
+        raw = (base_url or DEFAULT_VIDEO_API_ROOT).strip().rstrip("/")
+        if not raw:
+            return DEFAULT_VIDEO_API_ROOT
+        if raw.endswith(VIDEO_SUBMIT_PATH):
+            return raw[: -len(VIDEO_SUBMIT_PATH)]
+        if raw.endswith("/api/v1"):
+            return raw
+        return f"{raw}/api/v1"
+
+    def _submit_url(self) -> str:
+        """Build the HappyHorse video synthesis submit URL for the configured base URL."""
+        return f"{self._api_root}{VIDEO_SUBMIT_PATH}"
+
+    def _query_url(self, task_id: str) -> str:
+        """Build the HappyHorse async task polling URL for the configured base URL."""
+        return f"{self._api_root}{VIDEO_QUERY_PATH_TEMPLATE.format(task_id=task_id)}"
+
+    @staticmethod
     def _resolve_ratio(input_: VideoGenerationInput) -> str:
         """解析画面比例。支持 16:9/9:16/1:1，默认 16:9。"""
-        valid_ratios = ["16:9", "9:16", "1:1"]
+        valid_ratios = ["16:9", "4:3", "1:1", "3:4", "9:16"]
         if input_.ratio and input_.ratio in valid_ratios:
             return input_.ratio
         return "16:9"
@@ -397,7 +412,7 @@ class BailianVideoApiAdapter:
 
     async def _poll_until_complete(self, task_id: str) -> VideoGenerationResult:
         """轮询任务状态直到完成或超时。"""
-        query_url = VIDEO_QUERY_URL_TEMPLATE.format(task_id=task_id)
+        query_url = self._query_url(task_id)
 
         for i in range(self.MAX_POLL_COUNT):
             await asyncio.sleep(self.POLL_INTERVAL_S)
@@ -444,7 +459,7 @@ class BailianVideoApiAdapter:
             video_url = output.get("video_url") or ""
 
         if not video_url:
-            video_url = VIDEO_QUERY_URL_TEMPLATE.format(task_id=task_id)
+            video_url = self._query_url(task_id)
             logger.warning(
                 "[BailianVideo] No video URL found, returning query URL as fallback"
             )

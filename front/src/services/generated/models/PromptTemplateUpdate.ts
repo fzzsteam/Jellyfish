@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * 局部更新提示词模板。不含 id / is_system。
+ * 局部更新提示词模板。is_system 仅管理员可修改。
  */
 export type PromptTemplateUpdate = {
     /**
@@ -26,5 +26,9 @@ export type PromptTemplateUpdate = {
      * 是否为默认提示词
      */
     is_default?: (boolean | null);
+    /**
+     * 是否为系统预置（仅管理员有效）
+     */
+    is_system?: (boolean | null);
 };
 

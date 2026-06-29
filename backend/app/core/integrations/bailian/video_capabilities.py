@@ -1,16 +1,16 @@
 """阿里百炼 (DashScope) 视频模型能力约束。
 
 支持的视频生成模型：
-- happyhorse-1.0-t2v (文本转视频，当前主要支持)
+- happyhorse-1.1-t2v (文本转视频，当前主要支持)
 - 其他视频生成模型
 
 参数规格参考（基于官方 API 文档和示例）：
 https://help.aliyun.com/zh/model-studio/video-generation
 
-HappyHorse-1.0-t2v 官方支持的参数：
-- resolution: "480P" (854x480) 或 "720P" (1280x720)
-- ratio: "16:9", "9:16", "1:1"
-- duration: 2, 3, 5, 10 秒
+HappyHorse-1.1-t2v 官方支持的参数：
+- resolution: "720P" 或 "1080P"
+- ratio: "16:9", "4:3", "1:1", "3:4", "9:16"
+- duration: 3-15 秒
 """
 
 from __future__ import annotations
@@ -24,21 +24,24 @@ DEFAULT_BAILIAN_VIDEO_CAPABILITY = VideoModelCapability(
     supports_watermark=True,
     # 官方支持的比例（仅3种）
     allowed_ratios={
-        "16:9",  # 横屏 (1280×720 @720P) - 默认，适合电影感
-        "9:16",  # 竖屏 (720×1280 @720P) - 适合手机短视频
-        "1:1",   # 正方形 (720×720 @720P) - 适合社交媒体
+        "16:9",
+        "4:3",
+        "1:1",
+        "3:4",
+        "9:16",
     },
     default_ratio="16:9",
     # 使用 DashScope 的 resolution 字段格式（非 size）
     # ratio_to_size_mapping 已废弃，改用 resolution 字段
     ratio_to_size_mapping={
         "16:9": "720P",   # 高清横屏
+        "4:3": "720P",
         "9:16": "720P",   # 高清竖屏
         "1:1": "720P",    # 高清方形
+        "3:4": "720P",
     },
-    # 时长限制（官方支持：2/3/5/10秒）
-    min_seconds=2,
-    max_seconds=10,
+    min_seconds=3,
+    max_seconds=15,
 )
 
 # 可选：480P 标清模式（节省成本或加快速度）

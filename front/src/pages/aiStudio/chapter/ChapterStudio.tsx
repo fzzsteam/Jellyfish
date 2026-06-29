@@ -91,6 +91,7 @@ import type {
   ProjectSceneLinkRead,
   ShotStatus,
   ShotVideoPromptPackRead,
+  VideoPromptPreviewRequest,
 } from '../../../services/generated'
 import { listTaskLinksNormalized } from '../../../services/filmTaskLinks'
 import { buildFileDownloadUrl, resolveAssetUrl } from '../assets/utils'
@@ -130,6 +131,7 @@ type FramePromptDerived = {
   mappings: ShotFramePromptMappingRead[]
 }
 type VideoReferenceMode = 'first' | 'last' | 'key' | 'first_last' | 'first_last_key' | 'text_only'
+type VideoPreviewRatio = NonNullable<VideoPromptPreviewRequest['ratio']>
 type VideoPromptDerived = {
   prompt: string
   images: string[]
@@ -143,6 +145,14 @@ type VideoModelOption = ModelRead & {
 type FullscreenCapableVideo = HTMLVideoElement & {
   webkitRequestFullscreen?: () => Promise<void> | void
   msRequestFullscreen?: () => Promise<void> | void
+}
+
+/**
+ * Narrows validated UI ratio strings to the OpenAPI preview request union.
+ * Upstream selectors only expose supported ratios, and backend validation remains the source of truth.
+ */
+function toVideoPreviewRatio(value: string): VideoPreviewRatio {
+  return value as VideoPreviewRatio
 }
 
 /** 切换单个结果卡片内的视频播放状态，让中间区域可以直接快速预览。 */
@@ -1358,8 +1368,8 @@ const ChapterStudio: React.FC = () => {
               reference_mode: 'text_only',
               prompt: null,
               images: [],
-              ratio,
-            } as any,
+              ratio: toVideoPreviewRatio(ratio),
+            },
           })
           const derived = (previewRes as any)?.data ?? null
           const prompt = typeof derived?.prompt === 'string' ? derived.prompt : ''
@@ -3079,12 +3089,11 @@ function Inspector(props: {
       const res = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
         requestBody: {
           shot_id: selectedShot.id,
-          model_id: selectedVideoModelId,
           reference_mode: context.referenceMode,
           prompt: (base.prompt || '').trim() || null,
           images: context.images,
-          ratio,
-        } as any,
+          ratio: toVideoPreviewRatio(ratio),
+        },
       })
       const data = (res as any)?.data ?? null
       return {

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.contracts.video_generation import VideoRatio
 from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore, TaskManager
 from app.dependencies import get_current_user, get_db
 from app.models.llm import ModelCategoryKey
@@ -33,6 +34,7 @@ class VideoPromptPreviewRequest(BaseModel):
     )
     prompt: str | None = Field(None, description="视频提示词（text_only 必填；非文本模式可作为补充描述）")
     images: list[str] = Field(default_factory=list, description="参考图 file_id 列表")
+    ratio: VideoRatio | None = Field(None, description="视频画幅比例，如 16:9 / 4:3 / 1:1 / 3:4 / 9:16")
 
 router = APIRouter()
 
@@ -63,6 +65,7 @@ async def preview_video_generation_prompt(
         reference_mode=body.reference_mode,
         prompt=body.prompt,
         images=body.images,
+        ratio=body.ratio,
     )
     return success_response(VideoPromptPreviewResponse(prompt=prompt, images=images, pack=pack))
 

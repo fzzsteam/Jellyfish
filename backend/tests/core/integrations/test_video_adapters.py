@@ -56,6 +56,35 @@ def test_bailian_r2v_payload_uses_asset_reference_images() -> None:
     ]
 
 
+def test_bailian_happyhorse_11_r2v_payload_uses_asset_reference_images() -> None:
+    adapter = BailianVideoApiAdapter(
+        provider_config=ProviderConfig(provider="aliyun_bailian", api_key="bailian-key"),
+    )
+    inp = VideoGenerationInput.model_validate(
+        {
+            "model": "happyhorse-1.1-r2v",
+            "prompt": "角色在园林中奔跑，手里拿着纸灯",
+            "ratio": "4:3",
+            "seconds": 5,
+            "resolution": "1080p",
+            "reference_image_base64s": [
+                "data:image/png;base64,character",
+                "data:image/png;base64,scene",
+            ],
+        }
+    )
+
+    payload = adapter._build_payload(inp)
+
+    assert payload["model"] == "happyhorse-1.1-r2v"
+    assert payload["parameters"]["ratio"] == "4:3"
+    assert payload["parameters"]["resolution"] == "1080P"
+    assert payload["input"]["media"] == [
+        {"type": "reference_image", "url": "data:image/png;base64,character"},
+        {"type": "reference_image", "url": "data:image/png;base64,scene"},
+    ]
+
+
 def test_bailian_happyhorse_duration_keeps_official_integer_range() -> None:
     adapter = BailianVideoApiAdapter(
         provider_config=ProviderConfig(provider="aliyun_bailian", api_key="bailian-key"),
@@ -73,6 +102,64 @@ def test_bailian_happyhorse_duration_keeps_official_integer_range() -> None:
     payload = adapter._build_payload(inp)
 
     assert payload["parameters"]["duration"] == 15
+
+
+def test_bailian_happyhorse_11_t2v_payload_matches_official_shape() -> None:
+    adapter = BailianVideoApiAdapter(
+        provider_config=ProviderConfig(
+            provider="aliyun_bailian",
+            api_key="bailian-key",
+            base_url="https://llm-q04upj2v1s3t5zbp.cn-beijing.maas.aliyuncs.com",
+        ),
+    )
+    inp = VideoGenerationInput.model_validate(
+        {
+            "model": "happyhorse-1.1-t2v",
+            "prompt": "一座由硬纸板和瓶盖搭建的微型城市，在夜晚焕发出生机。",
+            "ratio": "16:9",
+            "seconds": 5,
+            "resolution": "720p",
+        }
+    )
+
+    payload = adapter._build_payload(inp)
+
+    assert adapter._submit_url() == (
+        "https://llm-q04upj2v1s3t5zbp.cn-beijing.maas.aliyuncs.com"
+        "/api/v1/services/aigc/video-generation/video-synthesis"
+    )
+    assert adapter._query_url("task-1") == (
+        "https://llm-q04upj2v1s3t5zbp.cn-beijing.maas.aliyuncs.com/api/v1/tasks/task-1"
+    )
+    assert payload == {
+        "model": "happyhorse-1.1-t2v",
+        "input": {"prompt": "一座由硬纸板和瓶盖搭建的微型城市，在夜晚焕发出生机。"},
+        "parameters": {
+            "resolution": "720P",
+            "ratio": "16:9",
+            "duration": 5,
+        },
+    }
+
+
+def test_bailian_happyhorse_11_t2v_supports_1080p_and_new_ratios() -> None:
+    adapter = BailianVideoApiAdapter(
+        provider_config=ProviderConfig(provider="aliyun_bailian", api_key="bailian-key"),
+    )
+    inp = VideoGenerationInput.model_validate(
+        {
+            "model": "happyhorse-1.1-t2v",
+            "prompt": "test",
+            "ratio": "3:4",
+            "seconds": 8,
+            "resolution": "1080p",
+        }
+    )
+
+    payload = adapter._build_payload(inp)
+
+    assert payload["parameters"]["resolution"] == "1080P"
+    assert payload["parameters"]["ratio"] == "3:4"
 
 
 @pytest.mark.asyncio

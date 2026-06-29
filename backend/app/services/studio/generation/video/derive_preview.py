@@ -27,6 +27,18 @@ class VideoDerivedPreview(GenerationDerivedPreview):
     template_name: str | None = None
 
 
+def append_video_ratio_to_prompt(rendered_prompt: str, ratio: str | None) -> str:
+    """Appends target aspect-ratio guidance so prompt preview and task submission stay aligned."""
+    prompt = (rendered_prompt or "").strip()
+    normalized_ratio = (ratio or "").strip()
+    if not prompt or not normalized_ratio:
+        return prompt
+    marker = f"目标视频比例：{normalized_ratio}"
+    if marker in prompt:
+        return prompt
+    return f"{prompt}\n\n{marker}。请按该画幅比例组织构图，避免主体被裁切。"
+
+
 async def derive_video_preview(
     db,
     *,
@@ -40,6 +52,7 @@ async def derive_video_preview(
             rendered_prompt=base.prompt,
             pack=pack,
         )
+        rendered_prompt = append_video_ratio_to_prompt(rendered_prompt, context.ratio)
         return VideoDerivedPreview(
             shot_id=base.shot_id,
             reference_mode=context.reference_mode,
@@ -67,6 +80,7 @@ async def derive_video_preview(
                 pack=pack,
             )
 
+    rendered_prompt = append_video_ratio_to_prompt(rendered_prompt, context.ratio)
     return VideoDerivedPreview(
         shot_id=base.shot_id,
         reference_mode=context.reference_mode,
