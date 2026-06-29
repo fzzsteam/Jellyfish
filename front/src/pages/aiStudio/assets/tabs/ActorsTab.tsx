@@ -151,26 +151,25 @@ export function ActorsTab() {
   }
 
   return (
-    <Card
-      title="演员"
-      extra={
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Input.Search
+          placeholder="搜索演员名称、描述或标签"
+          allowClear
+          className="max-w-sm"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onSearch={() => {
+            setPage(1)
+            void load({ page: 1 })
+          }}
+        />
         <Space>
-          <Input.Search
-            placeholder="搜索演员"
-            allowClear
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onSearch={(v) => {
-              setPage(1)
-              void load({ q: v, page: 1 })
-            }}
-            style={{ width: 240 }}
-          />
-          <Button icon={<ReloadOutlined />} onClick={() => void load()}>
+          <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
             刷新
           </Button>
           <Button type="primary" icon={<PlusOutlined />} loading={creating} onClick={() => void openCreate()}>
-            新建
+            新建演员
           </Button>
           <Upload
             accept="image/*"
@@ -188,8 +187,9 @@ export function ActorsTab() {
             </Button>
           </Upload>
         </Space>
-      }
-    >
+      </div>
+
+      <Card>
       {filtered.length === 0 && !loading ? (
         <Empty description="暂无演员" image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ) : (
@@ -278,6 +278,7 @@ export function ActorsTab() {
           setPage(1)
         }}
       />
-    </Card>
+      </Card>
+    </div>
   )
 }

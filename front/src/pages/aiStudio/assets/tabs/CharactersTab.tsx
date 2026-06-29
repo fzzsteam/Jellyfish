@@ -1,16 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Button, Col, Empty, Input, Modal, Pagination, Row, Space, Tag, message } from 'antd'
-import { DeleteOutlined, EditOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Button, Col, Empty, Input, Modal, Pagination, Row, Space, Tag, Upload, message } from 'antd'
+import { DeleteOutlined, EditOutlined, PlusOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { StudioEntitiesApi } from '../../../../services/studioEntities'
 import { resolveAssetUrl } from '../utils'
 import { DisplayImageCard } from '../components/DisplayImageCard'
+import { useProjectStyleOptions } from '../../project/useProjectStyleOptions'
+import { bulkUploadAssetImages } from '../bulkUploadAssets'
+import { generateUUID } from '../../../../utils'
 
 export function CharactersTab() {
   const navigate = useNavigate()
+  const { defaultVisualStyle, getDefaultStyle } = useProjectStyleOptions()
 
   const [characters, setCharacters] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [pageSize] = useState(12)
@@ -80,22 +86,95 @@ export function CharactersTab() {
     setPreviewOpen(true)
   }
 
+
+  /** 创建最小角色资产后进入编辑页，保持与其他资产库新建按钮的工作流一致。 */
+  const openCreate = async () => {
+    setCreating(true)
+    try {
+      const created = await StudioEntitiesApi.create('character', {
+        id: generateUUID(),
+        name: `未命名角色-${Date.now().toString(36)}`,
+        description: '',
+        tags: [],
+        view_count: 1,
+        visual_style: defaultVisualStyle,
+        style: getDefaultStyle(defaultVisualStyle),
+        prompt_template_id: null,
+      })
+      const createdId = String((created.data as { id?: string } | undefined)?.id ?? '')
+      if (!createdId) throw new Error('missing created character id')
+      navigate(`/assets/characters/${createdId}/edit`)
+    } catch {
+      message.error('创建角色资产失败')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  /** 批量上传图片：每张图按文件名创建一个角色，并写入正面图槽位。 */
+  const handleBulkUpload = async (files: File[]) => {
+    if (files.length === 0) return
+    setUploading(true)
+    try {
+      const result = await bulkUploadAssetImages({
+        entityType: 'character',
+        files,
+        visualStyle: defaultVisualStyle,
+        style: getDefaultStyle(defaultVisualStyle),
+      })
+      if (result.createdCount > 0) {
+        setPage(1)
+        await load({ page: 1 })
+      }
+      if (result.createdCount > 0 && result.failedCount === 0) {
+        message.success(`已创建 ${result.createdCount} 个角色资产`)
+      } else if (result.createdCount > 0) {
+        message.warning(`已创建 ${result.createdCount} 个角色资产，${result.failedCount} 个文件失败`)
+      } else {
+        message.error('批量上传失败')
+      }
+    } finally {
+      setUploading(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Space wrap>
-          <Input.Search
-            placeholder="搜索角色名称或描述"
-            allowClear
-            className="max-w-xs"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            onSearch={() => { setPage(1); void load({ page: 1 }) }}
-          />
+        <Input.Search
+          placeholder="搜索角色名称、描述或标签"
+          allowClear
+          className="max-w-sm"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onSearch={() => {
+            setPage(1)
+            void load({ page: 1 })
+          }}
+        />
+        <Space>
+          <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
+            刷新
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} loading={creating} onClick={() => void openCreate()}>
+            新建角色
+          </Button>
+          <Upload
+            accept="image/*"
+            multiple
+            showUploadList={false}
+            disabled={uploading}
+            beforeUpload={(file, fileList) => {
+              const isLastFile = file.uid === fileList[fileList.length - 1]?.uid
+              if (isLastFile) void handleBulkUpload(fileList)
+              return Upload.LIST_IGNORE
+            }}
+          >
+            <Button icon={<UploadOutlined />} loading={uploading}>
+              批量上传
+            </Button>
+          </Upload>
         </Space>
-        <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
-          刷新
-        </Button>
       </div>
 
       {!loading && characters.length === 0 ? (
