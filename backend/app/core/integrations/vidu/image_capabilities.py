@@ -5,7 +5,7 @@
 
 API 文档参数：
 - aspect_ratio: "16:9" | "4:3" | "1:1" | "3:4" | "9:16"
-- resolution: "1080P" | "2K" | "4K"
+- resolution: "1080p" | "2K" | "4K"
 """
 
 from __future__ import annotations
@@ -19,11 +19,11 @@ DEFAULT_VIDU_IMAGE_CAPABILITY = ImageModelCapability(
     supported_ratios={"16:9", "4:3", "1:1", "3:4", "9:16"},
     # ratio_size_profiles 中的 "size" 字符串在 Vidu 语义下表示 resolution 档位
     ratio_size_profiles={
-        "16:9": {"standard": "1080P", "high": "2K"},
-        "4:3":  {"standard": "1080P", "high": "2K"},
-        "1:1":  {"standard": "1080P", "high": "2K"},
-        "3:4":  {"standard": "1080P", "high": "2K"},
-        "9:16": {"standard": "1080P", "high": "2K"},
+        "16:9": {"standard": "1080p", "high": "2K"},
+        "4:3":  {"standard": "1080p", "high": "2K"},
+        "1:1":  {"standard": "1080p", "high": "2K"},
+        "3:4":  {"standard": "1080p", "high": "2K"},
+        "9:16": {"standard": "1080p", "high": "2K"},
     },
     default_resolution_profile="high",
     min_n=1,

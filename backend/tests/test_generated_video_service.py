@@ -40,6 +40,7 @@ from app.models.studio import (
 from app.models.types import FileType
 from app.services.film.generated_video import (
     build_run_args,
+    file_id_to_access_url,
     is_reference_to_video_model,
     persist_generated_video_to_shot,
     preview_prompt_and_images,
@@ -66,6 +67,28 @@ async def _build_session() -> tuple[AsyncSession, object]:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     return session_local(), engine
+
+
+@pytest.mark.asyncio
+async def test_file_id_to_access_url_uses_external_signed_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Video media URLs must be externally fetchable rather than OSS internal presigned URLs."""
+    db, engine = await _build_session()
+    async with db:
+        db.add(FileItem(id="file-1", type=FileType.image, name="asset.png", storage_key="assets/asset.png", user_id="test-user"))
+        await db.commit()
+
+        async def _fake_signed_external_download_url(*, key: str, expires: int = 3600) -> str:
+            return f"https://public-oss.example/{key}?expires={expires}"
+
+        monkeypatch.setattr(
+            "app.services.film.generated_video.storage.signed_external_download_url",
+            _fake_signed_external_download_url,
+        )
+
+        assert await file_id_to_access_url(db, file_id="file-1") == (
+            "https://public-oss.example/assets/asset.png?expires=3600"
+        )
+    await engine.dispose()
 
 
 async def _seed_shot_graph(db: AsyncSession) -> None:
@@ -227,9 +250,16 @@ async def test_build_run_args_maps_reference_images(monkeypatch: pytest.MonkeyPa
         async def _fake_file_id_to_data_url(_db: AsyncSession, *, file_id: str) -> str:
             return f"data:image/png;base64,{file_id}"
 
+        async def _fake_file_id_to_access_url(_db: AsyncSession, *, file_id: str) -> str:
+            return f"https://signed.example/{file_id}.png"
+
         monkeypatch.setattr(
             "app.services.film.generated_video.file_id_to_data_url",
             _fake_file_id_to_data_url,
+        )
+        monkeypatch.setattr(
+            "app.services.film.generated_video.file_id_to_access_url",
+            _fake_file_id_to_access_url,
         )
 
         run_args = await build_run_args(
@@ -272,9 +302,16 @@ async def test_build_run_args_clamps_legacy_duration_to_studio_range(monkeypatch
         async def _fake_file_id_to_data_url(_db: AsyncSession, *, file_id: str) -> str:
             return f"data:image/png;base64,{file_id}"
 
+        async def _fake_file_id_to_access_url(_db: AsyncSession, *, file_id: str) -> str:
+            return f"https://signed.example/{file_id}.png"
+
         monkeypatch.setattr(
             "app.services.film.generated_video.file_id_to_data_url",
             _fake_file_id_to_data_url,
+        )
+        monkeypatch.setattr(
+            "app.services.film.generated_video.file_id_to_access_url",
+            _fake_file_id_to_access_url,
         )
 
         run_args = await build_run_args(
@@ -399,9 +436,16 @@ async def test_build_run_args_adds_r2v_asset_reference_images(monkeypatch: pytes
         async def _fake_file_id_to_data_url(_db: AsyncSession, *, file_id: str) -> str:
             return f"data:image/png;base64,{file_id}"
 
+        async def _fake_file_id_to_access_url(_db: AsyncSession, *, file_id: str) -> str:
+            return f"https://signed.example/{file_id}.png"
+
         monkeypatch.setattr(
             "app.services.film.generated_video.file_id_to_data_url",
             _fake_file_id_to_data_url,
+        )
+        monkeypatch.setattr(
+            "app.services.film.generated_video.file_id_to_access_url",
+            _fake_file_id_to_access_url,
         )
 
         run_args = await build_run_args(
@@ -417,10 +461,74 @@ async def test_build_run_args_adds_r2v_asset_reference_images(monkeypatch: pytes
 
         assert run_args["input"]["model"] == "happyhorse-1.0-r2v"
         assert run_args["input"]["reference_image_base64s"] == [
-            "data:image/png;base64,file-char",
-            "data:image/png;base64,file-scene",
-            "data:image/png;base64,file-prop",
+            "https://signed.example/file-char.png",
+            "https://signed.example/file-scene.png",
+            "https://signed.example/file-prop.png",
         ]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_build_run_args_uses_signed_urls_for_bailian_r2v_asset_references(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Bailian HappyHorse r2v should send asset references as fetchable URLs instead of large data URLs."""
+    db, engine = await _build_session()
+    async with db:
+        await _seed_shot_graph(db)
+        bootstrap_all_registries()
+        provider = Provider(id="p1", name="bailian", base_url="https://dashscope.aliyuncs.com", api_key="k")
+        model = Model(
+            id="happyhorse-r2v",
+            name="happyhorse-1.1-r2v",
+            category=ModelCategoryKey.video,
+            provider_id="p1",
+        )
+        db.add_all(
+            [
+                provider,
+                model,
+                ModelSettings(id=1, default_video_model_id=model.id, user_id="test-user"),
+                Character(
+                    id="char-1",
+                    user_id="test-user",
+                    name="苏过",
+                    description="",
+                    style=ProjectStyle.real_people_city,
+                    visual_style=ProjectVisualStyle.live_action,
+                ),
+                FileItem(id="file-char", type=FileType.image, name="char.png", storage_key="assets/char.png", user_id="test-user"),
+                ShotCharacterLink(shot_id="s1", character_id="char-1", index=1),
+                CharacterImage(character_id="char-1", file_id="file-char", view_angle=AssetViewAngle.front),
+            ]
+        )
+        await db.commit()
+
+        async def _fake_file_id_to_data_url(_db: AsyncSession, *, file_id: str) -> str:
+            return f"data:image/png;base64,{file_id}"
+
+        async def _fake_file_id_to_access_url(_db: AsyncSession, *, file_id: str) -> str:
+            return f"https://signed.example/{file_id}.png"
+
+        monkeypatch.setattr(
+            "app.services.film.generated_video.file_id_to_data_url",
+            _fake_file_id_to_data_url,
+        )
+        monkeypatch.setattr(
+            "app.services.film.generated_video.file_id_to_access_url",
+            _fake_file_id_to_access_url,
+        )
+
+        run_args = await build_run_args(
+            db,
+            user_id="test-user",
+            shot_id="s1",
+            model_id=model.id,
+            reference_mode="text_only",
+            prompt="最终视频提示词",
+            images=[],
+            ratio="16:9",
+        )
+
+        assert run_args["input"]["reference_image_base64s"] == ["https://signed.example/file-char.png"]
     await engine.dispose()
 
 

@@ -53,7 +53,7 @@ SELECT
     JSON_OBJECT(
         'endpoint', '/ent/v2/reference2image',
         'aspect_ratios', JSON_ARRAY('16:9', '4:3', '1:1', '3:4', '9:16'),
-        'resolutions', JSON_ARRAY('1080P', '2K')
+        'resolutions', JSON_ARRAY('1080p', '2K')
     ),
     1,
     'Vidu2 text/reference-to-image model. Asset editor sends selected reference images to /ent/v2/reference2image when available.',
@@ -69,8 +69,12 @@ WHERE EXISTS (
 UPDATE models
 SET
     unit_points = 1,
+    params = JSON_SET(
+        COALESCE(params, JSON_OBJECT()),
+        '$.resolutions',
+        JSON_ARRAY('1080p', '2K')
+    ),
     description = 'Vidu2 text/reference-to-image model. Asset editor sends selected reference images to /ent/v2/reference2image when available.',
     updated_at = NOW()
 WHERE id = 'vidu-viduq2-image'
-  AND created_by = 'system'
-  AND unit_points = 12;
+  AND created_by = 'system';

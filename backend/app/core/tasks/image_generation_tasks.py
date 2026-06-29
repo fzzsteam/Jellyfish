@@ -211,17 +211,19 @@ class ImageGenerationTask(BaseTask):
         *,
         provider_config: ProviderConfig,
         input_: ImageGenerationInput,
-        timeout_s: float = 60.0,
+        timeout_s: float | None = None,
     ) -> None:
         from app.bootstrap import bootstrap_all_registries
 
         bootstrap_all_registries()
         factory = resolve_task_adapter("image_generation", provider_config.provider)
-        self._impl: AbstractImageGenerationTask = factory(
-            provider_config=provider_config,
-            input_=input_,
-            timeout_s=timeout_s,
-        )  # type: ignore[assignment]
+        kwargs: dict[str, Any] = {
+            "provider_config": provider_config,
+            "input_": input_,
+        }
+        if timeout_s is not None:
+            kwargs["timeout_s"] = timeout_s
+        self._impl: AbstractImageGenerationTask = factory(**kwargs)  # type: ignore[assignment]
 
     @staticmethod
     def _build_openai_impl(
@@ -267,7 +269,7 @@ class ImageGenerationTask(BaseTask):
         *,
         provider_config: ProviderConfig,
         input_: ImageGenerationInput,
-        timeout_s: float = 180.0,
+        timeout_s: float = 300.0,
     ) -> AbstractImageGenerationTask:
         return ViduImageGenerationTask(
             provider_config=provider_config,

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, BinaryIO
+from urllib.parse import urlsplit, urlunsplit
 
 import boto3
 from anyio import to_thread
@@ -29,7 +30,7 @@ class StoredFileInfo:
     extra: dict[str, Any] | None = None
 
 
-def _build_client() -> Any:
+def _build_client(*, endpoint_url: str | None = None) -> Any:
     """构建 boto3 S3 客户端。"""
     if not settings.s3_access_key_id or not settings.s3_secret_access_key:
         raise RuntimeError(
@@ -40,7 +41,7 @@ def _build_client() -> Any:
 
     return boto3.client(
         "s3",
-        endpoint_url=settings.s3_endpoint_url,
+        endpoint_url=endpoint_url or settings.s3_endpoint_url,
         aws_access_key_id=settings.s3_access_key_id,
         aws_secret_access_key=settings.s3_secret_access_key,
         region_name=settings.s3_region_name or "cn-shenzhen",
@@ -62,6 +63,25 @@ def _normalize_key(key: str) -> str:
     if base:
         return f"{base}/{key}"
     return key
+
+
+def _resolve_external_signing_endpoint_url() -> str:
+    """Resolve a public S3/OSS endpoint for URLs sent to external model providers."""
+    raw = (settings.s3_public_base_url or settings.s3_endpoint_url or "").strip().rstrip("/")
+    if not raw:
+        raise RuntimeError("S3 未配置：请在环境变量中设置 S3_ENDPOINT_URL")
+
+    parsed = urlsplit(raw)
+    hostname = parsed.hostname or ""
+    bucket = (settings.s3_bucket_name or "").strip()
+    if bucket and hostname.startswith(f"{bucket}."):
+        hostname = hostname[len(bucket) + 1 :]
+    hostname = hostname.replace("-internal.", ".")
+
+    netloc = hostname
+    if parsed.port:
+        netloc = f"{netloc}:{parsed.port}"
+    return urlunsplit((parsed.scheme or "https", netloc, "", "", ""))
 
 
 def init_storage() -> None:
@@ -195,9 +215,9 @@ async def delete_file(*, key: str) -> None:
     await to_thread.run_sync(_delete)
 
 
-def generate_signed_url(*, key: str, expires: int = 3600) -> str:
+def generate_signed_url(*, key: str, expires: int = 3600, external: bool = False) -> str:
     """生成带签名的临时访问 URL（同步）。"""
-    client = _build_client()
+    client = _build_client(endpoint_url=_resolve_external_signing_endpoint_url() if external else None)
     s3_key = _normalize_key(key)
     return client.generate_presigned_url(
         "get_object",
@@ -210,4 +230,11 @@ async def signed_download_url(*, key: str, expires: int = 3600) -> str:
     """异步版本：生成签名下载 URL。"""
     def _sign():
         return generate_signed_url(key=key, expires=expires)
+    return await to_thread.run_sync(_sign)
+
+
+async def signed_external_download_url(*, key: str, expires: int = 3600) -> str:
+    """Generate a temporary download URL that external model providers can fetch."""
+    def _sign():
+        return generate_signed_url(key=key, expires=expires, external=True)
     return await to_thread.run_sync(_sign)

@@ -87,6 +87,24 @@ async def file_id_to_data_url(db: AsyncSession, *, file_id: str) -> str:
     return f"data:image/{image_format};base64,{encoded}"
 
 
+async def file_id_to_access_url(db: AsyncSession, *, file_id: str) -> str:
+    """Resolve a file into a short-lived fetchable URL for providers that reject large data URLs."""
+
+    file_obj = await db.get(FileItem, file_id)
+    if file_obj is None or not file_obj.storage_key:
+        raise HTTPException(status_code=400, detail=f"Invalid image file_id: {file_id}")
+    try:
+        return await storage.signed_external_download_url(key=file_obj.storage_key, expires=3600)
+    except Exception:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Unable to sign image file_id: {file_id}") from None
+
+
+def _provider_prefers_media_urls(provider_key: str | None) -> bool:
+    """Return whether video media inputs should be passed as HTTP URLs instead of data URLs."""
+
+    return (provider_key or "").strip().lower() in {"aliyun_bailian", "bailian"}
+
+
 async def preview_prompt_and_images(
     db: AsyncSession,
     *,
@@ -254,13 +272,14 @@ async def build_run_args(
         raise HTTPException(status_code=400, detail="prompt is required")
 
     required_frames = tuple(ShotFrameType(item) for item in REQUIRED_FRAMES_BY_MODE[reference_mode])
-    frame_data_urls = [await file_id_to_data_url(db, file_id=file_id) for file_id in submission.images]
+    file_id_to_video_input = file_id_to_access_url if _provider_prefers_media_urls(provider_cfg.provider) else file_id_to_data_url
+    frame_data_urls = [await file_id_to_video_input(db, file_id=file_id) for file_id in submission.images]
     frame_map = {ft: frame_data_urls[i] for i, ft in enumerate(required_frames)}
     asset_reference_data_urls: list[str] = []
     if is_reference_to_video_model(model.name):
         asset_reference_file_ids = await resolve_r2v_asset_reference_file_ids(db, shot_id=shot_id)
         asset_reference_data_urls = [
-            await file_id_to_data_url(db, file_id=file_id)
+            await file_id_to_video_input(db, file_id=file_id)
             for file_id in asset_reference_file_ids
         ]
         # Vidu reference2video 总参考图上限为 7 张（含首/尾/关键帧）。

@@ -64,6 +64,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_VIDEO_API_ROOT = "https://dashscope.aliyuncs.com/api/v1"
 VIDEO_SUBMIT_PATH = "/services/aigc/video-generation/video-synthesis"
 VIDEO_QUERY_PATH_TEMPLATE = "/tasks/{task_id}"
+DASHSCOPE_COMPATIBLE_MODE_ROOT = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
 #: i2v 模型名称标识
 _I2V_MODEL_PREFIXES = ("happyhorse-1.0-i2v", "happyhorse-1.1-i2v", "i2v")
@@ -380,6 +381,8 @@ class BailianVideoApiAdapter:
         """Resolve the DashScope/MAAS API root used by submit and polling endpoints."""
         raw = (base_url or DEFAULT_VIDEO_API_ROOT).strip().rstrip("/")
         if not raw:
+            return DEFAULT_VIDEO_API_ROOT
+        if raw == DASHSCOPE_COMPATIBLE_MODE_ROOT:
             return DEFAULT_VIDEO_API_ROOT
         if raw.endswith(VIDEO_SUBMIT_PATH):
             return raw[: -len(VIDEO_SUBMIT_PATH)]

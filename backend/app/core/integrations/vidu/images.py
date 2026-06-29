@@ -152,7 +152,7 @@ class ViduImageApiAdapter:
         # 画幅比例：优先 target_ratio，其次从 supported_ratios 取默认
         aspect_ratio: str = inp.target_ratio or "16:9"
 
-        # 分辨率档位：优先从 size 直接透传（如 "2K"/"1080P"），
+        # 分辨率档位：优先从 size 直接透传（如 "1080p"/"2K"），
         # 其次由 resolution_profile + ratio 从 capability 推导
         vidu_resolution = self._resolve_resolution(inp, cap, aspect_ratio)
 
@@ -181,17 +181,20 @@ class ViduImageApiAdapter:
         cap: Any,
         aspect_ratio: str,
     ) -> str:
-        """解析最终 Vidu resolution 字符串（1080P / 2K / 4K）。
+        """解析最终 Vidu resolution 字符串（1080p / 2K / 4K）。
 
         优先级：
         1. inp.size 直接透传（调用方已指定 Vidu 分辨率关键字）
         2. ratio_size_profiles[aspect_ratio][resolution_profile]
-        3. 默认 "1080P"
+        3. 默认 "1080p"
         """
-        vidu_resolutions = {"1080P", "2K", "4K"}
+        # Viduq2 reference2image expects lowercase p for 1080p; do not upper-case it.
+        vidu_resolutions = {"1080p": "1080p", "2k": "2K", "4k": "4K"}
 
-        if inp.size and inp.size.upper() in vidu_resolutions:
-            return inp.size.upper()
+        if inp.size:
+            normalized_size = inp.size.strip().lower()
+            if normalized_size in vidu_resolutions:
+                return vidu_resolutions[normalized_size]
 
         profile = inp.resolution_profile or cap.default_resolution_profile or "standard"
         if cap.ratio_size_profiles:
@@ -200,7 +203,7 @@ class ViduImageApiAdapter:
             if resolution:
                 return resolution
 
-        return "1080P"
+        return "1080p"
 
     @staticmethod
     def _parse_poll_response(data: dict[str, Any], task_id: str) -> ImageGenerationResult:

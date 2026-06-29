@@ -243,7 +243,35 @@ def test_vidu_image_reference2image_defaults_seed_to_zero() -> None:
 
     assert body["seed"] == 0
     assert body["images"] == ["https://cdn.example.com/ref.png"]
-    assert body["resolution"] == "1080P"
+    assert body["resolution"] == "1080p"
+
+
+def test_vidu_image_reference2image_standard_profile_uses_1080p_resolution() -> None:
+    adapter = ViduImageApiAdapter()
+    inp = ImageGenerationInput(
+        model="viduq2",
+        prompt="asset prompt",
+        target_ratio="16:9",
+        resolution_profile="standard",
+    )
+
+    body = adapter._build_request_body(inp)
+
+    assert body["resolution"] == "1080p"
+
+
+def test_vidu_image_reference2image_preserves_official_1080p_size_casing() -> None:
+    adapter = ViduImageApiAdapter()
+    inp = ImageGenerationInput(
+        model="viduq2",
+        prompt="asset prompt",
+        target_ratio="16:9",
+        size="1080p",
+    )
+
+    body = adapter._build_request_body(inp)
+
+    assert body["resolution"] == "1080p"
 
 
 def test_vidu_image_reference2image_supports_text_only_generation() -> None:

@@ -42,6 +42,29 @@ def test_build_client_raises_without_endpoint(monkeypatch):
     with pytest.raises(RuntimeError, match="S3_ENDPOINT_URL"):
         _build_client()
 
+
+def test_external_signing_endpoint_removes_aliyun_internal_host(monkeypatch):
+    from app.config import settings
+    from app.core.storage import _resolve_external_signing_endpoint_url
+
+    monkeypatch.setattr(settings, "s3_bucket_name", "fzzs-jellyfish")
+    monkeypatch.setattr(settings, "s3_public_base_url", None)
+    monkeypatch.setattr(settings, "s3_endpoint_url", "https://oss-cn-shenzhen-internal.aliyuncs.com")
+
+    assert _resolve_external_signing_endpoint_url() == "https://oss-cn-shenzhen.aliyuncs.com"
+
+
+def test_external_signing_endpoint_normalizes_bucket_public_host(monkeypatch):
+    from app.config import settings
+    from app.core.storage import _resolve_external_signing_endpoint_url
+
+    monkeypatch.setattr(settings, "s3_bucket_name", "fzzs-jellyfish")
+    monkeypatch.setattr(settings, "s3_public_base_url", "https://fzzs-jellyfish.oss-cn-shenzhen.aliyuncs.com")
+    monkeypatch.setattr(settings, "s3_endpoint_url", "https://oss-cn-shenzhen-internal.aliyuncs.com")
+
+    assert _resolve_external_signing_endpoint_url() == "https://oss-cn-shenzhen.aliyuncs.com"
+
+
 @pytest.mark.asyncio
 async def test_upload_file_returns_empty_url(monkeypatch):
     from app.core import storage

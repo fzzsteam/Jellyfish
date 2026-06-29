@@ -85,6 +85,55 @@ def test_bailian_happyhorse_11_r2v_payload_uses_asset_reference_images() -> None
     ]
 
 
+def test_bailian_happyhorse_11_r2v_payload_matches_official_reference_url_shape() -> None:
+    """HappyHorse r2v should match the official prompt + reference_image URL payload shape."""
+    adapter = BailianVideoApiAdapter(
+        provider_config=ProviderConfig(
+            provider="aliyun_bailian",
+            api_key="bailian-key",
+            base_url="https://llm-q04upj2v1s3t5zbp.cn-beijing.maas.aliyuncs.com",
+        ),
+    )
+    inp = VideoGenerationInput.model_validate(
+        {
+            "model": "happyhorse-1.1-r2v",
+            "prompt": "[Image 1]中身着红色旗袍的女性展开折扇，流苏耳坠随头部转动轻盈摆动。",
+            "ratio": "16:9",
+            "seconds": 5,
+            "resolution": "720p",
+            "reference_image_base64s": [
+                "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260424/mvzfud/hh-v2v-girl.jpg",
+                "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260424/fvuihk/hh-v2v2-folding-fan.jpg",
+                "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260424/imerii/hh-v2v-earrings.jpg",
+            ],
+        }
+    )
+
+    payload = adapter._build_payload(inp)
+
+    assert adapter._submit_url() == (
+        "https://llm-q04upj2v1s3t5zbp.cn-beijing.maas.aliyuncs.com"
+        "/api/v1/services/aigc/video-generation/video-synthesis"
+    )
+    assert payload["model"] == "happyhorse-1.1-r2v"
+    assert payload["parameters"] == {"resolution": "720P", "ratio": "16:9", "duration": 5}
+    assert payload["input"]["prompt"] == inp.prompt
+    assert payload["input"]["media"] == [
+        {
+            "type": "reference_image",
+            "url": "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260424/mvzfud/hh-v2v-girl.jpg",
+        },
+        {
+            "type": "reference_image",
+            "url": "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260424/fvuihk/hh-v2v2-folding-fan.jpg",
+        },
+        {
+            "type": "reference_image",
+            "url": "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/20260424/imerii/hh-v2v-earrings.jpg",
+        },
+    ]
+
+
 def test_bailian_happyhorse_duration_keeps_official_integer_range() -> None:
     adapter = BailianVideoApiAdapter(
         provider_config=ProviderConfig(provider="aliyun_bailian", api_key="bailian-key"),
@@ -140,6 +189,123 @@ def test_bailian_happyhorse_11_t2v_payload_matches_official_shape() -> None:
             "duration": 5,
         },
     }
+
+
+def test_bailian_happyhorse_11_i2v_payload_matches_official_reference_url_shape() -> None:
+    """HappyHorse i2v should match the official first_frame URL payload shape."""
+    adapter = BailianVideoApiAdapter(
+        provider_config=ProviderConfig(
+            provider="aliyun_bailian",
+            api_key="bailian-key",
+            base_url="https://llm-q04upj2v1s3t5zbp.cn-beijing.maas.aliyuncs.com",
+        ),
+    )
+    inp = VideoGenerationInput.model_validate(
+        {
+            "model": "happyhorse-1.1-i2v",
+            "prompt": "一只猫在草地上奔跑",
+            "ratio": "16:9",
+            "seconds": 5,
+            "resolution": "720p",
+            "first_frame_base64": "https://cdn.translate.alibaba.com/r/wanx-demo-1.png",
+        }
+    )
+
+    payload = adapter._build_payload(inp)
+
+    assert adapter._submit_url() == (
+        "https://llm-q04upj2v1s3t5zbp.cn-beijing.maas.aliyuncs.com"
+        "/api/v1/services/aigc/video-generation/video-synthesis"
+    )
+    assert payload == {
+        "model": "happyhorse-1.1-i2v",
+        "input": {
+            "prompt": "一只猫在草地上奔跑",
+            "media": [
+                {
+                    "type": "first_frame",
+                    "url": "https://cdn.translate.alibaba.com/r/wanx-demo-1.png",
+                }
+            ],
+        },
+        "parameters": {
+            "resolution": "720P",
+            "duration": 5,
+        },
+    }
+
+
+def test_bailian_happyhorse_video_edit_payload_matches_official_reference_url_shape() -> None:
+    """HappyHorse video-edit should match the official source video + reference image payload shape."""
+    adapter = BailianVideoApiAdapter(
+        provider_config=ProviderConfig(
+            provider="aliyun_bailian",
+            api_key="bailian-key",
+            base_url="https://llm-q04upj2v1s3t5zbp.cn-beijing.maas.aliyuncs.com",
+        ),
+    )
+    inp = VideoGenerationInput.model_validate(
+        {
+            "model": "happyhorse-1.0-video-edit",
+            "prompt": "让视频中的马头人身角色穿上图片中的条纹毛衣",
+            "ratio": "16:9",
+            "resolution": "720p",
+            "source_video_base64": (
+                "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/"
+                "20260409/dozxak/Wan_Video_Edit_33_1.mp4"
+            ),
+            "first_frame_base64": (
+                "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/"
+                "20260415/hynnff/wan-video-edit-clothes.webp"
+            ),
+        }
+    )
+
+    payload = adapter._build_payload(inp)
+
+    assert adapter._submit_url() == (
+        "https://llm-q04upj2v1s3t5zbp.cn-beijing.maas.aliyuncs.com"
+        "/api/v1/services/aigc/video-generation/video-synthesis"
+    )
+    assert payload == {
+        "model": "happyhorse-1.0-video-edit",
+        "input": {
+            "prompt": "让视频中的马头人身角色穿上图片中的条纹毛衣",
+            "media": [
+                {
+                    "type": "video",
+                    "url": (
+                        "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/"
+                        "20260409/dozxak/Wan_Video_Edit_33_1.mp4"
+                    ),
+                },
+                {
+                    "type": "reference_image",
+                    "url": (
+                        "https://help-static-aliyun-doc.aliyuncs.com/file-manage-files/zh-CN/"
+                        "20260415/hynnff/wan-video-edit-clothes.webp"
+                    ),
+                },
+            ],
+        },
+        "parameters": {"resolution": "720P"},
+    }
+
+
+def test_bailian_video_url_ignores_dashscope_compatible_mode_base_url() -> None:
+    """DashScope video APIs use the native /api/v1 root, not the text compatible-mode root."""
+    adapter = BailianVideoApiAdapter(
+        provider_config=ProviderConfig(
+            provider="aliyun_bailian",
+            api_key="bailian-key",
+            base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
+        ),
+    )
+
+    assert adapter._submit_url() == (
+        "https://dashscope.aliyuncs.com/api/v1/services/aigc/video-generation/video-synthesis"
+    )
+    assert adapter._query_url("task-1") == "https://dashscope.aliyuncs.com/api/v1/tasks/task-1"
 
 
 def test_bailian_happyhorse_11_t2v_supports_1080p_and_new_ratios() -> None:
