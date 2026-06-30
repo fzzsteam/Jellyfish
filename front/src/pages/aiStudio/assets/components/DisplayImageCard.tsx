@@ -74,12 +74,30 @@ export function DisplayImageCard({
         {footer ? <div className="mt-3">{footer}</div> : null}
       </Card>
 
-      <Modal title={imageAlt} open={previewOpen} onCancel={() => setPreviewOpen(false)} footer={null} width={960}>
-        <div className="w-full flex justify-center bg-gray-50 rounded-md overflow-hidden">
-          {displayUrl ? <img src={displayUrl} alt={imageAlt} className="max-h-[75vh] object-contain" /> : null}
+      <Modal
+        title={imageAlt}
+        open={previewOpen}
+        onCancel={() => setPreviewOpen(false)}
+        footer={null}
+        width="min(96vw, 1120px)"
+        bodyStyle={{ maxHeight: 'calc(100vh - 140px)', overflow: 'auto' }}
+      >
+        <div className="w-full flex justify-center bg-gray-50 rounded-md">
+          {displayUrl ? (
+            <img
+              src={displayUrl}
+              alt={imageAlt}
+              className="block object-contain"
+              style={{
+                width: 'auto',
+                height: 'auto',
+                maxWidth: '100%',
+                maxHeight: 'calc(100vh - 180px)',
+              }}
+            />
+          ) : null}
         </div>
       </Modal>
     </>
   )
 }
-

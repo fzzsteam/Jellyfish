@@ -255,7 +255,7 @@ export function CharactersTab() {
         width={880}
       >
         <div className="w-full flex justify-center bg-gray-50 rounded-md overflow-hidden">
-          <img src={previewUrl} alt={previewTitle} className="max-h-[70vh] object-contain" />
+          <img src={previewUrl} alt={previewTitle} className="block max-w-full max-h-[70vh] object-contain" />
         </div>
       </Modal>
     </div>
