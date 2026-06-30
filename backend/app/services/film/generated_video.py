@@ -214,6 +214,20 @@ def is_reference_to_video_model(model_name: str | None) -> bool:
     )
 
 
+def max_reference_images_for_video_model(provider_key: str | None, model_name: str | None) -> int:
+    """Return the r2v total reference-image limit for the selected video model.
+
+    HappyHorse 1.1 r2v supports up to 9 reference images, while Vidu reference
+    video keeps its provider-specific 7-image cap. This preflight limit prevents
+    worker-side provider 400 errors and keeps user-facing messages accurate.
+    """
+    provider = (provider_key or "").strip().lower()
+    name = (model_name or "").strip().lower()
+    if provider == "aliyun_bailian" and name.startswith("happyhorse-1.1-r2v"):
+        return 9
+    return 7
+
+
 async def resolve_r2v_asset_reference_file_ids(db: AsyncSession, *, shot_id: str) -> list[str]:
     """Resolve linked character, scene, and prop images for HappyHorse r2v, excluding costume images."""
     items = await list_shot_linked_assets(db, shot_id=shot_id)
@@ -282,19 +296,17 @@ async def build_run_args(
             await file_id_to_video_input(db, file_id=file_id)
             for file_id in asset_reference_file_ids
         ]
-        # Vidu reference2video 总参考图上限为 7 张（含首/尾/关键帧）。
-        # 超出时在任务创建阶段即报错，避免 worker 侧触发无法恢复的 400。
-        _VIDU_MAX_TOTAL_REF = 7
+        max_total_ref = max_reference_images_for_video_model(provider_cfg.provider, model.name)
         frame_count = sum(
             1 for ft in (ShotFrameType.first, ShotFrameType.last, ShotFrameType.key)
             if ft in frame_map
         )
         total_ref = frame_count + len(asset_reference_data_urls)
-        if total_ref > _VIDU_MAX_TOTAL_REF:
+        if total_ref > max_total_ref:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"参考图数量超过模型上限（{model.name} 最多支持 {_VIDU_MAX_TOTAL_REF} 张），"
+                    f"参考图数量超过模型上限（{model.name} 最大不超过{max_total_ref}张），"
                     f"当前已关联 {total_ref} 张，请在分镜工作室中减少关联资产后重试。"
                 ),
             )

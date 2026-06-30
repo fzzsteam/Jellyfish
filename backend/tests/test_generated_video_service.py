@@ -533,6 +533,103 @@ async def test_build_run_args_uses_signed_urls_for_bailian_r2v_asset_references(
 
 
 @pytest.mark.asyncio
+async def test_build_run_args_allows_nine_happyhorse_11_r2v_references(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HappyHorse 1.1 r2v supports up to 9 total reference images."""
+    db, engine = await _build_session()
+    async with db:
+        await _seed_shot_graph(db)
+        bootstrap_all_registries()
+        provider = Provider(id="p1", name="bailian", base_url="https://dashscope.aliyuncs.com", api_key="k")
+        model = Model(
+            id="happyhorse-r2v",
+            name="happyhorse-1.1-r2v",
+            category=ModelCategoryKey.video,
+            provider_id="p1",
+        )
+        db.add_all([provider, model, ModelSettings(id=1, default_video_model_id=model.id, user_id="test-user")])
+        await db.commit()
+
+        async def _fake_reference_ids(_db: AsyncSession, *, shot_id: str) -> list[str]:
+            return [f"file-{index}" for index in range(1, 10)]
+
+        async def _fake_file_id_to_access_url(_db: AsyncSession, *, file_id: str) -> str:
+            return f"https://signed.example/{file_id}.png"
+
+        monkeypatch.setattr(
+            "app.services.film.generated_video.resolve_r2v_asset_reference_file_ids",
+            _fake_reference_ids,
+        )
+        monkeypatch.setattr(
+            "app.services.film.generated_video.file_id_to_access_url",
+            _fake_file_id_to_access_url,
+        )
+
+        run_args = await build_run_args(
+            db,
+            user_id="test-user",
+            shot_id="s1",
+            model_id=model.id,
+            reference_mode="text_only",
+            prompt="最终视频提示词",
+            images=[],
+            ratio="16:9",
+        )
+
+        assert run_args["input"]["reference_image_base64s"] == [
+            f"https://signed.example/file-{index}.png" for index in range(1, 10)
+        ]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_build_run_args_rejects_ten_happyhorse_11_r2v_references(monkeypatch: pytest.MonkeyPatch) -> None:
+    """HappyHorse 1.1 r2v overflow message should report the 9-image limit."""
+    db, engine = await _build_session()
+    async with db:
+        await _seed_shot_graph(db)
+        bootstrap_all_registries()
+        provider = Provider(id="p1", name="bailian", base_url="https://dashscope.aliyuncs.com", api_key="k")
+        model = Model(
+            id="happyhorse-r2v",
+            name="happyhorse-1.1-r2v",
+            category=ModelCategoryKey.video,
+            provider_id="p1",
+        )
+        db.add_all([provider, model, ModelSettings(id=1, default_video_model_id=model.id, user_id="test-user")])
+        await db.commit()
+
+        async def _fake_reference_ids(_db: AsyncSession, *, shot_id: str) -> list[str]:
+            return [f"file-{index}" for index in range(1, 11)]
+
+        async def _fake_file_id_to_access_url(_db: AsyncSession, *, file_id: str) -> str:
+            return f"https://signed.example/{file_id}.png"
+
+        monkeypatch.setattr(
+            "app.services.film.generated_video.resolve_r2v_asset_reference_file_ids",
+            _fake_reference_ids,
+        )
+        monkeypatch.setattr(
+            "app.services.film.generated_video.file_id_to_access_url",
+            _fake_file_id_to_access_url,
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            await build_run_args(
+                db,
+                user_id="test-user",
+                shot_id="s1",
+                model_id=model.id,
+                reference_mode="text_only",
+                prompt="最终视频提示词",
+                images=[],
+                ratio="16:9",
+            )
+
+        assert "最大不超过9张" in str(exc_info.value.detail)
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_build_run_args_adds_vidu_subject_asset_reference_images(monkeypatch: pytest.MonkeyPatch) -> None:
     """ViduQ3 subject reference video should receive linked character, scene, and prop images."""
     db, engine = await _build_session()
