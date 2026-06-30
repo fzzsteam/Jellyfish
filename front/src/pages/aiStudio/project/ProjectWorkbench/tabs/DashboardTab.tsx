@@ -11,6 +11,7 @@ import type { TabKey } from '../constants'
 import { getChapterShotsPath, getChapterStudioPath } from '../routes'
 import { useProject, useChapters } from '../hooks/useProjectData'
 import { ensureHasShotsBeforeShooting } from '../ensureHasShotsBeforeShooting'
+import { StudioShotLinksService } from '../../../../../services/generated'
 import { getChapterPreparationState } from '../chapterPreparation'
 import {
   loadChapterFlowStats,
@@ -18,6 +19,36 @@ import {
   type ChapterFlowStats,
   type ProjectFlowStats,
 } from '../projectFlowStats'
+
+type AssetHealthCounts = {
+  roles: number
+  scenes: number
+  props: number
+}
+
+/**
+ * Loads project-level asset link totals for the dashboard snapshot.
+ * The asset tabs use this same project-only link endpoint, so the snapshot
+ * reflects the current project asset library rather than stale project stats.
+ */
+async function loadProjectAssetHealthCounts(projectId: string): Promise<AssetHealthCounts> {
+  const [roles, scenes, props] = await Promise.all(
+    (['character', 'scene', 'prop'] as const).map((entityType) =>
+      StudioShotLinksService.listProjectEntityLinksApiV1StudioShotLinksEntityTypeGet({
+        entityType,
+        projectId,
+        chapterId: null,
+        shotId: null,
+        assetId: null,
+        order: null,
+        isDesc: false,
+        page: 1,
+        pageSize: 1,
+      }).then((res) => res.data?.pagination.total ?? 0),
+    ),
+  )
+  return { roles, scenes, props }
+}
 
 export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => void }) {
   const navigate = useNavigate()
@@ -35,6 +66,12 @@ export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => vo
   })
   const [chapterFlowStats, setChapterFlowStats] = useState<ChapterFlowStats[]>([])
   const [flowStatsLoading, setFlowStatsLoading] = useState(false)
+  const [assetHealthCounts, setAssetHealthCounts] = useState<AssetHealthCounts>({
+    roles: 0,
+    scenes: 0,
+    props: 0,
+  })
+  const [assetHealthLoading, setAssetHealthLoading] = useState(false)
 
   const loading = projectLoading || chaptersLoading
   const chaptersByIndex = [...chapters].sort((a, b) => a.index - b.index)
@@ -98,6 +135,33 @@ export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => vo
     }
   }, [chapters, projectId])
 
+  useEffect(() => {
+    let cancelled = false
+    if (!projectId) {
+      setAssetHealthCounts({ roles: 0, scenes: 0, props: 0 })
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const run = async () => {
+      setAssetHealthLoading(true)
+      try {
+        const counts = await loadProjectAssetHealthCounts(projectId)
+        if (!cancelled) setAssetHealthCounts(counts)
+      } catch {
+        if (!cancelled) setAssetHealthCounts({ roles: 0, scenes: 0, props: 0 })
+      } finally {
+        if (!cancelled) setAssetHealthLoading(false)
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
+
   if (loading && !project) {
     return (
       <div className="flex justify-center items-center py-16">
@@ -118,6 +182,7 @@ export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => vo
   const topPendingChapter = [...chapterFlowStats].sort((a, b) => b.pendingConfirmShots - a.pendingConfirmShots)[0]
   const topGeneratingChapter = [...chapterFlowStats].sort((a, b) => b.generatingShots - a.generatingShots)[0]
   const topReadyChapter = [...chapterFlowStats].sort((a, b) => b.readyShots - a.readyShots)[0]
+  const maxAssetHealthCount = Math.max(assetHealthCounts.roles, assetHealthCounts.scenes, assetHealthCounts.props, 1)
 
   const handleRecommendedAction = () => {
     if (!projectId) return
@@ -335,19 +400,19 @@ export function DashboardTab({ onSelectTab }: { onSelectTab: (tab: TabKey) => vo
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span>角色</span>
-                <span className="text-gray-500">{project.stats.roles} 项</span>
+                <span className="text-gray-500">{assetHealthLoading ? '...' : `${assetHealthCounts.roles} 项`}</span>
               </div>
-              <Progress percent={80} size="small" showInfo={false} />
+              <Progress percent={Math.round((assetHealthCounts.roles / maxAssetHealthCount) * 100)} size="small" showInfo={false} />
               <div className="flex justify-between text-sm">
                 <span>场景</span>
-                <span className="text-gray-500">{project.stats.scenes} 项</span>
+                <span className="text-gray-500">{assetHealthLoading ? '...' : `${assetHealthCounts.scenes} 项`}</span>
               </div>
-              <Progress percent={60} size="small" showInfo={false} />
+              <Progress percent={Math.round((assetHealthCounts.scenes / maxAssetHealthCount) * 100)} size="small" showInfo={false} />
               <div className="flex justify-between text-sm">
                 <span>道具</span>
-                <span className="text-gray-500">{project.stats.props} 项</span>
+                <span className="text-gray-500">{assetHealthLoading ? '...' : `${assetHealthCounts.props} 项`}</span>
               </div>
-              <Progress percent={75} size="small" showInfo={false} />
+              <Progress percent={Math.round((assetHealthCounts.props / maxAssetHealthCount) * 100)} size="small" showInfo={false} />
             </div>
             <Button type="link" className="p-0 mt-2" onClick={() => navigate('/assets')}>
               管理资产
