@@ -41,6 +41,7 @@ export type UsePointsQuoteResult = {
   error: string | null
   canSubmit: boolean
   refresh: () => void
+  refreshNow: () => Promise<PointsQuoteResponse | null>
 }
 
 /** 防抖等待时长（毫秒）：文本试算便宜且稳定，取较短值避免感知卡顿。 */
@@ -71,6 +72,50 @@ export function usePointsQuote(params: UsePointsQuoteParams): UsePointsQuoteResu
   const refresh = useCallback(() => {
     setManualTick((n) => n + 1)
   }, [])
+
+  const refreshNow = useCallback(async (): Promise<PointsQuoteResponse | null> => {
+    if (!enabled) return null
+    if (timerRef.current) {
+      clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+    const currentReqId = (reqIdRef.current += 1)
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await PointsService.quoteMyPointsApiV1PointsQuotePost({
+        requestBody: {
+          business_type: businessType,
+          category,
+          model_id: modelId ?? null,
+          duration_seconds: durationSeconds ?? null,
+          resolution: resolution ?? null,
+          resolution_profile: resolutionProfile ?? null,
+          generation_count: 1,
+        },
+      })
+      if (currentReqId !== reqIdRef.current) return res.data ?? null
+      const data = res.data ?? null
+      if (data) {
+        setQuote(data)
+        setError(null)
+      } else {
+        setQuote(null)
+        setError('暂时无法计算积分')
+      }
+      return data
+    } catch {
+      if (currentReqId === reqIdRef.current) {
+        setQuote(null)
+        setError('暂时无法计算积分')
+      }
+      return null
+    } finally {
+      if (currentReqId === reqIdRef.current) {
+        setLoading(false)
+      }
+    }
+  }, [businessType, category, durationSeconds, enabled, modelId, resolution, resolutionProfile])
 
   useEffect(() => {
     if (!enabled) {
@@ -153,5 +198,5 @@ export function usePointsQuote(params: UsePointsQuoteParams): UsePointsQuoteResu
   const canSubmit = !!enabled && !loading && !error && !!quote && quote.sufficient
   const quoteToken = quote?.quote_token ?? null
 
-  return { quote, quoteToken, loading, error, canSubmit, refresh }
+  return { quote, quoteToken, loading, error, canSubmit, refresh, refreshNow }
 }

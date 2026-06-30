@@ -2,6 +2,7 @@ import { Button, Dropdown } from 'antd'
 import type { MenuProps } from 'antd'
 import {
   AppstoreOutlined,
+  DownloadOutlined,
   SettingOutlined,
   ThunderboltOutlined,
   VideoCameraOutlined,
@@ -11,18 +12,26 @@ type ChapterStudioBatchToolbarProps = {
   selectedCount: number
   batchVideoReadinessLoading: boolean
   generating: boolean
+  batchDownloading: boolean
+  batchDownloadDisabled: boolean
+  batchDownloadText: string
   maintenanceMenuItems: MenuProps['items']
   onBatchInspectVideoReadiness: () => void
   onBatchGenerate: () => void
+  onBatchDownload: () => void
 }
 
 export function ChapterStudioBatchToolbar({
   selectedCount,
   batchVideoReadinessLoading,
   generating,
+  batchDownloading,
+  batchDownloadDisabled,
+  batchDownloadText,
   maintenanceMenuItems,
   onBatchInspectVideoReadiness,
   onBatchGenerate,
+  onBatchDownload,
 }: ChapterStudioBatchToolbarProps) {
   return (
     <div className="cs-group m-3 mt-0 mb-2">
@@ -47,6 +56,15 @@ export function ChapterStudioBatchToolbar({
           onClick={onBatchGenerate}
         >
           批量生成
+        </Button>
+        <Button
+          size="small"
+          icon={<DownloadOutlined />}
+          loading={batchDownloading}
+          disabled={batchDownloadDisabled}
+          onClick={onBatchDownload}
+        >
+          {batchDownloadText}
         </Button>
         <Dropdown menu={{ items: maintenanceMenuItems }} trigger={['click']}>
           <Button size="small" icon={<SettingOutlined />}>

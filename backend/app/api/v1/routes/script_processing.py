@@ -35,6 +35,7 @@ from app.chains.agents.script_processing_agents import (
 )
 from app.dependencies import get_current_user, get_db
 from app.models.user import User
+from app.models.studio import Chapter
 from app.schemas.common import ApiResponse, success_response
 from app.schemas.skills.character_portrait import CharacterPortraitAnalysisResult
 from app.schemas.skills.costume_info_analysis import CostumeInfoAnalysisResult
@@ -1312,6 +1313,15 @@ class ScriptExtractRequest(BaseModel):
     )
 
 
+async def _load_chapter_script_text(db: AsyncSession, chapter_id: str) -> str:
+    """读取章节正文作为信息提取上下文，优先使用精简文本再回退原文。"""
+
+    chapter = await db.get(Chapter, chapter_id)
+    if chapter is None:
+        return ""
+    return (chapter.condensed_text or chapter.raw_text or "").strip()
+
+
 @router.post(
     "/extract-async",
     response_model=ApiResponse[AsyncTaskCreateRead],
@@ -1324,11 +1334,13 @@ async def extract_script_async(
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[AsyncTaskCreateRead]:
     quote_token = _require_quote_token(request.quote_token)
+    script_text = await _load_chapter_script_text(db, request.chapter_id)
     task_info = await create_extract_task(
         db,
         user_id=current_user.id,
         project_id=request.project_id,
         chapter_id=request.chapter_id,
+        script_text=script_text,
         script_division=request.script_division,
         consistency=request.consistency,
         refresh_cache=request.refresh_cache,
@@ -1360,9 +1372,11 @@ async def extract_script(
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[StudioScriptExtractionDraft]:
     try:
+        script_text = await _load_chapter_script_text(db, request.chapter_id)
         cache_key = build_script_extract_cache_key(
             project_id=request.project_id,
             chapter_id=request.chapter_id,
+            script_text=script_text,
             script_division=request.script_division,
             consistency=request.consistency,
         )
@@ -1407,6 +1421,7 @@ async def extract_script(
                 agent.extract,
                 project_id=request.project_id,
                 chapter_id=request.chapter_id,
+                script_text=script_text,
                 script_division_json=json.dumps(request.script_division, ensure_ascii=False),
                 consistency_json=json.dumps(request.consistency or {}, ensure_ascii=False),
             )

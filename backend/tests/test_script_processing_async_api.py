@@ -84,6 +84,7 @@ def test_extract_async_returns_created_task_payload(client, monkeypatch) -> None
         user_id: str,
         project_id: str,
         chapter_id: str,
+        script_text: str | None = None,
         script_division: dict,
         consistency: dict | None,
         refresh_cache: bool,

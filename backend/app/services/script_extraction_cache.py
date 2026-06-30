@@ -17,12 +17,14 @@ def build_script_extract_cache_key(
     *,
     project_id: str,
     chapter_id: str,
+    script_text: str | None = None,
     script_division: dict[str, Any],
     consistency: dict[str, Any] | None,
 ) -> str:
     payload = {
         "project_id": project_id,
         "chapter_id": chapter_id,
+        "script_text": script_text or "",
         "script_division": script_division,
         "consistency": consistency or {},
     }

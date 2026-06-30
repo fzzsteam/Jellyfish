@@ -279,6 +279,12 @@ export function ChaptersTab() {
     }
     setChapterDivisionActionId(record.id)
     try {
+      const freshQuote = await divideQuote.refreshNow()
+      const quoteToken = freshQuote?.quote_token ?? null
+      if (!freshQuote?.sufficient || !quoteToken) {
+        message.warning('积分试算已刷新，请确认积分充足后再提交')
+        return
+      }
       await executeAsyncTaskCreate({
         request: () =>
           ScriptProcessingService.divideScriptAsyncApiV1ScriptProcessingDivideAsyncPost({
@@ -286,7 +292,7 @@ export function ChaptersTab() {
               chapter_id: record.id,
               script_text: scriptText,
               write_to_db: true,
-              quote_token: divideQuote.quoteToken,
+              quote_token: quoteToken,
             },
           }),
         trackTaskData: (data) => {

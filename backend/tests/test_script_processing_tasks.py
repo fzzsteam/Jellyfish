@@ -12,6 +12,9 @@ from app.core.task_manager import DeliveryMode, SqlAlchemyTaskStore
 from app.core.task_manager.types import TaskStatus
 from app.models.task import GenerationTask, GenerationTaskStatus
 from app.models.task_links import GenerationTaskLink
+from app.models.studio import Chapter, Project
+from app.schemas.skills.script_processing import StudioScriptExtractionDraft, StudioShotDraft
+from app.services.script_extraction_cache import build_script_extract_cache_key, clear_script_extract_cache, set_cached_script_extract
 from app.services.script_processing_worker import run_extract_task_sync
 from app.services.script_processing_tasks import (
     CHARACTER_PORTRAIT_ANALYSIS_RELATION_TYPE,
@@ -175,6 +178,7 @@ async def test_create_extract_task_creates_task_and_link() -> None:
             user_id="test-user",
             project_id="project-1",
             chapter_id="chapter-1",
+            script_text="完整章节原文",
             script_division={"shots": []},
             consistency=None,
             refresh_cache=False,
@@ -187,6 +191,7 @@ async def test_create_extract_task_creates_task_and_link() -> None:
 
         task = await db.get(GenerationTask, result.task_id)
         assert task is not None
+        assert task.payload["run_args"]["script_text"] == "完整章节原文"
 
         link = (
             await db.execute(
@@ -200,6 +205,168 @@ async def test_create_extract_task_creates_task_and_link() -> None:
         assert link is not None
 
     await engine.dispose()
+
+
+def test_generate_extraction_result_falls_back_to_chapter_script_text(monkeypatch) -> None:
+    engine = create_engine("sqlite:///:memory:", future=True)
+    SessionLocal = sessionmaker(engine, class_=Session, expire_on_commit=False)
+
+    import app.models.studio  # noqa: F401
+
+    Base.metadata.create_all(engine)
+    db = SessionLocal()
+    try:
+        db.add(
+            Project(
+                id="project-1",
+                name="测试项目",
+                description="",
+                style="真人古装",
+                seed=0,
+                user_id="test-user",
+            )
+        )
+        db.add(
+            Chapter(
+                id="chapter-1",
+                project_id="project-1",
+                index=1,
+                title="第一章",
+                summary="",
+                raw_text="原始章节文本",
+                condensed_text="朝云端茶入室，苏东坡颔首。",
+            )
+        )
+        db.flush()
+
+        captured: dict[str, str] = {}
+
+        class _FakeAgent:
+            def __init__(self, _llm) -> None:
+                pass
+
+            def extract(self, **kwargs):
+                captured["script_text"] = kwargs["script_text"]
+                return _FakeDraft({"shots": []})
+
+        monkeypatch.setattr("app.services.script_processing_worker.ElementExtractorAgent", _FakeAgent)
+        monkeypatch.setattr("app.services.script_processing_worker.build_default_text_llm_sync", lambda *_a, **_kw: object())
+
+        from app.services.script_processing_worker import generate_extraction_result
+
+        generate_extraction_result(
+            db=db,
+            user_id="test-user",
+            project_id="project-1",
+            chapter_id="chapter-1",
+            script_text="",
+            script_division={"shots": [{"index": 1, "script_excerpt": "摘要"}], "total_shots": 1},
+            consistency=None,
+            refresh_cache=True,
+        )
+
+        assert captured["script_text"] == "朝云端茶入室，苏东坡颔首。"
+    finally:
+        db.close()
+        engine.dispose()
+
+
+def test_generate_extraction_result_ignores_empty_cached_draft(monkeypatch) -> None:
+    engine = create_engine("sqlite:///:memory:", future=True)
+    SessionLocal = sessionmaker(engine, class_=Session, expire_on_commit=False)
+
+    import app.models.studio  # noqa: F401
+
+    Base.metadata.create_all(engine)
+    clear_script_extract_cache()
+    db = SessionLocal()
+    try:
+        db.add(
+            Project(
+                id="project-1",
+                name="测试项目",
+                description="",
+                style="真人古装",
+                seed=0,
+                user_id="test-user",
+            )
+        )
+        db.add(
+            Chapter(
+                id="chapter-1",
+                project_id="project-1",
+                index=1,
+                title="第一章",
+                summary="",
+                raw_text="朝云端茶入室，苏东坡颔首。",
+                condensed_text="",
+            )
+        )
+        db.flush()
+
+        script_division = {"shots": [{"index": 1, "script_excerpt": "朝云端茶入室。"}], "total_shots": 1}
+        cache_key = build_script_extract_cache_key(
+            project_id="project-1",
+            chapter_id="chapter-1",
+            script_text="朝云端茶入室，苏东坡颔首。",
+            script_division=script_division,
+            consistency=None,
+        )
+        set_cached_script_extract(
+            cache_key,
+            StudioScriptExtractionDraft(
+                project_id="project-1",
+                chapter_id="chapter-1",
+                script_text="朝云端茶入室，苏东坡颔首。",
+                shots=[],
+            ),
+        )
+
+        calls = {"extract": 0}
+
+        class _FakeAgent:
+            def __init__(self, _llm) -> None:
+                pass
+
+            def extract(self, **_kwargs):
+                calls["extract"] += 1
+                return StudioScriptExtractionDraft(
+                    project_id="project-1",
+                    chapter_id="chapter-1",
+                    script_text="朝云端茶入室，苏东坡颔首。",
+                    shots=[
+                        StudioShotDraft(
+                            index=1,
+                            title="朝云端茶",
+                            script_excerpt="朝云端茶入室。",
+                            character_names=["朝云"],
+                        )
+                    ],
+                )
+
+        monkeypatch.setattr("app.services.script_processing_worker.ElementExtractorAgent", _FakeAgent)
+        monkeypatch.setattr("app.services.script_processing_worker.build_default_text_llm_sync", lambda *_a, **_kw: object())
+
+        from app.services.script_processing_worker import generate_extraction_result
+
+        draft, from_cache = generate_extraction_result(
+            db=db,
+            user_id="test-user",
+            project_id="project-1",
+            chapter_id="chapter-1",
+            script_text="",
+            script_division=script_division,
+            consistency=None,
+            refresh_cache=False,
+        )
+
+        assert from_cache is False
+        assert calls["extract"] == 1
+        assert draft.shots[0].character_names == ["朝云"]
+    finally:
+        clear_script_extract_cache()
+        db.close()
+        engine.dispose()
 
 
 @pytest.mark.asyncio

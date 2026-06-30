@@ -71,6 +71,7 @@ class ExtractResultGenerator(AbstractLLMResultGenerator):
             user_id=user_id,
             project_id=str(run_args.get("project_id") or ""),
             chapter_id=str(run_args.get("chapter_id") or ""),
+            script_text=str(run_args.get("script_text") or ""),
             script_division=dict(run_args.get("script_division") or {}),
             consistency=dict(run_args.get("consistency") or {}) if run_args.get("consistency") else None,
             refresh_cache=bool(run_args.get("refresh_cache")),
@@ -171,8 +172,10 @@ class DivideTaskExecutor(AbstractWorkerTaskExecutor):
         if not chapter_id:
             raise HTTPException(status_code=400, detail="chapter_id is required for write_to_db=true")
         apply_division_result(ctx.db, chapter_id=chapter_id, result=result)
+        script_text = str(run_args.get("script_text") or "")
         summary = apply_auto_extraction_after_division(
             ctx.db, user_id=ctx.task.user_id, chapter_id=chapter_id, result=result,
+            script_text=script_text,
             cascade_root_billing_id=ctx.task.billing_id,
         )
         self._pending_image_task_ids = summary.image_task_ids if summary is not None else []
@@ -313,13 +316,21 @@ def generate_extraction_result(
     user_id: str,
     project_id: str,
     chapter_id: str,
+    script_text: str = "",
     script_division: dict[str, Any],
     consistency: dict[str, Any] | None,
     refresh_cache: bool,
 ) -> tuple[Any, bool]:
+    resolved_script_text = _resolve_extraction_script_text(
+        db,
+        chapter_id=chapter_id,
+        script_text=script_text,
+        script_division=script_division,
+    )
     cache_key = build_script_extract_cache_key(
         project_id=project_id,
         chapter_id=chapter_id,
+        script_text=resolved_script_text,
         script_division=script_division,
         consistency=consistency,
     )
@@ -327,8 +338,16 @@ def generate_extraction_result(
     result = None
     from_cache = False
     if not refresh_cache:
-        result = get_cached_script_extract(cache_key)
-        from_cache = result is not None
+        cached_result = get_cached_script_extract(cache_key)
+        if cached_result is not None:
+            if _draft_has_extractable_candidates(cached_result):
+                result = cached_result
+                from_cache = True
+            else:
+                logger.warning(
+                    "script_extract: 忽略空缓存草稿并重新提取 chapter_id=%s",
+                    chapter_id,
+                )
 
     if result is None:
         llm = build_default_text_llm_sync(db, user_id=user_id, thinking=False)
@@ -336,12 +355,55 @@ def generate_extraction_result(
         result = agent.extract(
             project_id=project_id,
             chapter_id=chapter_id,
+            script_text=resolved_script_text,
             script_division_json=json.dumps(script_division, ensure_ascii=False),
             consistency_json=json.dumps(consistency or {}, ensure_ascii=False),
         )
-        set_cached_script_extract(cache_key, result)
+        if _draft_has_extractable_candidates(result):
+            set_cached_script_extract(cache_key, result)
+        else:
+            logger.warning(
+                "script_extract: 本次提取草稿为空，不写入缓存 chapter_id=%s",
+                chapter_id,
+            )
 
     return result, from_cache
+
+
+def _resolve_extraction_script_text(
+    db: Session,
+    *,
+    chapter_id: str,
+    script_text: str,
+    script_division: dict[str, Any],
+) -> str:
+    """为信息提取恢复章节全文，避免自动准备只拿分镜摘要导致资产/对白候选为空。
+
+    一键分镜与异步刷新候选来自不同入口；历史任务或旧前端可能没有在
+    run_args 中携带 ``script_text``。这里优先使用调用方传入的文本，其次从
+    Chapter.condensed_text/raw_text 兜底，最后再拼接分镜摘录，确保 LLM 至少能看到
+    可提取的上下文。
+    """
+
+    text = (script_text or "").strip()
+    if text:
+        return text
+
+    if chapter_id:
+        chapter = db.get(Chapter, chapter_id)
+        if chapter is not None:
+            chapter_text = (chapter.condensed_text or chapter.raw_text or "").strip()
+            if chapter_text:
+                return chapter_text
+
+    excerpts: list[str] = []
+    for shot in list((script_division or {}).get("shots") or []):
+        if not isinstance(shot, dict):
+            continue
+        excerpt = str(shot.get("script_excerpt") or "").strip()
+        if excerpt:
+            excerpts.append(excerpt)
+    return "\n".join(excerpts)
 
 
 def apply_extraction_result(
@@ -357,12 +419,29 @@ def apply_extraction_result(
     apply_shot_semantic_defaults_from_draft_sync(db, chapter_id=chapter_id, draft=draft)
 
 
+def _draft_has_extractable_candidates(draft: Any) -> bool:
+    """判断提取草稿是否真的包含可落库的资产或对白候选。
+
+    自动分镜后的二次提取如果返回整章空结果，通常表示模型输出格式漂移或提取失败。
+    此时不应调用候选同步逻辑，否则每个镜头会被写入 last_extracted_at 并显示为“已提取无结果”。
+    """
+
+    for shot in list(getattr(draft, "shots", []) or []):
+        if str(getattr(shot, "scene_name", "") or "").strip():
+            return True
+        for attr in ("character_names", "prop_names", "costume_names", "dialogue_lines"):
+            if list(getattr(shot, attr, []) or []):
+                return True
+    return False
+
+
 def apply_auto_extraction_after_division(
     db: Session,
     *,
     user_id: str,
     chapter_id: str,
     result: ScriptDivisionResult,
+    script_text: str = "",
     cascade_root_billing_id: str | None = None,
 ) -> AutoPreparationSummary:
     """在分镜拆分写库后，串行提取每个镜头的资产/对白并执行自动准备。返回自动准备摘要。
@@ -444,6 +523,7 @@ def apply_auto_extraction_after_division(
             user_id=user_id,
             project_id=chapter.project_id,
             chapter_id=chapter_id,
+            script_text=script_text,
             script_division=result.model_dump(),
             consistency=None,
             refresh_cache=False,
@@ -473,7 +553,13 @@ def apply_auto_extraction_after_division(
                 billing_id, from_cache,
             )
 
-    apply_extraction_result(db, chapter_id=chapter_id, draft=draft)
+    if _draft_has_extractable_candidates(draft):
+        apply_extraction_result(db, chapter_id=chapter_id, draft=draft)
+    else:
+        logger.warning(
+            "auto_extract: 提取草稿为空，跳过候选同步，避免误标记已提取 chapter_id=%s",
+            chapter_id,
+        )
     return auto_prepare_chapter_shots_sync(
         db, user_id=user_id, project_id=chapter.project_id, chapter_id=chapter_id,
         cascade_root_billing_id=cascade_root_billing_id,

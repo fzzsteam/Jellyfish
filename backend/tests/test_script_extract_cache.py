@@ -29,12 +29,19 @@ class _FakeDB:
     def __init__(self) -> None:
         self.committed = False
 
+    async def get(self, *_args, **_kwargs):
+        return None
+
     async def commit(self) -> None:
         self.committed = True
 
 
 async def _async_noop(*_args, **_kwargs) -> None:
     return None
+
+
+async def _async_value(value):
+    return value
 
 
 async def _passthrough_billed_operation(_db, *, user_id, quote_token, business_type, operation):
@@ -71,6 +78,7 @@ async def test_extract_script_uses_cache_by_default(monkeypatch):
     monkeypatch.setattr(route, "apply_shot_semantic_defaults_from_draft", _async_noop)
     # 绕过计费基础设施：直接执行 operation。
     monkeypatch.setattr(route, "run_billed_text_operation", _passthrough_billed_operation)
+    monkeypatch.setattr(route, "_build_request_text_llm", lambda *args, **kwargs: _async_value(object()))
 
     request = route.ScriptExtractRequest(
         project_id="project-1",
@@ -81,8 +89,8 @@ async def test_extract_script_uses_cache_by_default(monkeypatch):
         quote_token="qt-test",
     )
 
-    first = await route.extract_script(request, llm=None, db=db, current_user=_FakeUser())
-    second = await route.extract_script(request, llm=None, db=db, current_user=_FakeUser())
+    first = await route.extract_script(request, db=db, current_user=_FakeUser())
+    second = await route.extract_script(request, db=db, current_user=_FakeUser())
 
     assert first.data is not None
     assert second.data is not None
@@ -110,6 +118,7 @@ async def test_extract_script_refresh_cache_forces_recompute(monkeypatch):
     monkeypatch.setattr(route, "sync_shot_extracted_dialogue_candidates_from_draft", _async_noop)
     monkeypatch.setattr(route, "apply_shot_semantic_defaults_from_draft", _async_noop)
     monkeypatch.setattr(route, "run_billed_text_operation", _passthrough_billed_operation)
+    monkeypatch.setattr(route, "_build_request_text_llm", lambda *args, **kwargs: _async_value(object()))
 
     request = route.ScriptExtractRequest(
         project_id="project-1",
@@ -121,8 +130,8 @@ async def test_extract_script_refresh_cache_forces_recompute(monkeypatch):
     )
     refresh_request = request.model_copy(update={"refresh_cache": True})
 
-    await route.extract_script(request, llm=None, db=db, current_user=_FakeUser())
-    refreshed = await route.extract_script(refresh_request, llm=None, db=db, current_user=_FakeUser())
+    await route.extract_script(request, db=db, current_user=_FakeUser())
+    refreshed = await route.extract_script(refresh_request, db=db, current_user=_FakeUser())
 
     assert refreshed.meta == {"from_cache": False}
     assert len(calls) == 2
@@ -139,6 +148,25 @@ def test_build_script_extract_cache_key_changes_when_payload_changes():
         project_id="project-1",
         chapter_id="chapter-1",
         script_division={"total_shots": 2, "shots": [{"index": 1}, {"index": 2}]},
+        consistency=None,
+    )
+
+    assert key1 != key2
+
+
+def test_build_script_extract_cache_key_changes_when_script_text_changes():
+    key1 = build_script_extract_cache_key(
+        project_id="project-1",
+        chapter_id="chapter-1",
+        script_text="朝云端茶入室。",
+        script_division={"total_shots": 1, "shots": [{"index": 1}]},
+        consistency=None,
+    )
+    key2 = build_script_extract_cache_key(
+        project_id="project-1",
+        chapter_id="chapter-1",
+        script_text="苏东坡接过茶盏。",
+        script_division={"total_shots": 1, "shots": [{"index": 1}]},
         consistency=None,
     )
 

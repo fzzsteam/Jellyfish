@@ -2272,9 +2272,17 @@ const ChapterStudio: React.FC = () => {
               selectedCount={selectedShotIds.length}
               batchVideoReadinessLoading={batchVideoReadinessLoading}
               generating={generating}
+              batchDownloading={batchDownloading}
+              batchDownloadDisabled={generatedVideos.length === 0}
+              batchDownloadText={
+                batchDownloading && batchDownloadProgress
+                  ? `下载中 ${batchDownloadProgress.current}/${batchDownloadProgress.total}`
+                  : '批量下载'
+              }
               maintenanceMenuItems={batchMaintenanceMenuItems}
               onBatchInspectVideoReadiness={() => void batchInspectVideoReadiness()}
               onBatchGenerate={() => batchMenuItems.find((item) => item.key === 'generate')?.onClick?.()}
+              onBatchDownload={handleBatchDownloadAll}
             />
           )}
 
@@ -2465,16 +2473,6 @@ const ChapterStudio: React.FC = () => {
             }
             extra={
               <div className="flex items-center gap-2">
-                <Button
-                  size="small"
-                  loading={batchDownloading}
-                  disabled={generatedVideos.length === 0}
-                  onClick={handleBatchDownloadAll}
-                >
-                  {batchDownloading && batchDownloadProgress
-                    ? `下载中 ${batchDownloadProgress.current}/${batchDownloadProgress.total}`
-                    : '一键全部下载'}
-                </Button>
                 <Tag className="m-0" color={generatedVideos.length > 0 ? 'blue' : 'default'}>
                   已生成 {generatedVideos.length}
                 </Tag>

@@ -41,6 +41,7 @@ from app.models.studio import (
     ProjectVisualStyle,
     Shot,
     ShotDetail,
+    ShotStatus,
 )
 from app.models.task import GenerationTask, GenerationTaskStatus
 from app.models.user import User
@@ -510,6 +511,76 @@ def test_auto_extract_cache_hit_unfreezes(monkeypatch) -> None:
                 assert freezes[0].billing_id == unfreezes[0].billing_id
 
         asyncio.run(_check())
+    finally:
+        db.close()
+        sync_engine.dispose()
+
+
+def test_auto_extract_empty_draft_does_not_mark_shot_extracted(monkeypatch) -> None:
+    """整章空提取草稿不应写 last_extracted_at，避免前端误显示“已提取无结果”。"""
+    import asyncio
+    from app.services import script_processing_worker as worker
+    from app.schemas.skills.script_processing import ScriptDivisionResult, ShotDivision, StudioScriptExtractionDraft
+
+    async_engine, async_session_local, sync_engine, sync_session_local = _build_engines()
+    asyncio.run(_seed_async(async_session_local))
+    _patch_async_session_maker(monkeypatch, async_session_local)
+
+    db = sync_session_local()
+    try:
+        _seed_sync(db)
+        db.add(
+            Model(
+                id="m_text",
+                name="text-model",
+                category=ModelCategoryKey.text,
+                provider_id="p1",
+                unit_points=TEXT_UNIT_POINTS,
+            )
+        )
+        db.add(
+            Shot(
+                id="shot-empty",
+                chapter_id="ch-1",
+                index=1,
+                title="空提取镜头",
+                script_excerpt="朝云端茶入室，苏东坡颔首。",
+                status=ShotStatus.pending,
+            )
+        )
+        db.flush()
+
+        draft = StudioScriptExtractionDraft(
+            project_id="proj-1",
+            chapter_id="ch-1",
+            script_text="朝云端茶入室，苏东坡颔首。",
+            shots=[],
+        )
+        monkeypatch.setattr(worker, "generate_extraction_result", lambda **kw: (draft, True))
+
+        result = ScriptDivisionResult(
+            shots=[
+                ShotDivision(
+                    index=1,
+                    start_line=1,
+                    end_line=1,
+                    script_excerpt="朝云端茶入室，苏东坡颔首。",
+                    shot_name="朝云端茶",
+                )
+            ],
+            total_shots=1,
+        )
+        worker.apply_auto_extraction_after_division(
+            db,
+            user_id=USER_ID,
+            chapter_id="ch-1",
+            result=result,
+        )
+
+        shot = db.get(Shot, "shot-empty")
+        assert shot is not None
+        assert shot.last_extracted_at is None
+        assert shot.status == ShotStatus.pending
     finally:
         db.close()
         sync_engine.dispose()

@@ -10,7 +10,7 @@ from app.chains.agents.base import AgentBase
 from app.schemas.skills.script_processing import StudioScriptExtractionDraft
 
 _SCRIPT_EXTRACTOR_SYSTEM_PROMPT = """\
-你是\"Studio 信息提取员\"。你的任务是：基于分镜结果（以及可选的一致性检查输出），输出可直接导入 Studio 的草稿结构 StudioScriptExtractionDraft（注意：ID 由导入 API 生成，因此这里全部使用 name 做引用键）。
+你是\"Studio 信息提取员\"。你的任务是：基于章节原文、分镜结果（以及可选的一致性检查输出），输出可直接导入 Studio 的草稿结构 StudioScriptExtractionDraft（注意：ID 由导入 API 生成，因此这里全部使用 name 做引用键）。
 
 输出 StudioScriptExtractionDraft：
 - project_id（必填）
@@ -46,6 +46,7 @@ _SCRIPT_EXTRACTOR_SYSTEM_PROMPT = """\
 输入：
 - project_id
 - chapter_id
+- script_text（章节原文；用于补充分镜摘要中缺失的角色、场景、道具和对白）
 - script_division_json（ScriptDivisionResult）
 - consistency_json（可选）
 
@@ -53,10 +54,11 @@ _SCRIPT_EXTRACTOR_SYSTEM_PROMPT = """\
 """
 
 SCRIPT_EXTRACTOR_PROMPT = PromptTemplate(
-    input_variables=["project_id", "chapter_id", "script_division_json", "consistency_json"],
+    input_variables=["project_id", "chapter_id", "script_text", "script_division_json", "consistency_json"],
     template=(
         "## project_id\n{project_id}\n\n"
         "## chapter_id\n{chapter_id}\n\n"
+        "## 章节原文\n{script_text}\n\n"
         "## 一致性检查（可选）\n{consistency_json}\n\n"
         "## 分镜结果\n{script_division_json}\n\n"
         "## 输出\n"
@@ -79,12 +81,38 @@ class ElementExtractorAgent(AgentBase[StudioScriptExtractionDraft]):
     def output_model(self) -> type[StudioScriptExtractionDraft]:
         return StudioScriptExtractionDraft
 
+    def _unwrap_model_payload(self, data: dict[str, Any]) -> dict[str, Any]:
+        """兼容 LLM 把结果包在模型名或通用 data/result 字段下的返回形状。"""
+
+        for key in ("StudioScriptExtractionDraft", "studio_script_extraction_draft", "data", "result", "draft"):
+            value = data.get(key)
+            if isinstance(value, dict):
+                return dict(value)
+        return data
+
+    def _normalize_shot(self, shot: Any, index: int) -> dict[str, Any]:
+        """把常见旧字段名归一成 `StudioShotDraft` 需要的字段。"""
+
+        if not isinstance(shot, dict):
+            return {"index": index, "title": "", "script_excerpt": str(shot or "")}
+        normalized = dict(shot)
+        if "index" not in normalized:
+            normalized["index"] = normalized.pop("shot_index", index)
+        if "title" not in normalized:
+            normalized["title"] = normalized.pop("shot_name", normalized.pop("shot_title", ""))
+        normalized.setdefault("script_excerpt", "")
+        for key in ("character_names", "prop_names", "costume_names", "dialogue_lines", "actions"):
+            if not isinstance(normalized.get(key), list):
+                normalized[key] = []
+        return normalized
+
     def _normalize(self, data: dict[str, Any]) -> dict[str, Any]:
-        data = dict(data)
+        data = self._unwrap_model_payload(dict(data))
         data.setdefault("project_id", "")
         data.setdefault("chapter_id", "")
         data.setdefault("script_text", "")
         for k in ("characters", "scenes", "props", "costumes", "shots"):
             if k not in data or not isinstance(data[k], list):
                 data[k] = []
+        data["shots"] = [self._normalize_shot(shot, idx + 1) for idx, shot in enumerate(data["shots"])]
         return data

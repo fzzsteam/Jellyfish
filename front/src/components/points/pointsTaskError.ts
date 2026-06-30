@@ -41,6 +41,10 @@ export function makePointsAwareGetErrorMessage(
         refresh()
         return '积分价格已更新，请重新确认'
       }
+      if (code === 'POINTS_QUOTE_INVALID') {
+        refresh()
+        return '积分试算已过期，请重新确认后再提交'
+      }
       if (code === 'INSUFFICIENT_POINTS') {
         refresh()
         return '可用积分不足，请充值后再试'

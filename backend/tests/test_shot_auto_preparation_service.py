@@ -836,6 +836,7 @@ def test_divide_task_apply_runs_extraction_and_auto_preparation(monkeypatch) -> 
         def _fake_generate_extraction_result(**kwargs):  # noqa: ANN003
             assert kwargs["project_id"] == "project-1"
             assert kwargs["chapter_id"] == "chapter-1"
+            assert kwargs["script_text"] == "小明走进控制室，说准备开始。"
             return draft, False
 
         monkeypatch.setattr(
@@ -845,7 +846,7 @@ def test_divide_task_apply_runs_extraction_and_auto_preparation(monkeypatch) -> 
 
         DivideTaskExecutor().apply_result(
             SimpleNamespace(db=db, task=SimpleNamespace(user_id="test-user", billing_id="divide-billing-1")),
-            {"chapter_id": "chapter-1"},
+            {"chapter_id": "chapter-1", "script_text": "小明走进控制室，说准备开始。"},
             _division_result(),
         )
 

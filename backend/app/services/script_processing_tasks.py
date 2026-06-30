@@ -342,6 +342,7 @@ async def create_extract_task(
     user_id: str,
     project_id: str,
     chapter_id: str,
+    script_text: str | None = None,
     script_division: dict,
     consistency: dict | None,
     refresh_cache: bool,
@@ -366,6 +367,7 @@ async def create_extract_task(
     run_args = {
         "project_id": project_id,
         "chapter_id": chapter_id,
+        "script_text": script_text or "",
         "script_division": script_division,
         "consistency": consistency,
         "refresh_cache": refresh_cache,
