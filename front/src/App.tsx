@@ -19,6 +19,7 @@ import AgentManagement from './pages/aiStudio/agents/AgentManagement'
 import AgentEdit from './pages/aiStudio/agents/AgentEdit.tsx'
 import ModelManagement from './pages/aiStudio/models/ModelManagement'
 import PointsPage from './pages/points/PointsPage'
+import CreationGuidePage from './pages/guide/CreationGuidePage'
 import { ChapterShotsPage } from './pages/aiStudio/shots/ChapterShotsPage'
 import { ChapterShotEditPage } from './pages/aiStudio/shots/ChapterShotEditPage'
 import LoginPage from './pages/auth/LoginPage'
@@ -36,6 +37,7 @@ const App: React.FC = () => {
         <Route path="/login" element={<LoginPage />} />
         <Route element={<PrivateRoute />}>
 
+        <Route path="/guide" element={<CreationGuidePage />} />
         <Route path="/" element={<MainLayout />}>
           <Route index element={<Navigate to="/projects" replace />} />
           <Route path="projects" element={<ProjectLobby />} />
@@ -73,4 +75,3 @@ const App: React.FC = () => {
 }
 
 export default App
-

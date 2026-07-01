@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Layout, Menu, theme, Dropdown, Space, Avatar } from 'antd'
+import { Layout, Menu, theme, Dropdown, Space, Avatar, Button } from 'antd'
 import {
   UserOutlined,
   FolderOutlined,
@@ -9,6 +9,7 @@ import {
   TeamOutlined,
   WalletOutlined,
   LoadingOutlined,
+  QuestionCircleOutlined,
 } from '@ant-design/icons'
 import { PointsBadge } from '../components/points/PointsBadge'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
@@ -76,7 +77,7 @@ const MainLayout: React.FC = () => {
     [pathSegments],
   )
 
-  // 当前激活的导航项
+  // 当前激活的导航项。
   const activeNav = useMemo(() => {
     if (!urlProjectId) return 'home'
     if (!urlChapterId) return 'workbench'
@@ -358,8 +359,27 @@ const MainLayout: React.FC = () => {
             })}
           </div>
 
-          {/* 用户信息 */}
-          <Space size="middle" className="px-4 shrink-0">
+          {/* 全局帮助入口与用户信息 */}
+          <Space size={8} className="px-4 shrink-0">
+            <Button
+              type="text"
+              icon={<QuestionCircleOutlined />}
+              href="/guide"
+              target="_blank"
+              rel="noreferrer"
+              className="hidden sm:inline-flex items-center"
+            >
+              操作指引
+            </Button>
+            <Button
+              type="text"
+              icon={<QuestionCircleOutlined />}
+              href="/guide"
+              target="_blank"
+              rel="noreferrer"
+              className="sm:hidden"
+              aria-label="操作指引"
+            />
             <Dropdown
               menu={{ items: userMenuItems }}
               placement="bottomRight"
