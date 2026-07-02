@@ -508,7 +508,8 @@ export function ChapterShotEditPage() {
         const providerNameById = new Map(providers.map((provider) => [provider.id, provider.name]))
         const items = ((modelsRes.data?.items ?? []) as ModelRead[])
           .filter((model) => model.category === 'video')
-          .filter((model) => activeProviderIds.size === 0 || activeProviderIds.has(model.provider_id))
+          // 视频模型必须挂在明确可用的供应商下；供应商列表为空时不放行，避免误选已禁用供应商的模型。
+          .filter((model) => activeProviderIds.has(model.provider_id))
           .map((model) => ({
             ...model,
             provider_name: providerNameById.get(model.provider_id) ?? model.provider_id,
