@@ -1017,6 +1017,10 @@ export function ChapterShotEditPage() {
 
   const goShot = (id: string) => {
     if (!projectId || !chapterId || id === shotId) return
+    videoDiagnosticsRequestSeqRef.current += 1
+    setVideoDiagnosticsOpen(false)
+    setVideoDiagnosticsLoading(false)
+    setVideoDiagnosticsReadiness(null)
     setSelectedShotIds([id])
     navigate(getChapterShotDetailPath(projectId, chapterId, id, editorTabKey))
   }
