@@ -34,7 +34,7 @@ const ChapterStudioRedirect = () => {
 
         const firstShot = res.data?.items?.[0]
         const target = firstShot
-          ? getChapterShotDetailPath(projectId, chapterId, firstShot.id)
+          ? getChapterShotDetailPath(projectId, chapterId, firstShot.id, 'generate')
           : getChapterShotsPath(projectId, chapterId)
         navigate(target, { replace: true })
       } catch {

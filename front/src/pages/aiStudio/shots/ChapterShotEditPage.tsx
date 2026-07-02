@@ -12,6 +12,7 @@ import type {
   ShotExtractedDialogueCandidateRead,
   ShotPreparationStateRead,
   ShotRead,
+  ShotVideoReadinessRead,
 } from '../../../services/generated'
 import {
   ScriptProcessingService,
@@ -23,14 +24,21 @@ import {
   StudioShotsService,
 } from '../../../services/generated'
 import { executeAsyncTaskCreate, executeTaskCancel, notifyExistingTask } from '../components/taskActionHelpers'
-import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
-import { getChapterShotEditPath, getChapterShotsPath, getChapterStudioPath } from '../project/ProjectWorkbench/routes'
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import {
+  getChapterShotEditPath,
+  getChapterShotsPath,
+  type ShotDetailTabKey,
+} from '../project/ProjectWorkbench/routes'
 import { DisplayImageCard } from '../assets/components/DisplayImageCard'
 import { AssetPickerDrawer } from './components/AssetPickerDrawer'
 import { ChapterShotAssetConfirmation } from './components/ChapterShotAssetConfirmation'
 import { ChapterShotBasicInfoSection } from './components/ChapterShotBasicInfoSection'
 import { ChapterShotDialogueConfirmation } from './components/ChapterShotDialogueConfirmation'
 import { ChapterShotPreparationGuide } from './components/ChapterShotPreparationGuide'
+import { ShotVideoGenerationTab } from './components/ShotVideoGenerationTab'
+import { ShotVideoResultsTab } from './components/ShotVideoResultsTab'
+import { VideoDiagnosticsDrawer } from './components/VideoDiagnosticsDrawer'
 import { useRelationTaskNotification } from '../components/taskNotificationHelpers'
 import { useTaskPageContext } from '../components/taskPageContext'
 import { createTaskSettledReloader } from '../components/taskResultHelpers'
@@ -70,6 +78,12 @@ type ShotAssetCreatedAndLinkedMessage = {
   shotId?: string
   assetId?: string | null
   assetName?: string
+}
+
+const SHOT_DETAIL_TAB_KEYS: readonly ShotDetailTabKey[] = ['basic', 'confirm', 'generate', 'results']
+
+function isShotDetailTabKey(value: string | null): value is ShotDetailTabKey {
+  return !!value && SHOT_DETAIL_TAB_KEYS.includes(value as ShotDetailTabKey)
 }
 
 const DEFAULT_EXTRACTION_SUMMARY: ShotExtractionSummaryRead = {
@@ -190,6 +204,7 @@ function overviewTypeToAssetKind(kind: ShotAssetOverviewItem['type']): AssetKind
 
 export function ChapterShotEditPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { projectId, chapterId, shotId } = useParams<{
     projectId: string
     chapterId: string
@@ -268,11 +283,16 @@ export function ChapterShotEditPage() {
   const [dialogAddingKeys, setDialogAddingKeys] = useState<Record<string, boolean>>({})
   const [batchDialogAdding, setBatchDialogAdding] = useState(false)
   const [candidateActionIds, setCandidateActionIds] = useState<Record<number, boolean>>({})
-  const [editorTabKey, setEditorTabKey] = useState<'basic' | 'confirm'>('basic')
+  const [editorTabKey, setEditorTabKey] = useState<ShotDetailTabKey>('basic')
+  const [videoDiagnosticsOpen, setVideoDiagnosticsOpen] = useState(false)
+  const [videoDiagnosticsLoading, setVideoDiagnosticsLoading] = useState(false)
+  const [videoDiagnosticsReadiness, setVideoDiagnosticsReadiness] = useState<ShotVideoReadinessRead | null>(null)
   const [shotListFilter, setShotListFilter] = useState<ShotListFilter>('all')
   const dialogDebounceTimersRef = useRef<Map<number, number>>(new Map())
   const tabAutoInitShotIdRef = useRef<string | null>(null)
-  const editorTabMemoryRef = useRef<Record<string, 'basic' | 'confirm'>>({})
+  const editorTabMemoryRef = useRef<Record<string, ShotDetailTabKey>>({})
+  const urlTabParam = searchParams.get('tab')
+  const explicitUrlTabKey = isShotDetailTabKey(urlTabParam) ? urlTabParam : null
 
   const shotsSorted = useMemo(
     () => [...shots].sort((a, b) => a.index - b.index),
@@ -1296,6 +1316,28 @@ export function ChapterShotEditPage() {
     [applyPreparationState, loadPreparationState, shotId],
   )
 
+  /**
+   * 打开视频生成诊断抽屉，并按首帧参考模式读取当前镜头准备度。
+   * 诊断只用于展示缺口，不在本任务内提交视频生成。
+   */
+  const openVideoDiagnostics = useCallback(async () => {
+    if (!shotId) return
+    setVideoDiagnosticsOpen(true)
+    setVideoDiagnosticsLoading(true)
+    try {
+      const res = await StudioShotsService.getShotVideoReadinessApiApiV1StudioShotsShotIdVideoReadinessGet({
+        shotId,
+        referenceMode: 'first',
+      })
+      setVideoDiagnosticsReadiness(res.data ?? null)
+    } catch {
+      message.error('加载生成诊断失败')
+      setVideoDiagnosticsReadiness(null)
+    } finally {
+      setVideoDiagnosticsLoading(false)
+    }
+  }, [shotId])
+
   const prefetchExistenceForNewAssets = useCallback(
     async (kind: AssetKind, items: AssetVM[]) => {
       if (!projectId || !shotId) return
@@ -1375,15 +1417,12 @@ export function ChapterShotEditPage() {
   const currentShotActionable = shot ? isActionablePreparationShot(shot) || !basicInfoReady || !actionBeatsReady : false
   const extractionSummary = getShotExtractionSummary(shot)
   const extractionStateMeta = getExtractionStateMeta(shot, pendingConfirmCount)
-  const goToStudio = () => navigate(getChapterStudioPath(projectId, chapterId), {
-    state: { focusShotId: shotId, selectedShotIds: shotId ? [shotId] : [] },
-  })
-  const nextStepTitle = statusReady ? '下一步：进入分镜工作室继续生成' : '下一步：先完成镜头准备，再进入工作室'
+  const nextStepTitle = statusReady ? '下一步：生成视频' : '下一步：先完成镜头准备'
   const nextStepDescription = statusReady
-    ? '当前镜头的信息提取确认已经完成，接下来更适合去分镜工作室继续关键帧、参考图、视频提示词和视频生成。'
+    ? '当前镜头的信息提取确认已经完成，可以继续配置关键帧、参考图、视频参数和视频生成。'
     : actionBeatsReady
-      ? '当前镜头仍有提取候选、对白或镜头基础信息待确认。先在这里完成准备，准备完成后再进入分镜工作室继续生成。'
-      : '当前镜头的动作拍点还没有确认。建议先补齐动作序列，再进入工作室继续关键帧和视频生成。'
+      ? '当前镜头仍有提取候选、对白或镜头基础信息待确认。先在这里完成准备，准备完成后再继续生成视频。'
+      : '当前镜头的动作拍点还没有确认。建议先补齐动作序列，再继续关键帧和视频生成。'
 
   const checklistItems = [
     {
@@ -1453,6 +1492,13 @@ export function ChapterShotEditPage() {
   useEffect(() => {
     if (!shotId) return
     if (loading || !shot) return
+    if (urlTabParam !== null) {
+      const nextTab = explicitUrlTabKey ?? 'basic'
+      if (editorTabKey !== nextTab) setEditorTabKey(nextTab)
+      editorTabMemoryRef.current[shotId] = nextTab
+      tabAutoInitShotIdRef.current = shotId
+      return
+    }
     const rememberedTab = editorTabMemoryRef.current[shotId]
     if (rememberedTab) {
       if (editorTabKey !== rememberedTab) setEditorTabKey(rememberedTab)
@@ -1462,19 +1508,25 @@ export function ChapterShotEditPage() {
     if (tabAutoInitShotIdRef.current === shotId) return
     setEditorTabKey(pendingConfirmCount > 0 ? 'confirm' : 'basic')
     tabAutoInitShotIdRef.current = shotId
-  }, [editorTabKey, loading, pendingConfirmCount, shot, shotId])
+  }, [editorTabKey, explicitUrlTabKey, loading, pendingConfirmCount, shot, shotId, urlTabParam])
 
   const handleEditorTabChange = useCallback(
     (key: string) => {
-      const nextKey = key as 'basic' | 'confirm'
+      const nextKey = isShotDetailTabKey(key) ? key : 'basic'
       setEditorTabKey(nextKey)
       if (shotId) {
         editorTabMemoryRef.current[shotId] = nextKey
         tabAutoInitShotIdRef.current = shotId
       }
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('tab', nextKey)
+        return next
+      }, { replace: true })
     },
-    [shotId],
+    [setSearchParams, shotId],
   )
+  const goToGenerateTab = () => handleEditorTabChange('generate')
 
   const editorTabItems = [
     {
@@ -1643,6 +1695,39 @@ export function ChapterShotEditPage() {
           />
         </div>
       ),
+    },
+    {
+      key: 'generate',
+      label: (
+        <div className="flex items-center gap-2">
+          <span
+            className="inline-block h-2 w-2 rounded-full"
+            style={{ background: statusReady ? '#22c55e' : '#f59e0b' }}
+          />
+          <span>3 生成视频</span>
+        </div>
+      ),
+      children: (
+        <ShotVideoGenerationTab
+          shot={shot}
+          shotDetail={shotDetail}
+          preparationState={preparationState}
+          onOpenDiagnostics={() => void openVideoDiagnostics()}
+        />
+      ),
+    },
+    {
+      key: 'results',
+      label: (
+        <div className="flex items-center gap-2">
+          <span
+            className="inline-block h-2 w-2 rounded-full"
+            style={{ background: shot?.generated_video_file_id ? '#22c55e' : '#cbd5e1' }}
+          />
+          <span>4 视频结果</span>
+        </div>
+      ),
+      children: <ShotVideoResultsTab shot={shot} />,
     },
   ] as const
 
@@ -1911,7 +1996,7 @@ export function ChapterShotEditPage() {
                       checklistItems={checklistItems}
                       nextStepTitle={nextStepTitle}
                       nextStepDescription={nextStepDescription}
-                      onGoToStudio={goToStudio}
+                      onGoToGenerate={goToGenerateTab}
                     />
                   </div>
                 }
@@ -1936,6 +2021,13 @@ export function ChapterShotEditPage() {
           )}
         </Card>
       </Content>
+
+      <VideoDiagnosticsDrawer
+        open={videoDiagnosticsOpen}
+        loading={videoDiagnosticsLoading}
+        readiness={videoDiagnosticsReadiness}
+        onClose={() => setVideoDiagnosticsOpen(false)}
+      />
 
       <Modal
         title="关联资产"

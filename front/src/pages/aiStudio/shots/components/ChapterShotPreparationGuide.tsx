@@ -14,15 +14,19 @@ type ChapterShotPreparationGuideProps = {
   checklistItems: readonly ChecklistItem[]
   nextStepTitle: string
   nextStepDescription: string
-  onGoToStudio: () => void
+  onGoToGenerate: () => void
 }
 
+/**
+ * 汇总当前镜头准备清单，并提供进入生成视频标签的主入口。
+ * 它只表达准备进度，不承载具体生成配置。
+ */
 export function ChapterShotPreparationGuide({
   statusReady,
   checklistItems,
   nextStepTitle,
   nextStepDescription,
-  onGoToStudio,
+  onGoToGenerate,
 }: ChapterShotPreparationGuideProps) {
   const [expanded, setExpanded] = useState(false)
 
@@ -32,7 +36,7 @@ export function ChapterShotPreparationGuide({
   )
 
   const summaryText = statusReady
-    ? '已完成准备，可进入工作室继续生成。'
+    ? '已完成准备，可继续生成视频。'
     : `还有 ${warningCount} 项待处理，建议先继续完成准备。`
 
   return (
@@ -62,13 +66,13 @@ export function ChapterShotPreparationGuide({
           >
             {expanded ? '收起' : '详情'}
           </Button>
-          <Tooltip title={statusReady ? '进入分镜工作室继续关键帧、图片和视频生成。' : '可以先进入工作室查看视频准备度；如需真正继续生成，建议先完成当前准备项。'}>
+          <Tooltip title={statusReady ? '继续配置关键帧、参考图和视频生成。' : '可以先查看生成配置与诊断；如需真正继续生成，建议先完成当前准备项。'}>
             <Button
               type={statusReady ? 'primary' : 'default'}
               size="small"
-              onClick={onGoToStudio}
+              onClick={onGoToGenerate}
             >
-              进入工作室
+              生成视频
             </Button>
           </Tooltip>
         </div>
@@ -77,7 +81,7 @@ export function ChapterShotPreparationGuide({
       {expanded ? (
         <div className="mt-2 space-y-2 border-t border-slate-200/70 pt-2">
           <div className="rounded-lg border border-slate-200 bg-white/70 px-3 py-2 text-xs text-slate-600">
-            这里负责当前镜头的准备工作：提取并确认资产、对白和基础信息。准备完成后，再进入分镜工作室继续关键帧、图片和视频生成。
+            这里负责当前镜头的准备工作：提取并确认资产、对白和基础信息。准备完成后，再继续关键帧、参考图和视频生成。
           </div>
 
           <div className="flex flex-wrap gap-2">
