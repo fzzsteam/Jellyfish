@@ -215,6 +215,14 @@ export function ChapterShotsPage() {
 
   const selectedShotIds = useMemo(() => selectedRowKeys.map((k) => String(k)), [selectedRowKeys])
 
+  useEffect(() => {
+    const visibleShotIds = new Set(filteredShots.map((shot) => shot.id))
+    setSelectedRowKeys((prev) => {
+      const next = prev.filter((key) => visibleShotIds.has(String(key)))
+      return next.length === prev.length ? prev : next
+    })
+  }, [filteredShots])
+
   const openCreate = useCallback(() => {
     createForm.resetFields()
     setCreateOpen(true)
@@ -745,7 +753,7 @@ export function ChapterShotsPage() {
                   { label: `全部 ${shotFilterCounts.all}`, value: 'all' },
                   { label: `基础待补 ${shotFilterCounts.basic}`, value: 'basic' },
                   { label: `待确认 ${shotFilterCounts.confirm}`, value: 'confirm' },
-                  { label: `可生成 ${shotFilterCounts.generatable}`, value: 'generatable' },
+                  { label: `可进入生成 ${shotFilterCounts.generatable}`, value: 'generatable' },
                   { label: `已有结果 ${shotFilterCounts.result}`, value: 'result' },
                 ]}
               />

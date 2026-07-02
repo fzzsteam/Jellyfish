@@ -26,17 +26,6 @@ export function getShotFlowState(shot: ShotRead, runtime?: ShotRuntimeLike): Sho
   const hasResult = Boolean(shot.generated_video_file_id?.trim())
   const activeTaskCount = runtime?.active_task_count ?? 1
 
-  if (hasResult) {
-    return {
-      key: 'result',
-      tab: 'results',
-      label: '已有结果',
-      buttonLabel: '查看结果',
-      tagColor: 'success',
-      hint: '当前镜头已有生成视频，可查看或下载结果',
-    }
-  }
-
   if (runtime?.has_active_tasks) {
     return {
       key: 'running',
@@ -48,14 +37,25 @@ export function getShotFlowState(shot: ShotRead, runtime?: ShotRuntimeLike): Sho
     }
   }
 
+  if (hasResult) {
+    return {
+      key: 'result',
+      tab: 'results',
+      label: '已有结果',
+      buttonLabel: '查看结果',
+      tagColor: 'success',
+      hint: '当前镜头已有生成视频，可查看或下载结果',
+    }
+  }
+
   if (shot.status === 'ready') {
     return {
       key: 'generatable',
       tab: 'generate',
-      label: '可生成',
-      buttonLabel: '生成视频',
+      label: '可进入生成',
+      buttonLabel: '进入生成配置',
       tagColor: 'blue',
-      hint: '信息提取已确认，可进入生成视频步骤',
+      hint: '信息提取已确认，可进入生成配置；具体视频条件以生成页诊断为准',
     }
   }
 
