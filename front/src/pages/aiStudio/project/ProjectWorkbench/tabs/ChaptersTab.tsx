@@ -3,7 +3,6 @@ import { Card, Button, Tag, Space, Table, Empty, Modal, Input, Dropdown, message
 import type { MenuProps, TableColumnsType } from 'antd'
 import {
   EditOutlined,
-  FileSearchOutlined,
   LoadingOutlined,
   MoreOutlined,
   PlusOutlined,
@@ -14,10 +13,9 @@ import {
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ScriptProcessingService, StudioChaptersService } from '../../../../../services/generated'
 import { chapterStatusMap } from '../constants'
-import { getChapterShotsPath, getChapterStudioPath } from '../routes'
+import { getChapterShotsPath } from '../routes'
 import { useChapters, newId, type Chapter } from '../hooks/useProjectData'
 import { ChapterRawTextEditorModal } from '../../../chapter/components/ChapterRawTextEditorModal'
-import { ensureHasShotsBeforeShooting } from '../ensureHasShotsBeforeShooting'
 import { getChapterPreparationState } from '../chapterPreparation'
 import { loadChapterFlowStats, type ChapterFlowStats } from '../projectFlowStats'
 import { executeAsyncTaskCreate, executeTaskCancel } from '../../../components/taskActionHelpers'
@@ -260,15 +258,10 @@ export function ChaptersTab() {
       return
     }
     if (state.key === 'prepare_shots') {
-      navigate(getChapterStudioPath(projectId, record.id))
+      navigate(getChapterShotsPath(projectId, record.id))
       return
     }
-    void ensureHasShotsBeforeShooting({
-      projectId,
-      chapterId: record.id,
-      storyboardCount: record.storyboardCount,
-      navigate,
-    })
+    navigate(getChapterShotsPath(projectId, record.id))
   }
 
   const handleDivideAsync = async (record: Chapter) => {
@@ -381,7 +374,6 @@ export function ChaptersTab() {
 
   const buildActionMenuItems = (record: Chapter): MenuProps['items'] => {
     if (!projectId) return []
-    const state = getChapterPreparationState(record)
     const activeTask = chapterDivisionTaskMap[record.id]
     return [
       {
@@ -390,14 +382,6 @@ export function ChaptersTab() {
         icon: <ScissorOutlined />,
         onClick: () => navigate(getChapterShotsPath(projectId, record.id)),
       },
-      state.key !== 'prepare_shots' && (record.storyboardCount ?? 0) > 0
-        ? {
-            key: 'studio',
-            label: '进入工作室',
-            icon: <FileSearchOutlined />,
-            onClick: () => navigate(getChapterStudioPath(projectId, record.id)),
-          }
-        : null,
       {
         key: 'raw',
         label: '编辑原文',

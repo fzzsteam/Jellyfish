@@ -15,9 +15,8 @@ import { CostumesTab, PropsTab } from './tabs/PropsTab'
 import { FilesTab } from './tabs/FilesTab'
 import { EditTab } from './tabs/EditTab'
 import { SettingsTab } from './tabs/SettingsTab'
-import { getChapterShotsPath, getChapterStudioPath } from './routes'
+import { getChapterShotsPath } from './routes'
 import { useProject, useChapters } from './hooks/useProjectData'
-import { ensureHasShotsBeforeShooting } from './ensureHasShotsBeforeShooting'
 import { getChapterPreparationState } from './chapterPreparation'
 
 const TAB_PARAM = 'tab'
@@ -109,23 +108,17 @@ const ProjectWorkbench: React.FC = () => {
     }
     if (state.key === 'prepare_shots') {
       return {
-        label: `进入${chapterLabel}分镜工作室`,
-        hint: `${chapterLabel}已有分镜，建议继续补齐镜头准备`,
+        label: `处理${chapterLabel}分镜`,
+        hint: `${chapterLabel}已有分镜，建议进入分镜列表处理待确认镜头`,
         icon: state.primaryIcon,
-        onClick: () => navigate(getChapterStudioPath(projectId, recommendedChapter.id)),
+        onClick: () => navigate(getChapterShotsPath(projectId, recommendedChapter.id)),
       }
     }
     return {
-      label: `进入${chapterLabel}拍摄`,
-      hint: `${chapterLabel}已具备分镜，可继续进入拍摄流程`,
+      label: `进入${chapterLabel}分镜`,
+      hint: `${chapterLabel}已有可继续生成的视频分镜`,
       icon: state.primaryIcon,
-      onClick: () =>
-        ensureHasShotsBeforeShooting({
-          projectId,
-          chapterId: recommendedChapter.id,
-          storyboardCount: recommendedChapter.storyboardCount,
-          navigate,
-        }),
+      onClick: () => navigate(getChapterShotsPath(projectId, recommendedChapter.id)),
     }
   })()
 

@@ -63,7 +63,7 @@ const MainLayout: React.FC = () => {
       .finally(() => setPointsLoading(false))
   }
 
-  // 从 URL 提取项目 / 章节上下文，用于顶部导航按钮
+  // 从 URL 提取项目上下文，用于顶部导航按钮
   const pathSegments = useMemo(
     () => location.pathname.replace(/^\/+/, '').split('/').filter(Boolean),
     [location.pathname],
@@ -72,43 +72,12 @@ const MainLayout: React.FC = () => {
     () => (pathSegments[0] === 'projects' && pathSegments[1] ? pathSegments[1] : null),
     [pathSegments],
   )
-  const urlChapterId = useMemo(
-    () => (pathSegments[2] === 'chapters' && pathSegments[3] ? pathSegments[3] : null),
-    [pathSegments],
-  )
 
   // 当前激活的导航项。
   const activeNav = useMemo(() => {
     if (!urlProjectId) return 'home'
-    if (!urlChapterId) return 'workbench'
-    const section = pathSegments[4]
-    if (section === 'studio') return 'studio'
-    if (section === 'shots') return 'shots'
     return 'workbench'
-  }, [urlProjectId, urlChapterId, pathSegments])
-
-  // 持久化记录每个项目最后访问的 chapterId。
-  // 一旦某项目到达过章节页，后续在项目任意页面均可直接跳转到分镜列表/工作室。
-  const [storedChapterId, setStoredChapterId] = useState<string | null>(() => {
-    const segs = location.pathname.replace(/^\/+/, '').split('/').filter(Boolean)
-    const pid = segs[0] === 'projects' && segs[1] ? segs[1] : null
-    if (!pid) return null
-    return localStorage.getItem(`nav_lastChapterId_${pid}`)
-  })
-
-  useEffect(() => {
-    if (urlProjectId && urlChapterId) {
-      localStorage.setItem(`nav_lastChapterId_${urlProjectId}`, urlChapterId)
-      setStoredChapterId(urlChapterId)
-    } else if (urlProjectId) {
-      setStoredChapterId(localStorage.getItem(`nav_lastChapterId_${urlProjectId}`))
-    } else {
-      setStoredChapterId(null)
-    }
-  }, [urlProjectId, urlChapterId])
-
-  // 导航时优先用 URL 里的 chapterId，否则回退到上次访问记录
-  const effectiveChapterId = urlChapterId ?? storedChapterId
+  }, [urlProjectId])
 
   // 用 React state 跟踪 hover，避免直接操作 DOM style 导致导航后残留背景色
   const [hoveredNavKey, setHoveredNavKey] = useState<string | null>(null)
@@ -121,50 +90,22 @@ const MainLayout: React.FC = () => {
     }
   }, [activeNav])
 
-  const navItems = useMemo(() => {
-    const shotsPath =
-      urlProjectId && effectiveChapterId
-        ? `/projects/${urlProjectId}/chapters/${effectiveChapterId}/shots`
-        : null
-    const studioPath =
-      urlProjectId && effectiveChapterId
-        ? `/projects/${urlProjectId}/chapters/${effectiveChapterId}/studio`
-        : null
-
-    return [
-      {
-        key: 'home',
-        label: '主页面',
-        path: '/projects',
-        // 始终可见、始终可用
-        visible: true,
-        enabled: true,
-      },
-      {
-        key: 'workbench',
-        label: '项目工作台',
-        path: urlProjectId ? `/projects/${urlProjectId}` : null,
-        // 有项目上下文才显示，进入项目后即解锁
-        visible: !!urlProjectId,
-        enabled: !!urlProjectId,
-      },
-      {
-        key: 'shots',
-        label: '分镜列表',
-        path: shotsPath,
-        // 有项目上下文才显示；曾到达过章节层级才可用（effectiveChapterId 有值）
-        visible: !!urlProjectId,
-        enabled: !!effectiveChapterId,
-      },
-      {
-        key: 'studio',
-        label: '分镜工作室',
-        path: studioPath,
-        visible: !!urlProjectId,
-        enabled: !!effectiveChapterId,
-      },
-    ]
-  }, [urlProjectId, effectiveChapterId])
+  const navItems = useMemo(() => [
+    {
+      key: 'home',
+      label: '主页面',
+      path: '/projects',
+      visible: true,
+      enabled: true,
+    },
+    {
+      key: 'workbench',
+      label: '项目工作台',
+      path: urlProjectId ? `/projects/${urlProjectId}` : null,
+      visible: !!urlProjectId,
+      enabled: !!urlProjectId,
+    },
+  ], [urlProjectId])
 
   const menuItems = [
     {

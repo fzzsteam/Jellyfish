@@ -42,19 +42,19 @@ export function getChapterPreparationState(chapter: Chapter): ChapterPreparation
   if (chapter.status === 'shooting' || chapter.status === 'done') {
     return {
       key: 'shoot',
-      text: '可进入拍摄',
+      text: '可生成视频',
       color: 'green',
-      hint: '当前章节已具备分镜，可继续进入拍摄',
-      primaryAction: '进入拍摄',
+      hint: '当前章节已有可继续生成的视频分镜',
+      primaryAction: '进入分镜',
       primaryIcon: <VideoCameraOutlined />,
     }
   }
   return {
     key: 'prepare_shots',
-    text: '待准备镜头',
+    text: '待确认分镜',
     color: 'blue',
-    hint: '已有分镜，建议先进入分镜工作室补齐镜头准备',
-    primaryAction: '进入分镜工作室',
+    hint: '已有分镜，建议进入分镜列表处理待确认镜头',
+    primaryAction: '处理分镜',
     primaryIcon: <FileSearchOutlined />,
   }
 }

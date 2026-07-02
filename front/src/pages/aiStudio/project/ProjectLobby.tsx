@@ -36,8 +36,6 @@ import {
 } from './ProjectVisualStyleAndStyleFields'
 import { useProjectStyleOptions } from './useProjectStyleOptions'
 import { getChapterPreparationState } from './ProjectWorkbench/chapterPreparation'
-import { ensureHasShotsBeforeShooting } from './ProjectWorkbench/ensureHasShotsBeforeShooting'
-import { getChapterShotsPath, getChapterStudioPath } from './ProjectWorkbench/routes'
 import { loadProjectFlowStatsForChapters, type ProjectFlowStats } from './ProjectWorkbench/projectFlowStats'
 import { generateUUID } from '../../../utils'
 
@@ -484,37 +482,8 @@ const ProjectLobby: React.FC = () => {
     return <Tag color="orange" className="mr-0 text-[11px] leading-4">进行中</Tag>
   }
 
-  const handlePrimaryAction = (project: ProjectView, stageSummary?: ProjectStageSummary) => {
-    if (!stageSummary) {
-      navigate(`/projects/${project.id}`)
-      return
-    }
-    if (stageSummary.key === 'create_first_chapter') {
-      navigate(`/projects/${project.id}?tab=chapters&create=1`)
-      return
-    }
-    if (!stageSummary.chapterId) {
-      navigate(`/projects/${project.id}`)
-      return
-    }
-    if (stageSummary.key === 'edit_raw') {
-      navigate(`/projects/${project.id}?tab=chapters&edit=${stageSummary.chapterId}`)
-      return
-    }
-    if (stageSummary.key === 'extract_shots') {
-      navigate(getChapterShotsPath(project.id, stageSummary.chapterId))
-      return
-    }
-    if (stageSummary.key === 'prepare_shots') {
-      navigate(getChapterStudioPath(project.id, stageSummary.chapterId))
-      return
-    }
-    void ensureHasShotsBeforeShooting({
-      projectId: project.id,
-      chapterId: stageSummary.chapterId,
-      storyboardCount: stageSummary.storyboardCount,
-      navigate,
-    })
+  const handlePrimaryAction = (project: ProjectView) => {
+    navigate(`/projects/${project.id}?tab=chapters`)
   }
 
   /**
@@ -600,12 +569,11 @@ const ProjectLobby: React.FC = () => {
   const selectedProject = filteredSorted.find((p) => p.id === selectedProjectId) ?? filteredSorted[0]
 
   const renderCard = (p: ProjectView) => {
-    const status = getProjectStatus(p)
     const stageSummary = projectStageMap[p.id]
     const flowStats = projectFlowStatsMap[p.id]
     const isCompact = viewMode === 'compact'
     const isLarge = viewMode === 'large'
-    const mainActionLabel = stageSummary?.nextActionLabel ?? (status === 'completed' ? '继续剪辑' : p.progress > 0 ? '继续拍摄' : '进入项目')
+    const mainActionLabel = '打开项目'
 
     const isSelected = selectedProject && selectedProject.id === p.id
     const isChecked = selectedIds.includes(p.id)
@@ -726,7 +694,7 @@ const ProjectLobby: React.FC = () => {
               type="primary"
               size="small"
               icon={<EnterOutlined />}
-              onClick={() => handlePrimaryAction(p, stageSummary)}
+              onClick={() => handlePrimaryAction(p)}
               className="text-[11px]"
             >
               {isCompact ? '进入' : mainActionLabel}
@@ -972,16 +940,6 @@ const ProjectLobby: React.FC = () => {
                   <div className="text-[11px] text-gray-500">
                     章 {selectedProject.stats.chapters} · 角 {selectedProject.stats.roles} · 场 {selectedProject.stats.scenes} · 道 {selectedProject.stats.props}
                   </div>
-                  <Button
-                    type="primary"
-                    block
-                    size="small"
-                    icon={<EnterOutlined />}
-                    onClick={() => navigate(`/projects/${selectedProject.id}`)}
-                    className="text-[11px]"
-                  >
-                    进入章节工作台
-                  </Button>
                 </div>
               ) : (
                 <div className="text-gray-500 text-sm py-6 text-center">
