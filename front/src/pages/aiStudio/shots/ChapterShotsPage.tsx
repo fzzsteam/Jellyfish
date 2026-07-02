@@ -9,7 +9,6 @@ import {
   Input,
   Layout,
   Modal,
-  Popconfirm,
   Segmented,
   Space,
   Table,
@@ -18,7 +17,7 @@ import {
   Typography,
   message,
 } from 'antd'
-import type { TableColumnsType } from 'antd'
+import type { MenuProps, TableColumnsType } from 'antd'
 import {
   ArrowDownOutlined,
   ArrowLeftOutlined,
@@ -26,16 +25,15 @@ import {
   CloseCircleOutlined,
   DeleteOutlined,
   EditOutlined,
-  FileSearchOutlined,
   PlusOutlined,
   ReloadOutlined,
   ScissorOutlined,
 } from '@ant-design/icons'
-import type { ShotRead, ShotRuntimeSummaryRead, ShotStatus } from '../../../services/generated'
+import type { ShotRead, ShotRuntimeSummaryRead } from '../../../services/generated'
 import { ScriptProcessingService, StudioChaptersService, StudioShotsService } from '../../../services/generated'
 import { executeAsyncTaskCreate, executeTaskCancel } from '../components/taskActionHelpers'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
-import { getChapterShotEditPath, getChapterShotsPath, getChapterStudioPath } from '../project/ProjectWorkbench/routes'
+import { getChapterShotDetailPath, getChapterShotsPath } from '../project/ProjectWorkbench/routes'
 import { useCancelableRelationTask } from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { useRelationTaskNotification } from '../components/taskNotificationHelpers'
 import { useTaskPageContext } from '../components/taskPageContext'
@@ -45,21 +43,11 @@ import { generateUUID } from '../../../utils'
 import { usePointsQuote } from '../../../hooks/usePointsQuote'
 import { makePointsAwareGetErrorMessage } from '../../../components/points/pointsTaskError'
 import { ExtractionConfirmModal } from './components/ExtractionConfirmModal'
+import { ShotBatchToolbar } from './components/ShotBatchToolbar'
+import { getShotFlowState, type ShotFlowDetailTab, type ShotFlowFilterKey } from './shotFlowStatus'
 
 const { Header, Content } = Layout
-type ShotListFilter = 'all' | 'pending' | 'generating' | 'ready'
-
-function statusTag(status?: ShotStatus) {
-  if (!status) return <span className="text-gray-400">—</span>
-  const color = status === 'ready' ? 'success' : 'default'
-  return <Tag color={color}>{status}</Tag>
-}
-
-type ShotPreparationState = {
-  text: string
-  color: string
-  hint: string
-}
+type ShotListFilter = ShotFlowFilterKey
 
 type ShotRuntimeState = {
   has_active_tasks: boolean
@@ -67,32 +55,6 @@ type ShotRuntimeState = {
   has_active_prompt_tasks: boolean
   has_active_frame_tasks: boolean
   active_task_count: number
-}
-
-function getShotPreparationState(shot: ShotRead, runtime?: ShotRuntimeState): ShotPreparationState {
-  if (runtime?.has_active_tasks) {
-    return {
-      text: '生成中',
-      color: 'processing',
-      hint: `当前镜头有 ${runtime.active_task_count} 个运行中任务`,
-    }
-  }
-  if (shot.status === 'ready') {
-    return {
-      text: '已就绪',
-      color: 'green',
-      hint: shot.skip_extraction
-        ? '当前镜头已标记为无需提取，可继续进入视频生成流程'
-        : '信息提取已确认完成，可继续进入视频生成流程',
-    }
-  }
-  return {
-    text: '待确认',
-    color: 'gold',
-    hint: shot.skip_extraction
-      ? '当前镜头已标记为无需提取，等待系统同步最新流程状态'
-      : '请先完成信息提取确认，再进入视频生成流程',
-  }
 }
 
 export function ChapterShotsPage() {
@@ -222,10 +184,9 @@ export function ChapterShotsPage() {
   const filteredShots = useMemo(() => {
     const q = searchText.trim().toLowerCase()
     const byWorkflow = shots.filter((s) => {
-      const runtime = shotRuntimeMap[s.id]
-      if (listFilter === 'generating') return Boolean(runtime?.has_active_tasks)
-      if (listFilter === 'ready') return s.status === 'ready' && !runtime?.has_active_tasks
-      if (listFilter === 'pending') return s.status !== 'ready' && !runtime?.has_active_tasks
+      const flow = getShotFlowState(s, shotRuntimeMap[s.id])
+      if (listFilter === 'generatable') return flow.key === 'generatable' || flow.key === 'running'
+      if (listFilter !== 'all') return flow.key === listFilter
       return true
     })
     if (!q) return byWorkflow
@@ -238,12 +199,20 @@ export function ChapterShotsPage() {
   }, [listFilter, searchText, shotRuntimeMap, shots])
 
   const shotFilterCounts = useMemo(
-    () => ({
-      all: shots.length,
-      pending: shots.filter((s) => s.status !== 'ready' && !shotRuntimeMap[s.id]?.has_active_tasks).length,
-      generating: shots.filter((s) => Boolean(shotRuntimeMap[s.id]?.has_active_tasks)).length,
-      ready: shots.filter((s) => s.status === 'ready' && !shotRuntimeMap[s.id]?.has_active_tasks).length,
-    }),
+    () =>
+      shots.reduce(
+        (acc, shot) => {
+          const flow = getShotFlowState(shot, shotRuntimeMap[shot.id])
+          acc.all += 1
+          if (flow.key === 'running') {
+            acc.generatable += 1
+          } else {
+            acc[flow.key] += 1
+          }
+          return acc
+        },
+        { all: 0, basic: 0, confirm: 0, generatable: 0, result: 0 },
+      ),
     [shotRuntimeMap, shots],
   )
 
@@ -462,15 +431,91 @@ export function ChapterShotsPage() {
     }
   }, [selectedShotIds])
 
-  const handleOpenSelectedInStudio = useCallback(() => {
-    if (!projectId || !chapterId || selectedShotIds.length === 0) return
-    navigate(getChapterStudioPath(projectId, chapterId), {
-      state: {
-        focusShotId: selectedShotIds[0],
-        selectedShotIds,
-      },
+  const openShotDetail = useCallback(
+    (shot: ShotRead, tab: ShotFlowDetailTab) => {
+      if (!projectId || !chapterId) return
+      navigate(getChapterShotDetailPath(projectId, chapterId, shot.id, tab))
+    },
+    [chapterId, navigate, projectId],
+  )
+
+  const confirmBatchDelete = useCallback(() => {
+    if (selectedShotIds.length === 0) return
+    Modal.confirm({
+      title: `确定删除选中的 ${selectedShotIds.length} 条分镜？`,
+      okText: '删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true },
+      onOk: () => handleBatchDelete(),
     })
-  }, [chapterId, navigate, projectId, selectedShotIds])
+  }, [handleBatchDelete, selectedShotIds.length])
+
+  const confirmDelete = useCallback(
+    (shot: ShotRead) => {
+      Modal.confirm({
+        title: '确定删除该分镜？',
+        content: shot.title || `分镜 ${shot.index}`,
+        okText: '删除',
+        cancelText: '取消',
+        okButtonProps: { danger: true, loading: extracting || deletingId === shot.id, disabled: extracting },
+        cancelButtonProps: { disabled: extracting },
+        onOk: () => handleDelete(shot.id),
+      })
+    },
+    [deletingId, extracting, handleDelete],
+  )
+
+  const batchMaintenanceMenuItems: MenuProps['items'] = useMemo(
+    () => [
+      {
+        key: 'delete',
+        label: '删除',
+        danger: true,
+        icon: <DeleteOutlined />,
+        disabled: extracting || batchDeleting,
+        onClick: confirmBatchDelete,
+      },
+    ],
+    [batchDeleting, confirmBatchDelete, extracting],
+  )
+
+  const buildActionMenuItems = useCallback(
+    (shot: ShotRead): MenuProps['items'] => [
+      {
+        key: 'edit',
+        label: '编辑基础信息',
+        icon: <EditOutlined />,
+        disabled: extracting,
+        onClick: () => openShotDetail(shot, 'basic'),
+      },
+      {
+        key: 'insert-before',
+        label: '向上插入分镜',
+        icon: <ArrowUpOutlined />,
+        disabled: extracting,
+        onClick: () => openInsert('before', shot),
+      },
+      {
+        key: 'insert-after',
+        label: '向下插入分镜',
+        icon: <ArrowDownOutlined />,
+        disabled: extracting,
+        onClick: () => openInsert('after', shot),
+      },
+      {
+        type: 'divider',
+      },
+      {
+        key: 'delete',
+        label: '删除',
+        danger: true,
+        icon: <DeleteOutlined />,
+        disabled: extracting,
+        onClick: () => confirmDelete(shot),
+      },
+    ],
+    [confirmDelete, extracting, openInsert, openShotDetail],
+  )
 
   const columns: TableColumnsType<ShotRead> = useMemo(
     () => [
@@ -497,22 +542,15 @@ export function ChapterShotsPage() {
         },
       },
       {
-        title: '状态',
-        dataIndex: 'status',
-        key: 'status',
-        width: 120,
-        render: (_: unknown, r) => statusTag(r.status),
-      },
-      {
-        title: '准备度',
-        key: 'preparation',
-        width: 168,
+        title: '当前步骤',
+        key: 'flow',
+        width: 160,
         render: (_: unknown, r) => {
-          const state = getShotPreparationState(r, shotRuntimeMap[r.id])
+          const flow = getShotFlowState(r, shotRuntimeMap[r.id])
           return (
             <div className="space-y-1">
-              <Tag color={state.color}>{state.text}</Tag>
-              <div className="text-[11px] text-gray-500 leading-5">{state.hint}</div>
+              <Tag color={flow.tagColor}>{flow.label}</Tag>
+              <div className="text-[11px] text-gray-500 leading-5">{flow.hint}</div>
             </div>
           )
         },
@@ -536,62 +574,32 @@ export function ChapterShotsPage() {
       {
         title: '操作',
         key: 'actions',
-        width: 220,
-        render: (_: unknown, r) => (
-          <Space size={0} wrap>
-            <Button
-              type="link"
-              size="small"
-              icon={<EditOutlined />}
-              disabled={extracting}
-              loading={extracting}
-              onClick={() =>
-                projectId &&
-                chapterId &&
-                navigate(getChapterShotEditPath(projectId, chapterId, r.id))
-              }
-            >
-              编辑
-            </Button>
-            <Dropdown
-              disabled={extracting}
-              menu={{
-                items: [
-                  { key: 'before', label: '向上插入分镜', icon: <ArrowUpOutlined /> },
-                  { key: 'after', label: '向下插入分镜', icon: <ArrowDownOutlined /> },
-                ],
-                onClick: ({ key }) => openInsert(key as 'before' | 'after', r),
-              }}
-              trigger={['click']}
-            >
-              <Button type="link" size="small" icon={<PlusOutlined />} disabled={extracting}>
-                插入
-              </Button>
-            </Dropdown>
-            <Popconfirm
-              title="确定删除该分镜？"
-              okText="删除"
-              cancelText="取消"
-              onConfirm={() => void handleDelete(r.id)}
-              okButtonProps={{ loading: extracting || deletingId === r.id, disabled: extracting }}
-              cancelButtonProps={{ disabled: extracting }}
-            >
+        fixed: 'right',
+        width: 180,
+        render: (_: unknown, r) => {
+          const flow = getShotFlowState(r, shotRuntimeMap[r.id])
+          return (
+            <Space size="small">
               <Button
-                type="link"
+                type="primary"
                 size="small"
-                danger
-                icon={<DeleteOutlined />}
-                loading={extracting || deletingId === r.id}
                 disabled={extracting}
+                loading={extracting || deletingId === r.id}
+                onClick={() => openShotDetail(r, flow.tab)}
               >
-                删除
+                {flow.buttonLabel}
               </Button>
-            </Popconfirm>
-          </Space>
-        ),
+              <Dropdown disabled={extracting} menu={{ items: buildActionMenuItems(r) }} trigger={['click']}>
+                <Button type="text" size="small" disabled={extracting}>
+                  更多
+                </Button>
+              </Dropdown>
+            </Space>
+          )
+        },
       },
     ],
-    [chapterId, deletingId, extracting, handleDelete, navigate, openInsert, projectId, shotRuntimeMap],
+    [buildActionMenuItems, deletingId, extracting, openShotDetail, shotRuntimeMap],
   )
 
   const tableEmpty =
@@ -645,15 +653,6 @@ export function ChapterShotsPage() {
           </Typography.Text>
         </div>
 
-        {shots.length > 0 ? (
-          <Button
-            type="primary"
-            icon={<FileSearchOutlined />}
-            onClick={() => navigate(getChapterStudioPath(projectId, chapterId))}
-          >
-            进入分镜工作室
-          </Button>
-        ) : null}
       </Header>
 
       <Content
@@ -687,23 +686,6 @@ export function ChapterShotsPage() {
           }}
           extra={
             <Space wrap>
-              {selectedRowKeys.length > 0 ? (
-                <>
-                  <span className="text-gray-500 text-sm">已选 {selectedRowKeys.length} 项</span>
-                  <Popconfirm
-                    title={`确定删除选中的 ${selectedRowKeys.length} 条分镜？`}
-                    okText="删除"
-                    cancelText="取消"
-                    onConfirm={() => void handleBatchDelete()}
-                    okButtonProps={{ danger: true, loading: batchDeleting, disabled: extracting || batchDeleting }}
-                    cancelButtonProps={{ disabled: extracting || batchDeleting }}
-                  >
-                    <Button danger icon={<DeleteOutlined />} loading={batchDeleting} disabled={extracting || batchDeleting}>
-                      批量删除
-                    </Button>
-                  </Popconfirm>
-                </>
-              ) : null}
               <Tooltip
                 title={
                   chapterDivisionTask
@@ -764,30 +746,24 @@ export function ChapterShotsPage() {
                 onChange={(value) => setListFilter(value as ShotListFilter)}
                 options={[
                   { label: `全部 ${shotFilterCounts.all}`, value: 'all' },
-                  { label: `待确认 ${shotFilterCounts.pending}`, value: 'pending' },
-                  { label: `生成中 ${shotFilterCounts.generating}`, value: 'generating' },
-                  { label: `已就绪 ${shotFilterCounts.ready}`, value: 'ready' },
+                  { label: `基础待补 ${shotFilterCounts.basic}`, value: 'basic' },
+                  { label: `待确认 ${shotFilterCounts.confirm}`, value: 'confirm' },
+                  { label: `可生成 ${shotFilterCounts.generatable}`, value: 'generatable' },
+                  { label: `已有结果 ${shotFilterCounts.result}`, value: 'result' },
                 ]}
               />
-              {selectedRowKeys.length > 0 ? (
-                <Space size="small" wrap>
-                  <Button
-                    icon={<FileSearchOutlined />}
-                    disabled={extracting || batchDeleting}
-                    onClick={handleOpenSelectedInStudio}
-                  >
-                    处理首个已选
-                  </Button>
-                  <Button
-                    type="text"
-                    disabled={extracting || batchDeleting}
-                    onClick={() => setSelectedRowKeys([])}
-                  >
-                    清空选择
-                  </Button>
-                </Space>
-              ) : null}
             </div>
+            {selectedRowKeys.length > 0 ? (
+              <ShotBatchToolbar
+                selectedCount={selectedRowKeys.length}
+                disabled={extracting || batchDeleting}
+                maintenanceMenuItems={batchMaintenanceMenuItems}
+                onBatchGenerate={() => message.warning('请先完成单镜头生成配置后再批量生成')}
+                onBatchDownload={() => message.warning('当前选中镜头暂无可下载视频')}
+                onBatchDiagnose={() => message.warning('请先完成诊断接入')}
+                onClearSelection={() => setSelectedRowKeys([])}
+              />
+            ) : null}
             <div className="flex-1 min-h-0">
               <Table<ShotRead>
                 rowKey="id"
