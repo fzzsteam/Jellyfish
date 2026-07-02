@@ -1,14 +1,14 @@
 import { useEffect, useState } from 'react'
 import { message, Spin } from 'antd'
 import { Navigate, useNavigate, useParams } from 'react-router-dom'
-import { StudioShotsService } from '../../../services/generated/services/StudioShotsService'
+import { StudioShotsService } from '../../../services/generated'
 import {
   getChapterShotDetailPath,
   getChapterShotsPath,
 } from '../project/ProjectWorkbench/routes'
 
 /**
- * 兼容旧章节工作室链接，将入口转发到首个镜头的生成标签或分镜列表。
+ * 兼容旧章节工作室链接，将入口转发到首个镜头详情或分镜列表。
  */
 const ChapterStudioRedirect = () => {
   const { projectId, chapterId } = useParams()
@@ -34,7 +34,7 @@ const ChapterStudioRedirect = () => {
 
         const firstShot = res.data?.items?.[0]
         const target = firstShot
-          ? getChapterShotDetailPath(projectId, chapterId, firstShot.id, 'generate')
+          ? getChapterShotDetailPath(projectId, chapterId, firstShot.id)
           : getChapterShotsPath(projectId, chapterId)
         navigate(target, { replace: true })
       } catch {
