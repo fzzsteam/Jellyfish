@@ -60,7 +60,6 @@ import {
 } from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { StudioEntitiesApi } from '../../../services/studioEntities'
 import { resolveAssetUrl } from '../assets/utils'
-import { useProjectStyleOptions } from '../project/useProjectStyleOptions'
 
 const { Header, Content } = Layout
 const { TextArea } = Input
@@ -109,18 +108,16 @@ function toSupportedVideoRatio(value: string | null | undefined): VideoRatio | n
 }
 
 /**
- * 按镜头覆盖、项目默认、后端能力默认的顺序解析视频比例。
+ * 按镜头覆盖、项目真实默认值的顺序解析视频比例。
  * 只返回 OpenAPI 允许的 ratio union，避免预览和提交 payload 与页面展示不一致。
  */
 function resolveVideoRatio(
   shotDetail: ShotDetailRead | null,
   projectDefaultVideoRatio: string,
-  capabilityDefaultVideoRatio: string,
 ): VideoRatio | null {
   return (
     toSupportedVideoRatio(shotDetail?.override_video_ratio) ??
-    toSupportedVideoRatio(projectDefaultVideoRatio) ??
-    toSupportedVideoRatio(capabilityDefaultVideoRatio)
+    toSupportedVideoRatio(projectDefaultVideoRatio)
   )
 }
 
@@ -243,7 +240,6 @@ function overviewTypeToAssetKind(kind: ShotAssetOverviewItem['type']): AssetKind
 export function ChapterShotEditPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const { defaultVideoRatio: capabilityDefaultVideoRatio } = useProjectStyleOptions()
   const { projectId, chapterId, shotId } = useParams<{
     projectId: string
     chapterId: string
@@ -1556,8 +1552,8 @@ export function ChapterShotEditPage() {
   )
 
   const resolvedVideoRatio = useMemo(
-    () => resolveVideoRatio(shotDetail, projectDefaultVideoRatio, capabilityDefaultVideoRatio),
-    [capabilityDefaultVideoRatio, projectDefaultVideoRatio, shotDetail],
+    () => resolveVideoRatio(shotDetail, projectDefaultVideoRatio),
+    [projectDefaultVideoRatio, shotDetail],
   )
 
   /**
