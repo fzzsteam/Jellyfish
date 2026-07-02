@@ -14,7 +14,21 @@ export function getChapterShotEditPath(projectId: string, chapterId: string, sho
   return `/projects/${projectId}/chapters/${chapterId}/shots/${shotId}/edit`
 }
 
+export type ShotDetailTabKey = 'basic' | 'confirm' | 'generate' | 'results'
+
+/**
+ * 生成分镜详情页地址，用于在不同业务入口间稳定跳转到指定详情标签。
+ */
+export function getChapterShotDetailPath(
+  projectId: string,
+  chapterId: string,
+  shotId: string,
+  tab?: ShotDetailTabKey,
+) {
+  const base = getChapterShotEditPath(projectId, chapterId, shotId)
+  return tab ? `${base}?tab=${tab}` : base
+}
+
 export function getProjectEditorPath(projectId: string) {
   return `/projects/${projectId}/editor`
 }
-
