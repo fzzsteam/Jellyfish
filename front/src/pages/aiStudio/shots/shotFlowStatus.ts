@@ -48,6 +48,17 @@ export function getShotFlowState(shot: ShotRead, runtime?: ShotRuntimeLike): Sho
     }
   }
 
+  if (shot.status === 'ready') {
+    return {
+      key: 'generatable',
+      tab: 'generate',
+      label: '可生成',
+      buttonLabel: '生成视频',
+      tagColor: 'blue',
+      hint: '信息提取已确认，可进入生成视频步骤',
+    }
+  }
+
   if (!hasBasic) {
     return {
       key: 'basic',
@@ -59,25 +70,14 @@ export function getShotFlowState(shot: ShotRead, runtime?: ShotRuntimeLike): Sho
     }
   }
 
-  if (shot.status !== 'ready') {
-    return {
-      key: 'confirm',
-      tab: 'confirm',
-      label: '待确认',
-      buttonLabel: '确认提取',
-      tagColor: 'warning',
-      hint: shot.extraction?.state === 'not_extracted'
-        ? '请先完成信息提取或标记无需提取'
-        : '请先完成资产与对白候选确认',
-    }
-  }
-
   return {
-    key: 'generatable',
-    tab: 'generate',
-    label: '可生成',
-    buttonLabel: '生成视频',
-    tagColor: 'blue',
-    hint: '信息提取已确认，可进入生成视频步骤',
+    key: 'confirm',
+    tab: 'confirm',
+    label: '待确认',
+    buttonLabel: '确认提取',
+    tagColor: 'warning',
+    hint: shot.extraction?.state === 'not_extracted'
+      ? '请先完成信息提取或标记无需提取'
+      : '请先完成资产与对白候选确认',
   }
 }

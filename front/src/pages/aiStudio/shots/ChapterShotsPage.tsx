@@ -185,7 +185,6 @@ export function ChapterShotsPage() {
     const q = searchText.trim().toLowerCase()
     const byWorkflow = shots.filter((s) => {
       const flow = getShotFlowState(s, shotRuntimeMap[s.id])
-      if (listFilter === 'generatable') return flow.key === 'generatable' || flow.key === 'running'
       if (listFilter !== 'all') return flow.key === listFilter
       return true
     })
@@ -204,9 +203,7 @@ export function ChapterShotsPage() {
         (acc, shot) => {
           const flow = getShotFlowState(shot, shotRuntimeMap[shot.id])
           acc.all += 1
-          if (flow.key === 'running') {
-            acc.generatable += 1
-          } else {
+          if (flow.key !== 'running') {
             acc[flow.key] += 1
           }
           return acc
