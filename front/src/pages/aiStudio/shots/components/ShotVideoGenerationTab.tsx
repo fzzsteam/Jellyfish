@@ -1,4 +1,5 @@
-import { Button, Card, Descriptions, Space, Tag, Tooltip, Typography } from 'antd'
+import type { ReactNode } from 'react'
+import { Button, Card, Descriptions, Segmented, Select, Space, Tag, Tooltip, Typography } from 'antd'
 import { SettingOutlined, ToolOutlined, VideoCameraAddOutlined } from '@ant-design/icons'
 import type { ShotDetailRead, ShotPreparationStateRead, ShotRead } from '../../../../services/generated'
 
@@ -6,7 +7,15 @@ type ShotVideoGenerationTabProps = {
   shot: ShotRead | null
   shotDetail: ShotDetailRead | null
   preparationState: ShotPreparationStateRead | null
+  videoModels: Array<{ id: string; name: string; provider_name?: string | null }>
+  selectedVideoModelId: string | null
+  videoModelsLoading: boolean
+  videoResolution: '720p' | '1080p'
+  quoteNode: ReactNode
+  onModelChange: (modelId: string) => void
+  onResolutionChange: (resolution: '720p' | '1080p') => void
   onOpenDiagnostics: () => void
+  onOpenPromptPreview: () => void
 }
 
 /**
@@ -17,24 +26,34 @@ function getGenerateDisabledReason(
   shot: ShotRead | null,
   shotDetail: ShotDetailRead | null,
   preparationState: ShotPreparationStateRead | null,
+  selectedVideoModelId: string | null,
 ): string | null {
   if (!shot) return '未选择镜头'
   if (!(preparationState?.ready_for_generation ?? shot.status === 'ready')) return '未完成准备'
   if (!shotDetail?.duration || shotDetail.duration <= 0) return '未设置时长'
+  if (!selectedVideoModelId) return '未选择视频模型'
   return null
 }
 
 /**
- * 展示单镜头视频生成的入口框架。
- * Task 4 只承接生成流程的位置与诊断入口，真实提交逻辑会在后续任务迁移。
+ * 展示单镜头视频生成配置。
+ * 生成动作先进入提示词预览与积分确认弹窗，避免配置卡直接创建任务。
  */
 export function ShotVideoGenerationTab({
   shot,
   shotDetail,
   preparationState,
+  videoModels,
+  selectedVideoModelId,
+  videoModelsLoading,
+  videoResolution,
+  quoteNode,
+  onModelChange,
+  onResolutionChange,
   onOpenDiagnostics,
+  onOpenPromptPreview,
 }: ShotVideoGenerationTabProps) {
-  const disabledReason = getGenerateDisabledReason(shot, shotDetail, preparationState)
+  const disabledReason = getGenerateDisabledReason(shot, shotDetail, preparationState, selectedVideoModelId)
   const readyForGeneration = !disabledReason
 
   return (
@@ -46,22 +65,17 @@ export function ShotVideoGenerationTab({
             <span>生成配置</span>
           </Space>
         }
-        extra={
-          <Button size="small" icon={<ToolOutlined />} onClick={onOpenDiagnostics}>
-            诊断
-          </Button>
-        }
       >
         <div className="space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <Typography.Text strong>{shot ? `镜头 #${shot.index} · ${shot.title || '未命名镜头'}` : '未选择镜头'}</Typography.Text>
               <div className="mt-1 text-xs text-slate-500">
-                这里承接关键帧、参考图、视频参数和提交生成入口；真实生成操作将在后续任务迁移。
+                当前先支持首帧参考模式；提示词预览确认后再提交视频生成任务。
               </div>
             </div>
             <Tag color={readyForGeneration ? 'green' : 'gold'}>
-              {readyForGeneration ? '可进入生成配置' : '待补齐'}
+              {readyForGeneration ? '可生成' : '待补齐'}
             </Tag>
           </div>
 
@@ -77,17 +91,55 @@ export function ShotVideoGenerationTab({
             </Descriptions.Item>
           </Descriptions>
 
-          <Space>
-            <Tooltip title={disabledReason || '后续任务会接入真实视频生成提交'}>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-1">
+              <Typography.Text className="text-xs text-slate-500">视频模型</Typography.Text>
+              <Select
+                className="w-full"
+                placeholder="请选择视频模型"
+                loading={videoModelsLoading}
+                value={selectedVideoModelId ?? undefined}
+                onChange={onModelChange}
+                options={videoModels.map((model) => ({
+                  value: model.id,
+                  label: model.provider_name ? `${model.name} · ${model.provider_name}` : model.name,
+                }))}
+              />
+            </div>
+            <div className="space-y-1">
+              <Typography.Text className="text-xs text-slate-500">清晰度</Typography.Text>
+              <Segmented
+                block
+                value={videoResolution}
+                onChange={(value) => onResolutionChange(value as '720p' | '1080p')}
+                options={[
+                  { label: '720p', value: '720p' },
+                  { label: '1080p', value: '1080p' },
+                ]}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+            {quoteNode}
+          </div>
+
+          <Space wrap>
+            <Tooltip title={disabledReason || '预览提示词并确认积分'}>
               <span>
-                <Button type="primary" icon={<VideoCameraAddOutlined />} disabled={!!disabledReason}>
-                  {readyForGeneration ? '进入生成配置' : '生成视频'}
+                <Button
+                  type="primary"
+                  icon={<VideoCameraAddOutlined />}
+                  disabled={!!disabledReason}
+                  onClick={onOpenPromptPreview}
+                >
+                  生成视频
                 </Button>
               </span>
             </Tooltip>
-            <Typography.Text type="secondary" className="text-xs">
-              当前阶段不会提交生成任务。
-            </Typography.Text>
+            <Button icon={<ToolOutlined />} onClick={onOpenDiagnostics}>
+              诊断
+            </Button>
           </Space>
         </div>
       </Card>

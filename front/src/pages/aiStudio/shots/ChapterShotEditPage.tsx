@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Button, Card, Divider, Empty, Layout, List, Modal, Popconfirm, Segmented, Space, Spin, Tabs, Tooltip, Typography, message } from 'antd'
+import { Badge, Button, Card, Divider, Empty, Input, Layout, List, Modal, Popconfirm, Segmented, Space, Spin, Tabs, Tooltip, Typography, message } from 'antd'
 import { ArrowLeftOutlined, ClearOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import type {
   EntityNameExistenceItem,
+  ModelRead,
+  ProviderRead,
   ShotAssetOverviewItem,
   ShotAssetsOverviewRead,
   ShotDetailRead,
@@ -15,6 +17,8 @@ import type {
   ShotVideoReadinessRead,
 } from '../../../services/generated'
 import {
+  FilmService,
+  LlmService,
   ScriptProcessingService,
   StudioChaptersService,
   StudioEntitiesService,
@@ -45,6 +49,7 @@ import { useTaskPageContext } from '../components/taskPageContext'
 import { createTaskSettledReloader } from '../components/taskResultHelpers'
 import { TASK_COPY } from '../components/taskCopy'
 import { usePointsQuote } from '../../../hooks/usePointsQuote'
+import { PointsCostButton } from '../../../components/points/PointsCostButton'
 import { makePointsAwareGetErrorMessage } from '../../../components/points/pointsTaskError'
 import { ExtractionConfirmModal } from './components/ExtractionConfirmModal'
 import {
@@ -55,9 +60,13 @@ import { StudioEntitiesApi } from '../../../services/studioEntities'
 import { resolveAssetUrl } from '../assets/utils'
 
 const { Header, Content } = Layout
+const { TextArea } = Input
 const extractTaskCopy = TASK_COPY.scriptExtract
 
 type AssetKind = 'scene' | 'actor' | 'prop' | 'costume'
+type VideoModelOption = ModelRead & {
+  provider_name: string
+}
 type NamedDraft = { name: string; thumbnail?: string | null; id?: string | null; file_id?: string | null; description?: string | null }
 type AssetVM = NamedDraft & {
   kind: AssetKind
@@ -288,6 +297,23 @@ export function ChapterShotEditPage() {
   const [videoDiagnosticsOpen, setVideoDiagnosticsOpen] = useState(false)
   const [videoDiagnosticsLoading, setVideoDiagnosticsLoading] = useState(false)
   const [videoDiagnosticsReadiness, setVideoDiagnosticsReadiness] = useState<ShotVideoReadinessRead | null>(null)
+  const [videoModels, setVideoModels] = useState<VideoModelOption[]>([])
+  const [selectedVideoModelId, setSelectedVideoModelId] = useState<string | null>(null)
+  const [videoModelsLoading, setVideoModelsLoading] = useState(false)
+  const [videoResolution, setVideoResolution] = useState<'720p' | '1080p'>('720p')
+  const [videoPromptPreviewOpen, setVideoPromptPreviewOpen] = useState(false)
+  const [videoPromptPreviewLoading, setVideoPromptPreviewLoading] = useState(false)
+  const [videoPromptPreviewSubmitting, setVideoPromptPreviewSubmitting] = useState(false)
+  const [videoPromptPreviewDraft, setVideoPromptPreviewDraft] = useState('')
+  // 视频生成试算绑定模型、镜头时长与清晰度；提示词预览弹窗提交时复用同一 quote_token。
+  const videoQuote = usePointsQuote({
+    businessType: 'video_generation',
+    category: 'video',
+    modelId: selectedVideoModelId,
+    durationSeconds: shotDetail?.duration ?? null,
+    resolution: videoResolution,
+    enabled: !!selectedVideoModelId && !!shotDetail?.duration,
+  })
   const [shotListFilter, setShotListFilter] = useState<ShotListFilter>('all')
   const dialogDebounceTimersRef = useRef<Map<number, number>>(new Map())
   const tabAutoInitShotIdRef = useRef<string | null>(null)
@@ -451,6 +477,62 @@ export function ChapterShotEditPage() {
       setLoading(false)
     }
   }, [chapterId, navigate, projectId, shotId])
+
+  useEffect(() => {
+    let active = true
+    setVideoModelsLoading(true)
+    void (async () => {
+      try {
+        const [modelsRes, providersRes] = await Promise.all([
+          LlmService.listModelsApiV1LlmModelsGet({
+            category: 'video',
+            order: 'name',
+            isDesc: false,
+            page: 1,
+            pageSize: 100,
+          }),
+          LlmService.listProvidersApiV1LlmProvidersGet({
+            order: 'name',
+            isDesc: false,
+            page: 1,
+            pageSize: 100,
+          }),
+        ])
+        if (!active) return
+        const providers = (providersRes.data?.items ?? []) as ProviderRead[]
+        const activeProviderIds = new Set(
+          providers
+            .filter((provider) => provider.status !== 'disabled')
+            .map((provider) => provider.id),
+        )
+        const providerNameById = new Map(providers.map((provider) => [provider.id, provider.name]))
+        const items = ((modelsRes.data?.items ?? []) as ModelRead[])
+          .filter((model) => model.category === 'video')
+          .filter((model) => activeProviderIds.size === 0 || activeProviderIds.has(model.provider_id))
+          .map((model) => ({
+            ...model,
+            provider_name: providerNameById.get(model.provider_id) ?? model.provider_id,
+          }))
+        setVideoModels(items)
+        setSelectedVideoModelId((prev) => {
+          if (prev && items.some((item) => item.id === prev)) return prev
+          return items[0]?.id ?? null
+        })
+      } catch {
+        if (active) {
+          setVideoModels([])
+          setSelectedVideoModelId(null)
+        }
+      } finally {
+        if (active) {
+          setVideoModelsLoading(false)
+        }
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [])
 
   const clearDialogDebounceTimers = useCallback(() => {
     for (const [, timer] of dialogDebounceTimersRef.current.entries()) {
@@ -1332,8 +1414,100 @@ export function ChapterShotEditPage() {
   )
 
   /**
+   * 打开单镜头视频提示词预览。
+   * 本页仅迁移首帧参考模式的最小生成路径；提交前先让用户确认提示词和积分消耗。
+   */
+  const openVideoPromptPreview = useCallback(async () => {
+    if (!shotId) {
+      message.warning('请先选择一个分镜')
+      return
+    }
+    if (!preparationState?.ready_for_generation) {
+      message.warning('请先完成基础信息、动作拍点、资产与台词确认')
+      return
+    }
+    if (!shotDetail?.duration || shotDetail.duration <= 0) {
+      message.warning('请先设置镜头时长')
+      return
+    }
+    if (!selectedVideoModelId) {
+      message.warning('请先选择视频模型')
+      return
+    }
+
+    setVideoPromptPreviewDraft('')
+    setVideoPromptPreviewOpen(true)
+    setVideoPromptPreviewLoading(true)
+    try {
+      const res = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
+        requestBody: {
+          shot_id: shotId,
+          reference_mode: 'first',
+          prompt: null,
+          images: [],
+          ratio: '16:9',
+        },
+      })
+      setVideoPromptPreviewDraft(res.data?.prompt ?? '')
+    } catch {
+      message.error('获取视频提示词预览失败')
+      setVideoPromptPreviewOpen(false)
+    } finally {
+      setVideoPromptPreviewLoading(false)
+    }
+  }, [preparationState?.ready_for_generation, selectedVideoModelId, shotDetail?.duration, shotId])
+
+  /**
+   * 提交当前提示词生成视频任务。
+   * 只负责创建任务并刷新镜头数据，任务状态与失败详情仍由全局任务中心承载。
+   */
+  const submitVideoGeneration = useCallback(async () => {
+    if (!shotId) {
+      message.warning('请先选择一个分镜')
+      return
+    }
+    const prompt = videoPromptPreviewDraft.trim()
+    if (!prompt) {
+      message.warning('请输入视频提示词')
+      return
+    }
+    if (!selectedVideoModelId) {
+      message.warning('请先选择视频模型')
+      return
+    }
+    if (!videoQuote.quoteToken) {
+      message.warning('请等待积分试算完成后再提交')
+      return
+    }
+
+    setVideoPromptPreviewSubmitting(true)
+    try {
+      await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
+        requestBody: {
+          shot_id: shotId,
+          model_id: selectedVideoModelId,
+          reference_mode: 'first',
+          prompt,
+          images: [],
+          ratio: '16:9',
+          resolution: videoResolution,
+          quote_token: videoQuote.quoteToken,
+        },
+      })
+      message.success('视频生成任务已提交')
+      setVideoPromptPreviewOpen(false)
+      await loadPage()
+    } catch (error) {
+      const pointsAware = makePointsAwareGetErrorMessage(videoQuote.refresh)
+      message.error(pointsAware(error, '发起视频生成失败'))
+    } finally {
+      setVideoPromptPreviewSubmitting(false)
+    }
+  }, [loadPage, selectedVideoModelId, shotId, videoPromptPreviewDraft, videoQuote.quoteToken, videoQuote.refresh, videoResolution])
+
+  /**
    * 打开视频生成诊断抽屉，并按首帧参考模式读取当前镜头准备度。
-   * 诊断只用于展示缺口，不在本任务内提交视频生成。
+   * 诊断只用于展示缺口，不承载生成任务的运行态信息。
    */
   const openVideoDiagnostics = useCallback(async () => {
     if (!shotId) return
@@ -1734,7 +1908,37 @@ export function ChapterShotEditPage() {
           shot={shot}
           shotDetail={shotDetail}
           preparationState={preparationState}
+          videoModels={videoModels}
+          selectedVideoModelId={selectedVideoModelId}
+          videoModelsLoading={videoModelsLoading}
+          videoResolution={videoResolution}
+          quoteNode={
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <Typography.Text strong>积分报价</Typography.Text>
+                <div className="mt-1 text-xs text-slate-500">
+                  报价随模型、镜头时长和清晰度变化，提交前会使用当前 quote token 校验。
+                </div>
+              </div>
+              <div className="text-sm">
+                {videoQuote.loading ? (
+                  <Typography.Text type="secondary">试算中...</Typography.Text>
+                ) : videoQuote.error ? (
+                  <Typography.Text type="danger">{videoQuote.error}</Typography.Text>
+                ) : videoQuote.quote ? (
+                  <Typography.Text>
+                    预计消耗 <Typography.Text strong>{videoQuote.quote.required_points.toLocaleString()}</Typography.Text> 积分
+                  </Typography.Text>
+                ) : (
+                  <Typography.Text type="secondary">选择模型并设置时长后显示</Typography.Text>
+                )}
+              </div>
+            </div>
+          }
+          onModelChange={setSelectedVideoModelId}
+          onResolutionChange={setVideoResolution}
           onOpenDiagnostics={() => void openVideoDiagnostics()}
+          onOpenPromptPreview={() => void openVideoPromptPreview()}
         />
       ),
     },
@@ -2110,6 +2314,53 @@ export function ChapterShotEditPage() {
         onSelect={(entityId, entityName) => void doAddLink(entityId, entityName)}
         onClose={() => setAddDrawerOpen(false)}
       />
+
+      <Modal
+        title="视频生成提示词预览"
+        open={videoPromptPreviewOpen}
+        onCancel={() => {
+          if (videoPromptPreviewSubmitting) return
+          setVideoPromptPreviewOpen(false)
+        }}
+        width={900}
+        destroyOnClose
+        footer={
+          <div className="flex items-center justify-end gap-3">
+            <Button onClick={() => setVideoPromptPreviewOpen(false)} disabled={videoPromptPreviewSubmitting}>
+              取消
+            </Button>
+            <PointsCostButton
+              type="primary"
+              loading={videoPromptPreviewSubmitting}
+              quote={videoQuote.quote}
+              quoteLoading={videoQuote.loading}
+              quoteError={videoQuote.error}
+              onClick={() => void submitVideoGeneration()}
+            >
+              确认生成
+            </PointsCostButton>
+          </div>
+        }
+      >
+        {videoPromptPreviewLoading ? (
+          <div className="py-8 text-center">
+            <Spin />
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              <div>参考模式：首帧</div>
+              <div>清晰度：{videoResolution}</div>
+            </div>
+            <TextArea
+              rows={14}
+              value={videoPromptPreviewDraft}
+              onChange={(event) => setVideoPromptPreviewDraft(event.target.value)}
+              placeholder="视频提示词"
+            />
+          </div>
+        )}
+      </Modal>
 
       <ExtractionConfirmModal
         open={extractConfirmOpen}

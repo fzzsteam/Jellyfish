@@ -1,4 +1,5 @@
-import { Card, Empty, Typography } from 'antd'
+import { Button, Card, Empty, Space, Tag, Typography } from 'antd'
+import { DownloadOutlined, VideoCameraOutlined } from '@ant-design/icons'
 import type { ShotRead } from '../../../../services/generated'
 import { buildFileDownloadUrl } from '../../assets/utils'
 
@@ -19,12 +20,25 @@ export function ShotVideoResultsTab({ shot }: ShotVideoResultsTabProps) {
   }
 
   return (
-    <Card title="视频结果">
-      <div className="space-y-3">
+    <Card
+      title={
+        <Space>
+          <VideoCameraOutlined />
+          <span>视频结果</span>
+          <Tag color="green">当前使用</Tag>
+        </Space>
+      }
+      extra={
+        <Button icon={<DownloadOutlined />} href={videoUrl} download>
+          下载
+        </Button>
+      }
+    >
+      <div className="space-y-4">
         <video
           src={videoUrl}
           controls
-          className="w-full max-h-[520px] rounded-lg bg-black"
+          className="w-full max-h-[560px] rounded-lg bg-black"
         >
           当前浏览器不支持视频播放。
         </video>
