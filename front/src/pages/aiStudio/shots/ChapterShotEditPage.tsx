@@ -96,7 +96,6 @@ type ShotAssetCreatedAndLinkedMessage = {
 
 const SHOT_DETAIL_TAB_KEYS: readonly ShotDetailTabKey[] = ['basic', 'confirm', 'generate', 'results']
 const VIDEO_GENERATION_RELATION_TYPE = 'video'
-const VIDEO_RATIO_FALLBACK: VideoRatio = '16:9'
 const SUPPORTED_VIDEO_RATIOS = new Set<VideoRatio>(['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'])
 
 function isShotDetailTabKey(value: string | null): value is ShotDetailTabKey {
@@ -121,8 +120,7 @@ function resolveVideoRatio(
   return (
     toSupportedVideoRatio(shotDetail?.override_video_ratio) ??
     toSupportedVideoRatio(projectDefaultVideoRatio) ??
-    toSupportedVideoRatio(capabilityDefaultVideoRatio) ??
-    VIDEO_RATIO_FALLBACK
+    toSupportedVideoRatio(capabilityDefaultVideoRatio)
   )
 }
 
@@ -1580,7 +1578,7 @@ export function ChapterShotEditPage() {
       return
     }
     if (!resolvedVideoRatio) {
-      message.warning('请先设置可用的视频比例')
+      message.warning('请先设置视频比例')
       return
     }
     if (!selectedVideoModelId) {
@@ -1648,7 +1646,7 @@ export function ChapterShotEditPage() {
       return
     }
     if (!resolvedVideoRatio) {
-      message.warning('请先设置可用的视频比例')
+      message.warning('请先设置视频比例')
       return
     }
     const prompt = videoPromptPreviewDraft.trim()

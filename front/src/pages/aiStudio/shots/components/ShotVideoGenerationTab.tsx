@@ -37,7 +37,7 @@ function getGenerateDisabledReason(
   if (!shot) return '未选择镜头'
   if (!(preparationState?.ready_for_generation ?? shot.status === 'ready')) return '未完成准备'
   if (!shotDetail?.duration || shotDetail.duration <= 0) return '未设置时长'
-  if (!videoRatio) return '未设置视频比例'
+  if (!videoRatio) return '请先设置视频比例'
   if (!selectedVideoModelId) return '未选择视频模型'
   if (videoReadinessLoading) return '检查生成条件中'
   if (videoReadinessReady !== true) return '首帧未就绪'
