@@ -255,8 +255,9 @@ const MainLayout: React.FC = () => {
             padding: 0,
           }}
         >
-          {/* 四个等距导航按钮
-              - visible=false 时用 visibility:hidden 占位，保证按钮始终保持等宽
+          {/* 项目级导航按钮
+              - 仅保留"主页面"与"项目工作台"两项
+              - 使用固定宽度按钮；visible=false 时用 visibility:hidden 保留占位
               - enabled=false 时置灰不可点击（进度锁定效果）
           */}
           <div className="flex-1 flex items-stretch h-full">
@@ -290,7 +291,7 @@ const MainLayout: React.FC = () => {
                     cursor: enabled ? 'pointer' : 'not-allowed',
                     transition: 'all 0.2s',
                     whiteSpace: 'nowrap',
-                    // 不可见时保留占位空间，让"主页面"始终维持 1/4 宽度
+                    // 不可见时保留占位空间，避免项目级导航按钮宽度跳变
                     visibility: visible ? 'visible' : 'hidden',
                   }}
                 >

@@ -5,7 +5,6 @@ import {
 } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import type { TabKey } from '../constants'
 import { useProject, useChapters } from '../hooks/useProjectData'
 import { StudioShotLinksService } from '../../../../../services/generated'
 import {
@@ -71,7 +70,7 @@ async function loadProjectAssetHealthCounts(projectId: string): Promise<AssetHea
   return { roles, scenes, props }
 }
 
-export function DashboardTab(_props: { onSelectTab: (tab: TabKey) => void }) {
+export function DashboardTab() {
   const navigate = useNavigate()
   const { projectId } = useParams<{ projectId: string }>()
   const { project, loading: projectLoading } = useProject(projectId)

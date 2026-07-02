@@ -194,7 +194,7 @@ const ProjectWorkbench: React.FC = () => {
         className="pt-4 animate-fadeIn flex-1 min-h-0 overflow-hidden"
         style={{ animation: 'fadeIn 0.25s ease-out' }}
       >
-        {activeTab === 'dashboard' && <DashboardTab onSelectTab={setTabInUrl} />}
+        {activeTab === 'dashboard' && <DashboardTab />}
 
         {activeTab === 'chapters' && <ChaptersTab />}
 
