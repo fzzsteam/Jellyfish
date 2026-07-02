@@ -9,6 +9,10 @@ type ShotVideoGenerationTabProps = {
   onOpenDiagnostics: () => void
 }
 
+/**
+ * 计算生成入口不可用的最短原因。
+ * 该原因直接作为按钮 Tooltip，避免页面常驻展示完整 readiness 明细。
+ */
 function getGenerateDisabledReason(
   shot: ShotRead | null,
   shotDetail: ShotDetailRead | null,

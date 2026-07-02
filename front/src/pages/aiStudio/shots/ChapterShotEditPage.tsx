@@ -26,6 +26,7 @@ import {
 import { executeAsyncTaskCreate, executeTaskCancel, notifyExistingTask } from '../components/taskActionHelpers'
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
+  getChapterShotDetailPath,
   getChapterShotEditPath,
   getChapterShotsPath,
   type ShotDetailTabKey,
@@ -291,8 +292,11 @@ export function ChapterShotEditPage() {
   const dialogDebounceTimersRef = useRef<Map<number, number>>(new Map())
   const tabAutoInitShotIdRef = useRef<string | null>(null)
   const editorTabMemoryRef = useRef<Record<string, ShotDetailTabKey>>({})
+  const videoDiagnosticsRequestSeqRef = useRef(0)
+  const currentShotIdRef = useRef<string | null>(shotId ?? null)
   const urlTabParam = searchParams.get('tab')
   const explicitUrlTabKey = isShotDetailTabKey(urlTabParam) ? urlTabParam : null
+  currentShotIdRef.current = shotId ?? null
 
   const shotsSorted = useMemo(
     () => [...shots].sort((a, b) => a.index - b.index),
@@ -728,6 +732,13 @@ export function ChapterShotEditPage() {
   }, [shotId])
 
   useEffect(() => {
+    videoDiagnosticsRequestSeqRef.current += 1
+    setVideoDiagnosticsOpen(false)
+    setVideoDiagnosticsLoading(false)
+    setVideoDiagnosticsReadiness(null)
+  }, [shotId])
+
+  useEffect(() => {
     if (!projectId || !chapterId || !shotId) return
 
     const resetExistenceCache = () => {
@@ -1007,7 +1018,7 @@ export function ChapterShotEditPage() {
   const goShot = (id: string) => {
     if (!projectId || !chapterId || id === shotId) return
     setSelectedShotIds([id])
-    navigate(`/projects/${projectId}/chapters/${chapterId}/shots/${id}/edit`)
+    navigate(getChapterShotDetailPath(projectId, chapterId, id, editorTabKey))
   }
   const handleShotListClick = useCallback(
     (targetShotId: string, e: React.MouseEvent) => {
@@ -1322,19 +1333,26 @@ export function ChapterShotEditPage() {
    */
   const openVideoDiagnostics = useCallback(async () => {
     if (!shotId) return
+    const requestShotId = shotId
+    const requestSeq = ++videoDiagnosticsRequestSeqRef.current
     setVideoDiagnosticsOpen(true)
     setVideoDiagnosticsLoading(true)
+    setVideoDiagnosticsReadiness(null)
     try {
       const res = await StudioShotsService.getShotVideoReadinessApiApiV1StudioShotsShotIdVideoReadinessGet({
-        shotId,
+        shotId: requestShotId,
         referenceMode: 'first',
       })
+      if (requestSeq !== videoDiagnosticsRequestSeqRef.current || currentShotIdRef.current !== requestShotId) return
       setVideoDiagnosticsReadiness(res.data ?? null)
     } catch {
+      if (requestSeq !== videoDiagnosticsRequestSeqRef.current || currentShotIdRef.current !== requestShotId) return
       message.error('加载生成诊断失败')
       setVideoDiagnosticsReadiness(null)
     } finally {
-      setVideoDiagnosticsLoading(false)
+      if (requestSeq === videoDiagnosticsRequestSeqRef.current && currentShotIdRef.current === requestShotId) {
+        setVideoDiagnosticsLoading(false)
+      }
     }
   }, [shotId])
 
