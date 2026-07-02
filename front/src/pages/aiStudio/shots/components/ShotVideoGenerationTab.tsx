@@ -11,6 +11,9 @@ type ShotVideoGenerationTabProps = {
   selectedVideoModelId: string | null
   videoModelsLoading: boolean
   videoResolution: '720p' | '1080p'
+  videoRatio: string | null
+  videoReadinessReady: boolean | null
+  videoReadinessLoading: boolean
   quoteNode: ReactNode
   onModelChange: (modelId: string) => void
   onResolutionChange: (resolution: '720p' | '1080p') => void
@@ -27,11 +30,17 @@ function getGenerateDisabledReason(
   shotDetail: ShotDetailRead | null,
   preparationState: ShotPreparationStateRead | null,
   selectedVideoModelId: string | null,
+  videoRatio: string | null,
+  videoReadinessReady: boolean | null,
+  videoReadinessLoading: boolean,
 ): string | null {
   if (!shot) return '未选择镜头'
   if (!(preparationState?.ready_for_generation ?? shot.status === 'ready')) return '未完成准备'
   if (!shotDetail?.duration || shotDetail.duration <= 0) return '未设置时长'
+  if (!videoRatio) return '未设置视频比例'
   if (!selectedVideoModelId) return '未选择视频模型'
+  if (videoReadinessLoading) return '检查生成条件中'
+  if (videoReadinessReady !== true) return '首帧未就绪'
   return null
 }
 
@@ -47,13 +56,24 @@ export function ShotVideoGenerationTab({
   selectedVideoModelId,
   videoModelsLoading,
   videoResolution,
+  videoRatio,
+  videoReadinessReady,
+  videoReadinessLoading,
   quoteNode,
   onModelChange,
   onResolutionChange,
   onOpenDiagnostics,
   onOpenPromptPreview,
 }: ShotVideoGenerationTabProps) {
-  const disabledReason = getGenerateDisabledReason(shot, shotDetail, preparationState, selectedVideoModelId)
+  const disabledReason = getGenerateDisabledReason(
+    shot,
+    shotDetail,
+    preparationState,
+    selectedVideoModelId,
+    videoRatio,
+    videoReadinessReady,
+    videoReadinessLoading,
+  )
   const readyForGeneration = !disabledReason
 
   return (
@@ -84,7 +104,7 @@ export function ShotVideoGenerationTab({
               {shotDetail?.duration ? `${shotDetail.duration}s` : '未设置'}
             </Descriptions.Item>
             <Descriptions.Item label="视频比例">
-              {shotDetail?.override_video_ratio || '继承项目默认'}
+              {videoRatio ?? '未设置'}
             </Descriptions.Item>
             <Descriptions.Item label="准备状态">
               {preparationState?.ready_for_generation ? '准备完成' : '待继续准备'}

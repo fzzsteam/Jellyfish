@@ -15,6 +15,7 @@ import type {
   ShotPreparationStateRead,
   ShotRead,
   ShotVideoReadinessRead,
+  VideoPromptPreviewRequest,
 } from '../../../services/generated'
 import {
   FilmService,
@@ -53,11 +54,13 @@ import { PointsCostButton } from '../../../components/points/PointsCostButton'
 import { makePointsAwareGetErrorMessage } from '../../../components/points/pointsTaskError'
 import { ExtractionConfirmModal } from './components/ExtractionConfirmModal'
 import {
+  type RelationTaskState,
   SCRIPT_EXTRACTION_RELATION_TYPE,
   useCancelableRelationTask,
 } from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { StudioEntitiesApi } from '../../../services/studioEntities'
 import { resolveAssetUrl } from '../assets/utils'
+import { useProjectStyleOptions } from '../project/useProjectStyleOptions'
 
 const { Header, Content } = Layout
 const { TextArea } = Input
@@ -80,6 +83,7 @@ type AssetVM = NamedDraft & {
   candidateStatus?: ShotAssetOverviewItem['candidate_status']
 }
 type ShotListFilter = 'all' | 'not_extracted' | 'pending'
+type VideoRatio = NonNullable<VideoPromptPreviewRequest['ratio']>
 
 type ShotAssetCreatedAndLinkedMessage = {
   type: 'studio-shot-asset-created-and-linked'
@@ -91,9 +95,35 @@ type ShotAssetCreatedAndLinkedMessage = {
 }
 
 const SHOT_DETAIL_TAB_KEYS: readonly ShotDetailTabKey[] = ['basic', 'confirm', 'generate', 'results']
+const VIDEO_GENERATION_RELATION_TYPE = 'video'
+const VIDEO_RATIO_FALLBACK: VideoRatio = '16:9'
+const SUPPORTED_VIDEO_RATIOS = new Set<VideoRatio>(['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'])
 
 function isShotDetailTabKey(value: string | null): value is ShotDetailTabKey {
   return !!value && SHOT_DETAIL_TAB_KEYS.includes(value as ShotDetailTabKey)
+}
+
+/** 将任意字符串收窄为视频生成接口允许的 ratio；非法值返回 null。 */
+function toSupportedVideoRatio(value: string | null | undefined): VideoRatio | null {
+  const trimmed = String(value ?? '').trim()
+  return SUPPORTED_VIDEO_RATIOS.has(trimmed as VideoRatio) ? (trimmed as VideoRatio) : null
+}
+
+/**
+ * 按镜头覆盖、项目默认、后端能力默认的顺序解析视频比例。
+ * 只返回 OpenAPI 允许的 ratio union，避免预览和提交 payload 与页面展示不一致。
+ */
+function resolveVideoRatio(
+  shotDetail: ShotDetailRead | null,
+  projectDefaultVideoRatio: string,
+  capabilityDefaultVideoRatio: string,
+): VideoRatio | null {
+  return (
+    toSupportedVideoRatio(shotDetail?.override_video_ratio) ??
+    toSupportedVideoRatio(projectDefaultVideoRatio) ??
+    toSupportedVideoRatio(capabilityDefaultVideoRatio) ??
+    VIDEO_RATIO_FALLBACK
+  )
 }
 
 const DEFAULT_EXTRACTION_SUMMARY: ShotExtractionSummaryRead = {
@@ -215,6 +245,7 @@ function overviewTypeToAssetKind(kind: ShotAssetOverviewItem['type']): AssetKind
 export function ChapterShotEditPage() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  const { defaultVideoRatio: capabilityDefaultVideoRatio } = useProjectStyleOptions()
   const { projectId, chapterId, shotId } = useParams<{
     projectId: string
     chapterId: string
@@ -225,6 +256,7 @@ export function ChapterShotEditPage() {
   const [chapterIndex, setChapterIndex] = useState<number | null>(null)
   const [projectVisualStyle, setProjectVisualStyle] = useState<string>('现实')
   const [projectStyle, setProjectStyle] = useState<string>('真人都市')
+  const [projectDefaultVideoRatio, setProjectDefaultVideoRatio] = useState<string>('')
   const [shots, setShots] = useState<ShotRead[]>([])
   const [shot, setShot] = useState<ShotRead | null>(null)
   const [title, setTitle] = useState('')
@@ -297,6 +329,8 @@ export function ChapterShotEditPage() {
   const [videoDiagnosticsOpen, setVideoDiagnosticsOpen] = useState(false)
   const [videoDiagnosticsLoading, setVideoDiagnosticsLoading] = useState(false)
   const [videoDiagnosticsReadiness, setVideoDiagnosticsReadiness] = useState<ShotVideoReadinessRead | null>(null)
+  const [firstFrameReadiness, setFirstFrameReadiness] = useState<ShotVideoReadinessRead | null>(null)
+  const [firstFrameReadinessLoading, setFirstFrameReadinessLoading] = useState(false)
   const [videoModels, setVideoModels] = useState<VideoModelOption[]>([])
   const [selectedVideoModelId, setSelectedVideoModelId] = useState<string | null>(null)
   const [videoModelsLoading, setVideoModelsLoading] = useState(false)
@@ -305,6 +339,7 @@ export function ChapterShotEditPage() {
   const [videoPromptPreviewLoading, setVideoPromptPreviewLoading] = useState(false)
   const [videoPromptPreviewSubmitting, setVideoPromptPreviewSubmitting] = useState(false)
   const [videoPromptPreviewDraft, setVideoPromptPreviewDraft] = useState('')
+  const [videoPromptPreviewShotId, setVideoPromptPreviewShotId] = useState<string | null>(null)
   // 视频生成试算绑定模型、镜头时长与清晰度；提示词预览弹窗提交时复用同一 quote_token。
   const videoQuote = usePointsQuote({
     businessType: 'video_generation',
@@ -319,6 +354,8 @@ export function ChapterShotEditPage() {
   const tabAutoInitShotIdRef = useRef<string | null>(null)
   const editorTabMemoryRef = useRef<Record<string, ShotDetailTabKey>>({})
   const videoDiagnosticsRequestSeqRef = useRef(0)
+  const firstFrameReadinessRequestSeqRef = useRef(0)
+  const videoPromptPreviewRequestSeqRef = useRef(0)
   const currentShotIdRef = useRef<string | null>(shotId ?? null)
   const urlTabParam = searchParams.get('tab')
   const explicitUrlTabKey = isShotDetailTabKey(urlTabParam) ? urlTabParam : null
@@ -431,12 +468,14 @@ export function ChapterShotEditPage() {
       ])
       const nextVisualStyle = projectRes.data?.visual_style
       const nextStyle = projectRes.data?.style
+      const nextDefaultVideoRatio = projectRes.data?.default_video_ratio
       if (typeof nextVisualStyle === 'string' && nextVisualStyle.trim()) {
         setProjectVisualStyle(nextVisualStyle)
       }
       if (typeof nextStyle === 'string' && nextStyle.trim()) {
         setProjectStyle(nextStyle)
       }
+      setProjectDefaultVideoRatio(typeof nextDefaultVideoRatio === 'string' ? nextDefaultVideoRatio : '')
 
       const c = chRes.data
       setChapterTitle(c?.title ?? '')
@@ -591,21 +630,46 @@ export function ChapterShotEditPage() {
     createTaskSettledReloader(loadPage),
     [loadPage],
   )
+  const reloadAfterVideoGenerationSettled = useCallback(
+    createTaskSettledReloader(loadPage),
+    [loadPage],
+  )
   const { task: extractTask, settledTask: extractSettledTask, trackTaskData: trackExtractTaskData, applyCancelData: applyExtractCancelData } = useCancelableRelationTask({
     enabled: !!chapterId,
     relationType: SCRIPT_EXTRACTION_RELATION_TYPE,
     relationEntityId: chapterId,
     onTaskSettled: reloadAfterExtractTaskSettled,
   })
+  const {
+    task: videoGenerationRelation,
+    settledTask: videoGenerationSettled,
+    setTrackedTask: setTrackedVideoGeneration,
+    applyCancelData: applyVideoGenerationCancelData,
+  } = useCancelableRelationTask({
+    enabled: !!shotId,
+    relationType: VIDEO_GENERATION_RELATION_TYPE,
+    relationEntityId: shotId,
+    onTaskSettled: reloadAfterVideoGenerationSettled,
+  })
   useTaskPageContext(
-    chapterId
-      ? [
-          {
-            relationType: SCRIPT_EXTRACTION_RELATION_TYPE,
-            relationEntityId: chapterId,
-          },
-        ]
-      : [],
+    [
+      ...(chapterId
+        ? [
+            {
+              relationType: SCRIPT_EXTRACTION_RELATION_TYPE,
+              relationEntityId: chapterId,
+            },
+          ]
+        : []),
+      ...(shotId
+        ? [
+            {
+              relationType: VIDEO_GENERATION_RELATION_TYPE,
+              relationEntityId: shotId,
+            },
+          ]
+        : []),
+    ],
   )
   const extractTaskActive = !!extractTask
 
@@ -816,10 +880,48 @@ export function ChapterShotEditPage() {
 
   useEffect(() => {
     videoDiagnosticsRequestSeqRef.current += 1
+    firstFrameReadinessRequestSeqRef.current += 1
+    videoPromptPreviewRequestSeqRef.current += 1
     setVideoDiagnosticsOpen(false)
     setVideoDiagnosticsLoading(false)
     setVideoDiagnosticsReadiness(null)
+    setFirstFrameReadiness(null)
+    setFirstFrameReadinessLoading(false)
+    setVideoPromptPreviewOpen(false)
+    setVideoPromptPreviewLoading(false)
+    setVideoPromptPreviewDraft('')
+    setVideoPromptPreviewShotId(null)
   }, [shotId])
+
+  useEffect(() => {
+    if (!shotId || !preparationState?.ready_for_generation) {
+      firstFrameReadinessRequestSeqRef.current += 1
+      setFirstFrameReadiness(null)
+      setFirstFrameReadinessLoading(false)
+      return
+    }
+    const requestShotId = shotId
+    const requestSeq = ++firstFrameReadinessRequestSeqRef.current
+    setFirstFrameReadinessLoading(true)
+    setFirstFrameReadiness(null)
+    void (async () => {
+      try {
+        const res = await StudioShotsService.getShotVideoReadinessApiApiV1StudioShotsShotIdVideoReadinessGet({
+          shotId: requestShotId,
+          referenceMode: 'first',
+        })
+        if (requestSeq !== firstFrameReadinessRequestSeqRef.current || currentShotIdRef.current !== requestShotId) return
+        setFirstFrameReadiness(res.data ?? null)
+      } catch {
+        if (requestSeq !== firstFrameReadinessRequestSeqRef.current || currentShotIdRef.current !== requestShotId) return
+        setFirstFrameReadiness(null)
+      } finally {
+        if (requestSeq === firstFrameReadinessRequestSeqRef.current && currentShotIdRef.current === requestShotId) {
+          setFirstFrameReadinessLoading(false)
+        }
+      }
+    })()
+  }, [preparationState?.ready_for_generation, shotId])
 
   useEffect(() => {
     if (!projectId || !chapterId || !shotId) return
@@ -1081,6 +1183,23 @@ export function ChapterShotEditPage() {
     }
   }, [applyExtractCancelData, extractTask])
 
+  /** 取消当前镜头的视频生成 relation 任务，并把取消态同步到全局任务通知。 */
+  const cancelVideoGeneration = useCallback(async () => {
+    if (!videoGenerationRelation?.taskId) return
+    try {
+      await executeTaskCancel({
+        taskId: videoGenerationRelation.taskId,
+        reason: '用户在分镜详情页取消视频生成任务',
+        applyCancelData: applyVideoGenerationCancelData,
+        cancelledImmediatelyMessage: TASK_COPY.videoGeneration.cancelledImmediatelyMessage,
+        cancelRequestedMessage: TASK_COPY.videoGeneration.cancelRequestedMessage,
+        fallbackErrorMessage: '取消视频生成任务失败',
+      })
+    } catch {
+      // executeTaskCancel 已统一处理错误提示
+    }
+  }, [applyVideoGenerationCancelData, videoGenerationRelation])
+
   useRelationTaskNotification({
     task: extractTask,
     settledTask: extractSettledTask,
@@ -1097,13 +1216,37 @@ export function ChapterShotEditPage() {
         ? () => navigate(getChapterShotEditPath(projectId, chapterId, shotId))
         : null,
   })
+  useRelationTaskNotification({
+    task: videoGenerationRelation,
+    settledTask: videoGenerationSettled,
+    title: TASK_COPY.videoGeneration.title,
+    sourceLabel: shot?.title ? `镜头：${shot.title}` : '分镜详情页',
+    runningDescription: TASK_COPY.videoGeneration.runningDescription,
+    cancellingDescription: TASK_COPY.videoGeneration.cancellingDescription,
+    successDescription: TASK_COPY.videoGeneration.successDescription,
+    cancelledDescription: TASK_COPY.videoGeneration.cancelledDescription,
+    failedDescription: TASK_COPY.videoGeneration.failedDescription,
+    onCancel: videoGenerationRelation ? () => void cancelVideoGeneration() : null,
+    onNavigate:
+      projectId && chapterId && shotId
+        ? () => navigate(getChapterShotDetailPath(projectId, chapterId, shotId, 'results'))
+        : null,
+  })
 
   const goShot = (id: string) => {
     if (!projectId || !chapterId || id === shotId) return
     videoDiagnosticsRequestSeqRef.current += 1
+    firstFrameReadinessRequestSeqRef.current += 1
+    videoPromptPreviewRequestSeqRef.current += 1
     setVideoDiagnosticsOpen(false)
     setVideoDiagnosticsLoading(false)
     setVideoDiagnosticsReadiness(null)
+    setFirstFrameReadiness(null)
+    setFirstFrameReadinessLoading(false)
+    setVideoPromptPreviewOpen(false)
+    setVideoPromptPreviewLoading(false)
+    setVideoPromptPreviewDraft('')
+    setVideoPromptPreviewShotId(null)
     setSelectedShotIds([id])
     navigate(getChapterShotDetailPath(projectId, chapterId, id, editorTabKey))
   }
@@ -1414,6 +1557,11 @@ export function ChapterShotEditPage() {
     [applyPreparationState, loadPreparationState, shotId],
   )
 
+  const resolvedVideoRatio = useMemo(
+    () => resolveVideoRatio(shotDetail, projectDefaultVideoRatio, capabilityDefaultVideoRatio),
+    [capabilityDefaultVideoRatio, projectDefaultVideoRatio, shotDetail],
+  )
+
   /**
    * 打开单镜头视频提示词预览。
    * 本页仅迁移首帧参考模式的最小生成路径；提交前先让用户确认提示词和积分消耗。
@@ -1431,32 +1579,60 @@ export function ChapterShotEditPage() {
       message.warning('请先设置镜头时长')
       return
     }
+    if (!resolvedVideoRatio) {
+      message.warning('请先设置可用的视频比例')
+      return
+    }
     if (!selectedVideoModelId) {
       message.warning('请先选择视频模型')
       return
     }
+    if (firstFrameReadinessLoading) {
+      message.warning('正在检查首帧生成条件，请稍后再试')
+      return
+    }
+    if (firstFrameReadiness?.ready !== true) {
+      message.warning('当前镜头首帧模式还未就绪，请先查看诊断')
+      return
+    }
 
+    const requestShotId = shotId
+    const requestSeq = ++videoPromptPreviewRequestSeqRef.current
     setVideoPromptPreviewDraft('')
+    setVideoPromptPreviewShotId(requestShotId)
     setVideoPromptPreviewOpen(true)
     setVideoPromptPreviewLoading(true)
     try {
       const res = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
         requestBody: {
-          shot_id: shotId,
+          shot_id: requestShotId,
           reference_mode: 'first',
           prompt: null,
           images: [],
-          ratio: '16:9',
+          ratio: resolvedVideoRatio,
         },
       })
+      if (requestSeq !== videoPromptPreviewRequestSeqRef.current || currentShotIdRef.current !== requestShotId) return
       setVideoPromptPreviewDraft(res.data?.prompt ?? '')
     } catch {
+      if (requestSeq !== videoPromptPreviewRequestSeqRef.current || currentShotIdRef.current !== requestShotId) return
       message.error('获取视频提示词预览失败')
       setVideoPromptPreviewOpen(false)
+      setVideoPromptPreviewShotId(null)
     } finally {
-      setVideoPromptPreviewLoading(false)
+      if (requestSeq === videoPromptPreviewRequestSeqRef.current && currentShotIdRef.current === requestShotId) {
+        setVideoPromptPreviewLoading(false)
+      }
     }
-  }, [preparationState?.ready_for_generation, selectedVideoModelId, shotDetail?.duration, shotId])
+  }, [
+    firstFrameReadiness?.ready,
+    firstFrameReadinessLoading,
+    preparationState?.ready_for_generation,
+    resolvedVideoRatio,
+    selectedVideoModelId,
+    shotDetail?.duration,
+    shotId,
+  ])
 
   /**
    * 提交当前提示词生成视频任务。
@@ -1465,6 +1641,14 @@ export function ChapterShotEditPage() {
   const submitVideoGeneration = useCallback(async () => {
     if (!shotId) {
       message.warning('请先选择一个分镜')
+      return
+    }
+    if (!videoPromptPreviewOpen || videoPromptPreviewShotId !== shotId) {
+      message.warning('当前提示词预览已失效，请重新预览')
+      return
+    }
+    if (!resolvedVideoRatio) {
+      message.warning('请先设置可用的视频比例')
       return
     }
     const prompt = videoPromptPreviewDraft.trim()
@@ -1483,28 +1667,50 @@ export function ChapterShotEditPage() {
 
     setVideoPromptPreviewSubmitting(true)
     try {
-      await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
+      const created = await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
         requestBody: {
           shot_id: shotId,
           model_id: selectedVideoModelId,
           reference_mode: 'first',
           prompt,
           images: [],
-          ratio: '16:9',
+          ratio: resolvedVideoRatio,
           resolution: videoResolution,
           quote_token: videoQuote.quoteToken,
         },
       })
+      const taskId = created.data?.task_id ?? null
+      if (taskId) {
+        const nextRelation: RelationTaskState = {
+          taskId,
+          status: 'pending',
+          progress: 0,
+          cancelRequested: false,
+        }
+        setTrackedVideoGeneration(nextRelation)
+      }
       message.success('视频生成任务已提交')
       setVideoPromptPreviewOpen(false)
-      await loadPage()
+      setVideoPromptPreviewShotId(null)
+      setVideoPromptPreviewDraft('')
     } catch (error) {
       const pointsAware = makePointsAwareGetErrorMessage(videoQuote.refresh)
       message.error(pointsAware(error, '发起视频生成失败'))
     } finally {
       setVideoPromptPreviewSubmitting(false)
     }
-  }, [loadPage, selectedVideoModelId, shotId, videoPromptPreviewDraft, videoQuote.quoteToken, videoQuote.refresh, videoResolution])
+  }, [
+    resolvedVideoRatio,
+    selectedVideoModelId,
+    setTrackedVideoGeneration,
+    shotId,
+    videoPromptPreviewDraft,
+    videoPromptPreviewOpen,
+    videoPromptPreviewShotId,
+    videoQuote.quoteToken,
+    videoQuote.refresh,
+    videoResolution,
+  ])
 
   /**
    * 打开视频生成诊断抽屉，并按首帧参考模式读取当前镜头准备度。
@@ -1913,6 +2119,9 @@ export function ChapterShotEditPage() {
           selectedVideoModelId={selectedVideoModelId}
           videoModelsLoading={videoModelsLoading}
           videoResolution={videoResolution}
+          videoRatio={resolvedVideoRatio}
+          videoReadinessReady={firstFrameReadiness?.ready ?? null}
+          videoReadinessLoading={firstFrameReadinessLoading}
           quoteNode={
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">
@@ -2321,13 +2530,26 @@ export function ChapterShotEditPage() {
         open={videoPromptPreviewOpen}
         onCancel={() => {
           if (videoPromptPreviewSubmitting) return
+          videoPromptPreviewRequestSeqRef.current += 1
           setVideoPromptPreviewOpen(false)
+          setVideoPromptPreviewLoading(false)
+          setVideoPromptPreviewDraft('')
+          setVideoPromptPreviewShotId(null)
         }}
         width={900}
         destroyOnClose
         footer={
           <div className="flex items-center justify-end gap-3">
-            <Button onClick={() => setVideoPromptPreviewOpen(false)} disabled={videoPromptPreviewSubmitting}>
+            <Button
+              onClick={() => {
+                videoPromptPreviewRequestSeqRef.current += 1
+                setVideoPromptPreviewOpen(false)
+                setVideoPromptPreviewLoading(false)
+                setVideoPromptPreviewDraft('')
+                setVideoPromptPreviewShotId(null)
+              }}
+              disabled={videoPromptPreviewSubmitting}
+            >
               取消
             </Button>
             <PointsCostButton
@@ -2351,6 +2573,7 @@ export function ChapterShotEditPage() {
           <div className="space-y-3">
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
               <div>参考模式：首帧</div>
+              <div>视频比例：{resolvedVideoRatio ?? '未设置'}</div>
               <div>清晰度：{videoResolution}</div>
             </div>
             <TextArea
