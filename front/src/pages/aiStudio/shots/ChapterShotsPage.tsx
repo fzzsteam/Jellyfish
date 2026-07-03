@@ -25,11 +25,14 @@ import {
   CloseCircleOutlined,
   DeleteOutlined,
   EditOutlined,
+  EyeInvisibleOutlined,
   PlusOutlined,
   ReloadOutlined,
   ScissorOutlined,
+  StopOutlined,
+  UndoOutlined,
 } from '@ant-design/icons'
-import type { ShotRead, ShotRuntimeSummaryRead } from '../../../services/generated'
+import type { ShotRead, ShotRuntimeSummaryRead, ShotVideoReadinessRead } from '../../../services/generated'
 import { ScriptProcessingService, StudioChaptersService, StudioShotsService } from '../../../services/generated'
 import { executeAsyncTaskCreate, executeTaskCancel } from '../components/taskActionHelpers'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
@@ -44,6 +47,7 @@ import { usePointsQuote } from '../../../hooks/usePointsQuote'
 import { makePointsAwareGetErrorMessage } from '../../../components/points/pointsTaskError'
 import { ExtractionConfirmModal } from './components/ExtractionConfirmModal'
 import { ShotBatchToolbar } from './components/ShotBatchToolbar'
+import { VideoDiagnosticsDrawer } from './components/VideoDiagnosticsDrawer'
 import { getShotFlowState, type ShotFlowDetailTab, type ShotFlowFilterKey } from './shotFlowStatus'
 
 const { Header, Content } = Layout
@@ -57,6 +61,15 @@ type ShotRuntimeState = {
   active_task_count: number
 }
 
+type BatchDiagnosticItem = {
+  shot: ShotRead
+  readiness: ShotVideoReadinessRead | null
+  error?: string
+}
+
+/**
+ * 展示章节分镜队列，并承接批量维护与批量诊断等低频列表动作。
+ */
 export function ChapterShotsPage() {
   const taskCopy = TASK_COPY.chapterDivision
   const navigate = useNavigate()
@@ -83,6 +96,9 @@ export function ChapterShotsPage() {
   const [insertForm] = Form.useForm<{ title: string; script_excerpt?: string }>()
   const [chapterDivisionTaskLoading, setChapterDivisionTaskLoading] = useState(false)
   const [extractConfirmOpen, setExtractConfirmOpen] = useState(false)
+  const [batchDiagnosticsOpen, setBatchDiagnosticsOpen] = useState(false)
+  const [batchDiagnosticsLoading, setBatchDiagnosticsLoading] = useState(false)
+  const [batchDiagnostics, setBatchDiagnostics] = useState<BatchDiagnosticItem[]>([])
 
   const refresh = async () => {
     if (!chapterId) return
@@ -470,8 +486,56 @@ export function ChapterShotsPage() {
     [deletingId, extracting, handleDelete],
   )
 
+  /**
+   * 对当前选中的镜头逐条拉取视频准备度，供列表页按需查看批量诊断结果。
+   * 单条失败时保留镜头上下文，避免局部错误导致整批结果丢失。
+   */
+  const runBatchDiagnostics = useCallback(async () => {
+    if (selectedShotIds.length === 0) {
+      message.warning('请先选择分镜')
+      return
+    }
+
+    const selectedShots = shots.filter((shot) => selectedShotIds.includes(shot.id))
+    setBatchDiagnosticsOpen(true)
+    setBatchDiagnosticsLoading(true)
+    setBatchDiagnostics([])
+
+    try {
+      const results: BatchDiagnosticItem[] = []
+      for (const shot of selectedShots) {
+        try {
+          const res = await StudioShotsService.getShotVideoReadinessApiApiV1StudioShotsShotIdVideoReadinessGet({
+            shotId: shot.id,
+            referenceMode: 'first',
+          })
+          results.push({
+            shot,
+            readiness: res.data ?? null,
+          })
+        } catch {
+          results.push({
+            shot,
+            readiness: null,
+            error: '诊断失败',
+          })
+        }
+      }
+      setBatchDiagnostics(results)
+    } finally {
+      setBatchDiagnosticsLoading(false)
+    }
+  }, [selectedShotIds, shots])
+
   const batchMaintenanceMenuItems: MenuProps['items'] = useMemo(
     () => [
+      {
+        key: 'hide',
+        label: '隐藏',
+        icon: <EyeInvisibleOutlined />,
+        disabled: extracting || batchDeleting,
+        onClick: () => message.warning('请先完成维护动作接入'),
+      },
       {
         key: 'delete',
         label: '删除',
@@ -479,6 +543,20 @@ export function ChapterShotsPage() {
         icon: <DeleteOutlined />,
         disabled: extracting || batchDeleting,
         onClick: confirmBatchDelete,
+      },
+      {
+        key: 'skip-extraction',
+        label: '维护：标记无需提取',
+        icon: <StopOutlined />,
+        disabled: extracting || batchDeleting,
+        onClick: () => message.warning('请先完成维护动作接入'),
+      },
+      {
+        key: 'restore-extraction',
+        label: '维护：恢复提取',
+        icon: <UndoOutlined />,
+        disabled: extracting || batchDeleting,
+        onClick: () => message.warning('请先完成维护动作接入'),
       },
     ],
     [batchDeleting, confirmBatchDelete, extracting],
@@ -762,10 +840,11 @@ export function ChapterShotsPage() {
               <ShotBatchToolbar
                 selectedCount={selectedRowKeys.length}
                 disabled={extracting || batchDeleting}
+                diagnosticLoading={batchDiagnosticsLoading}
                 maintenanceMenuItems={batchMaintenanceMenuItems}
                 onBatchGenerate={() => message.warning('请先完成单镜头生成配置后再批量生成')}
                 onBatchDownload={() => message.warning('当前选中镜头暂无可下载视频')}
-                onBatchDiagnose={() => message.warning('请先完成诊断接入')}
+                onBatchDiagnose={() => void runBatchDiagnostics()}
                 onClearSelection={() => setSelectedRowKeys([])}
               />
             ) : null}
@@ -869,6 +948,19 @@ export function ChapterShotsPage() {
           },
         ]}
         note="资产图数量由 AI 拆解后生成的分镜数决定，拆解前无法预知；积分不足时对应资产将建档但不生成图片。"
+      />
+
+      <VideoDiagnosticsDrawer
+        open={batchDiagnosticsOpen}
+        loading={batchDiagnosticsLoading}
+        title="批量诊断"
+        readiness={null}
+        batchItems={batchDiagnostics.map(({ shot, readiness, error }) => ({
+          title: shot.title || `第 ${shot.index} 镜`,
+          readiness,
+          error,
+        }))}
+        onClose={() => setBatchDiagnosticsOpen(false)}
       />
 
     </Layout>
