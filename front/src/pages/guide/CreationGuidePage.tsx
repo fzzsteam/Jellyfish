@@ -20,7 +20,7 @@ const guideSections: GuideSection[] = [
   { id: 'chapter', title: '录入章节剧本', eyebrow: '3', summary: '在项目工作台创建章节并粘贴剧本原文。' },
   { id: 'extract', title: '一键提取分镜并自动准备', eyebrow: '4', summary: '拆镜头、识别资产对白、生成缺失资产图。' },
   { id: 'prepare', title: '分镜准备与确认', eyebrow: '5', summary: '校对基础信息、镜头语言、资产与对白。' },
-  { id: 'studio', title: '分镜工作室生成视频', eyebrow: '6', summary: '设置关键帧、提示词、参数，生成并选片。' },
+  { id: 'studio', title: '镜头详情生成视频', eyebrow: '6', summary: '在生成视频与视频结果步骤里出片、选片、下载。' },
   { id: 'assets', title: '资产管理与图片编辑', eyebrow: '7', summary: '管理角色、场景、道具、服装等素材。' },
   { id: 'quickstart', title: '一条最短上手路径', eyebrow: '8', summary: '按最短主线完成从剧本到素材下载。' },
 ]
@@ -36,7 +36,7 @@ const quickSteps: FlowStep[] = [
   { title: '建章节 · 粘贴剧本', description: '把整段剧本贴进「章节内容」' },
   { title: '一键提取分镜并自动准备', description: 'AI 自动拆镜头，并准备资产与台词' },
   { title: '逐镜准备与确认', description: '确认资产 / 对白 / 基础信息，推进到准备完成' },
-  { title: '进工作室生成视频', description: '检查关键帧、提示词和参数后生成视频' },
+  { title: '进入镜头详情生成视频', description: '切到「生成视频 / 视频结果」步骤，检查诊断后生成视频' },
   { title: '选片下载', description: '在结果区选用满意视频并下载成片素材' },
 ]
 
@@ -54,7 +54,7 @@ const chapterStates = [
   { key: 'raw', status: '待录入原文', meaning: '还没粘贴剧本。', action: '编辑原文' },
   { key: 'extract', status: '待提取分镜', meaning: '已有剧本，但还没拆成镜头。', action: '提取分镜并自动准备' },
   { key: 'prepare', status: '待准备镜头', meaning: '镜头已拆好，还需要确认信息。', action: '进入分镜列表或分镜编辑页' },
-  { key: 'shoot', status: '可进入拍摄', meaning: '分镜已具备后续生成条件。', action: '进入分镜工作室' },
+  { key: 'shoot', status: '待继续生成', meaning: '镜头已完成提取确认，但是否可生成仍要看视频准备度。', action: '进入分镜列表或镜头详情的生成视频步骤' },
 ]
 
 const screenshots = [
@@ -67,11 +67,11 @@ const screenshots = [
   { src: '/guide/guide-shot-006.jpg', caption: '图 07 分镜列表页' },
   { src: '/guide/guide-shot-007.jpg', caption: '图 08 分镜编辑页 · 基础信息' },
   { src: '/guide/guide-shot-008.jpg', caption: '图 09 分镜编辑页 · 提取确认' },
-  { src: '/guide/guide-shot-009.jpg', caption: '图 10 分镜工作室 · 总览' },
-  { src: '/guide/guide-shot-010.jpg', caption: '图 11 工作室 · 视频生成参数' },
-  { src: '/guide/guide-shot-011.jpg', caption: '图 12 工作室 · 生成视频' },
-  { src: '/guide/guide-shot-012.jpg', caption: '图 13 工作室 · 批量生成与下载' },
-  { src: '/guide/guide-shot-013.jpg', caption: '图 14 工作室 · 视频提示词预览' },
+  { src: '/guide/guide-shot-009.jpg', caption: '图 10 镜头详情 · 生成视频' },
+  { src: '/guide/guide-shot-010.jpg', caption: '图 11 镜头详情 · 视频生成参数' },
+  { src: '/guide/guide-shot-011.jpg', caption: '图 12 镜头详情 · 生成视频' },
+  { src: '/guide/guide-shot-012.jpg', caption: '图 13 分镜列表 · 批量生成与下载' },
+  { src: '/guide/guide-shot-013.jpg', caption: '图 14 镜头详情 · 视频提示词预览' },
   { src: '/guide/guide-shot-014.jpg', caption: '图 15 资产管理 · 资产库' },
   { src: '/guide/guide-shot-015.jpg', caption: '图 16 资产编辑 · 图片编辑' },
 ]
@@ -145,7 +145,7 @@ const CreationGuidePage: React.FC = () => {
                   dataSource={[
                     { key: 'script', stage: '① 剧本', page: '项目列表 → 项目工作台「章节」', work: '建项目、建章节、粘贴剧本原文' },
                     { key: 'shot', stage: '② 分镜', page: '分镜列表 + 分镜编辑页', work: '一键拆分镜、确认资产/对白、补镜头信息' },
-                    { key: 'video', stage: '③ 生成出片', page: '分镜工作室', work: '出关键帧、改提示词、生成视频、选片下载成片' },
+                    { key: 'video', stage: '③ 生成出片', page: '镜头详情「生成视频 / 视频结果」+ 分镜列表工具栏', work: '出关键帧、改提示词、生成视频、选片下载成片' },
                   ]}
                 />
               </div>
@@ -161,7 +161,7 @@ const CreationGuidePage: React.FC = () => {
               <p>登录后进入「主页面」，也就是所有短剧项目的列表。先确认全站四个常用位置：</p>
               <ul className="list-disc space-y-2 pl-5">
                 <li><strong>左侧菜单栏：</strong>项目列表、资产管理、提示词模板、模型管理、积分明细；管理员还能看到用户管理。</li>
-                <li><strong>顶部按钮：</strong>进入项目后按「主页面 / 项目工作台 / 分镜列表 / 分镜工作室」逐步点亮。</li>
+                <li><strong>顶部按钮：</strong>进入项目后按「主页面 / 项目工作台 / 分镜列表 / 镜头详情」逐步点亮。</li>
                 <li><strong>右上角头像：</strong>查看积分、修改密码、退出登录。</li>
                 <li><strong>左下角任务中心：</strong>查看拆分镜、生成图片、生成视频等 AI 任务进度。</li>
               </ul>
@@ -203,7 +203,7 @@ const CreationGuidePage: React.FC = () => {
                 />
               </div>
               <Figure {...screenshots[4]} />
-              <p>仪表盘可以总览未完成章节、待确认分镜、已就绪分镜和生成中分镜，也会把当前最该做的下一步放在动态摘要里。</p>
+              <p>仪表盘可以总览未完成章节、待确认分镜、准备完成分镜和生成中分镜，也会把当前最该做的下一步放在动态摘要里。</p>
             </GuideBlock>
 
             <GuideBlock id="extract" number="4" title="一键提取分镜并自动准备">
@@ -220,24 +220,24 @@ const CreationGuidePage: React.FC = () => {
             </GuideBlock>
 
             <GuideBlock id="prepare" number="5" title="分镜准备与确认（分镜编辑页）">
-              <p>在分镜列表点「编辑」进入分镜编辑页。目标是把每个镜头的信息核对好，让它达到可以生成视频的状态。</p>
+              <p>在分镜列表点「编辑」进入镜头详情。镜头详情按「基础信息 / 提取确认 / 生成视频 / 视频结果」四个步骤组织，前两个步骤先把镜头准备完整。</p>
               <Figure {...screenshots[7]} />
               <p>基础信息里重点确认标题、剧本摘录、景别、机位、运镜、时长和动作拍点。动作拍点保留 2-4 条即可。</p>
               <Figure {...screenshots[8]} />
-              <p>提取确认里检查场景、角色、道具、服装和对白。待确认候选需要关联或忽略；纯画面镜头可标记「无需提取」。</p>
-              <Alert type="success" showIcon message="效率建议" description="先把所有镜头逐个确认好，再统一进入分镜工作室批量生成视频。" />
+              <p>提取确认里检查场景、角色、道具、服装和对白。待确认候选需要关联或忽略；纯画面镜头可标记「无需提取」。`shot.status = ready` 只表示这里的确认完成，不等于已经满足视频生成条件。</p>
+              <Alert type="success" showIcon message="效率建议" description="先把所有镜头逐个确认好，再用分镜列表顶部工具栏批量生成视频。" />
             </GuideBlock>
 
-            <GuideBlock id="studio" number="6" title="分镜工作室（生成画面与视频）">
-              <p>分镜工作室负责真正出片：左栏选镜头，中间看视频结果，右栏配置关键帧、参考图、生成参数和视频生成。</p>
+            <GuideBlock id="studio" number="6" title="镜头详情（生成画面与视频）">
+              <p>当前单镜头生成入口位于镜头详情的第三个步骤「生成视频」，结果回看位于第四个步骤「视频结果」。旧 `/studio` 仅保留兼容跳转，不是主路径。</p>
               <Figure {...screenshots[9]} />
               <Figure {...screenshots[10]} />
-              <p>在「生成参数」里设置景别、角度、运镜、时长、视频比例和分辨率；在「视频生成」里选择参考图、模型和清晰度后发起生成。</p>
+              <p>在「生成视频」步骤里查看 `video-readiness` 诊断，补齐关键帧、参考图、提示词和生成参数。镜头显示“准备完成”后，仍要通过这里的诊断才能真正发起视频生成。</p>
               <Figure {...screenshots[11]} />
               <Figure {...screenshots[12]} />
-              <p>批量生成会先做视频准备度检查，未通过的镜头会自动跳过并给出诊断。生成完成后，在结果区点「√」选用满意视频，再一键下载。</p>
+              <p>章节级批量生成、批量下载和批量诊断位于分镜列表顶部工具栏。批量生成会先做视频准备度检查，未通过的镜头会自动跳过并给出诊断。</p>
               <Figure {...screenshots[13]} />
-              <p>视频提示词已经由 Agent 自动整理，包含镜头标题、剧本摘录、动作节拍、项目风格、资产设定和连续性上下文；需要精修时再展开修改。</p>
+              <p>视频提示词已经由 Agent 自动整理，包含镜头标题、剧本摘录、动作节拍、项目风格、资产设定和连续性上下文；生成完成后切到「视频结果」步骤选用满意版本并下载。</p>
             </GuideBlock>
 
             <GuideBlock id="assets" number="7" title="资产管理与图片编辑">

@@ -50,6 +50,14 @@ shot_extracted_dialogue_candidates
 
 视频生成条件由 `video-readiness` 单独判断，例如关键帧、参考图、视频参数等缺口不会写入 `shot.status`。
 
+因此 UI 文案必须保持下面这条约束：
+
+- `shot.status = ready`
+  - 应显示为“提取确认完成”或“准备完成”
+  - 不能直接翻译成“可生成视频”
+- “可生成视频”
+  - 必须来自 `video-readiness` 或明确的诊断结论
+
 需要特别注意：
 
 > 运行中的生成任务不再写入 `shots.status`。
@@ -81,6 +89,25 @@ shot_extracted_dialogue_candidates
 如果某个镜头提取后没有任何对白候选，这不会阻塞 `ready`。
 
 当前分镜准备页只把角色、场景、道具作为需要用户确认的资产候选。`costume` 候选仍可保留在提取明细中，但不再计入 `asset_candidate_total` / `pending_asset_count`，也不会阻塞 `shot.status = ready`。
+
+## `video-readiness` 与生成按钮
+
+视频生成按钮必须由 `video-readiness` 结果控制，而不是由 `shot.status` 直接控制。
+
+建议遵守以下前端规则：
+
+- `shot.status = pending`
+  - 直接提示继续做提取确认。
+- `shot.status = ready` 且 `video-readiness` 仍有缺口
+  - 允许展示“准备完成”，但按钮保持禁用或引导先补关键帧 / 参考图 / 参数。
+- `shot.status = ready` 且 `video-readiness` 通过
+  - 才展示为可发起视频生成。
+
+诊断项展示时：
+
+- 保留后端返回的英文 key，便于和契约、日志、调试信息对齐。
+- 同时补充中文说明，解释用户还差什么。
+- 不要把诊断项重新折叠回 `shot.status`。
 
 ## `shot_extracted_candidates` 表结构职责
 
@@ -201,7 +228,7 @@ script_divide
 - 用 `shot_extracted_candidates` 展示资产待确认项
 - 用 `shot_extracted_dialogue_candidates` 展示对白待确认项
 
-目前 `ChapterStudio` 与 `ChapterShotEditPage` 已经接入这一约束。
+当前分镜列表与镜头详情页已经按这套约束消费后端状态：`shot.status` 负责信息确认阶段，生成按钮与生成入口由 `video-readiness` 和诊断结果控制。
 
 ## OpenAPI 同步约定
 
