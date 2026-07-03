@@ -23,21 +23,23 @@ weight: 8
 当前推荐的页面分工是：
 
 ```text
-ChapterShotEditPage
-  = 分镜准备页
+ChapterShotEntryPage (/shots)
+  = 分镜入口 / 空态兜底
 
-ChapterStudio
-  = 分镜生成工作台
+ChapterShotEditPage
+  = 分镜准备与生成主工作区
 ```
 
 也就是：
 
 ```text
-分镜编辑页
-→ 提取、确认、修正
+分镜入口
+→ 有镜头时直接进入详情
+→ 无镜头时保留一键提取 / 新增分镜
 
-分镜工作室
-→ 关键帧、参考图、视频参数、视频生成
+分镜详情页
+→ 左侧镜头列表与批量动作
+→ 右侧基础信息 / 提取确认 / 生成视频 / 视频结果
 ```
 
 ## `ChapterShotEditPage` 的职责

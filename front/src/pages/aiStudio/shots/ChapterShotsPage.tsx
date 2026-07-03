@@ -1,115 +1,88 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
+  ArrowLeftOutlined,
+  LoadingOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  StopOutlined,
+} from '@ant-design/icons'
+import {
+  Alert,
   Button,
   Card,
   Divider,
-  Dropdown,
-  Empty,
   Form,
   Input,
   Layout,
   Modal,
-  Segmented,
   Space,
-  Table,
-  Tag,
-  Tooltip,
   Typography,
   message,
 } from 'antd'
-import type { MenuProps, TableColumnsType } from 'antd'
-import {
-  ArrowDownOutlined,
-  ArrowLeftOutlined,
-  ArrowUpOutlined,
-  CloseCircleOutlined,
-  DeleteOutlined,
-  EditOutlined,
-  EyeInvisibleOutlined,
-  PlusOutlined,
-  ReloadOutlined,
-  ScissorOutlined,
-  StopOutlined,
-  UndoOutlined,
-} from '@ant-design/icons'
-import type { ShotRead, ShotRuntimeSummaryRead, ShotVideoReadinessRead } from '../../../services/generated'
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { ScriptProcessingService, StudioChaptersService, StudioShotsService } from '../../../services/generated'
 import {
   defaultTaskActionErrorMessage,
   executeAsyncTaskCreate,
   executeTaskCancel,
 } from '../components/taskActionHelpers'
-import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
-import { getChapterShotDetailPath, getChapterShotsPath } from '../project/ProjectWorkbench/routes'
-import { useCancelableRelationTask } from '../project/ProjectWorkbench/chapterDivisionTasks'
+import {
+  getChapterShotDetailPath,
+  getChapterShotsPath,
+} from '../project/ProjectWorkbench/routes'
+import {
+  useCancelableRelationTask,
+} from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { useRelationTaskNotification } from '../components/taskNotificationHelpers'
-import { useTaskPageContext } from '../components/taskPageContext'
 import { createTaskSettledReloader } from '../components/taskResultHelpers'
+import { useTaskPageContext } from '../components/taskPageContext'
 import { TASK_COPY } from '../components/taskCopy'
 import { generateUUID } from '../../../utils'
 import { usePointsQuote } from '../../../hooks/usePointsQuote'
 import { makePointsAwareGetErrorMessage } from '../../../components/points/pointsTaskError'
 import { ExtractionConfirmModal } from './components/ExtractionConfirmModal'
-import { ShotBatchToolbar } from './components/ShotBatchToolbar'
-import { VideoDiagnosticsDrawer } from './components/VideoDiagnosticsDrawer'
-import { getShotFlowState, type ShotFlowDetailTab, type ShotFlowFilterKey } from './shotFlowStatus'
 
 const { Header, Content } = Layout
-type ShotListFilter = ShotFlowFilterKey
-
-type ShotRuntimeState = {
-  has_active_tasks: boolean
-  has_active_video_tasks: boolean
-  has_active_prompt_tasks: boolean
-  has_active_frame_tasks: boolean
-  active_task_count: number
-}
-
-type BatchDiagnosticItem = {
-  shot: ShotRead
-  readiness: ShotVideoReadinessRead | null
-  error?: string
-}
 
 /**
- * 展示章节分镜队列，并承接批量维护与批量诊断等低频列表动作。
+ * 章节分镜入口页：若章节已有镜头则直接进入首个镜头详情，否则只保留提取与新增两个空态入口。
  */
 export function ChapterShotsPage() {
-  const taskCopy = TASK_COPY.chapterDivision
   const navigate = useNavigate()
   const { projectId, chapterId } = useParams<{ projectId: string; chapterId: string }>()
-  const [loading, setLoading] = useState(false)
-  const [extracting, setExtracting] = useState(false)
-  const [shots, setShots] = useState<ShotRead[]>([])
-  const [shotRuntimeMap, setShotRuntimeMap] = useState<Record<string, ShotRuntimeState>>({})
-  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([])
-  const [listFilter, setListFilter] = useState<ShotListFilter>('all')
-  const [searchText, setSearchText] = useState('')
-  const [chapterTitle, setChapterTitle] = useState<string>('')
+  const [loading, setLoading] = useState(true)
+  const [chapterTitle, setChapterTitle] = useState('')
   const [chapterIndex, setChapterIndex] = useState<number | null>(null)
-  const [chapterRawText, setChapterRawText] = useState<string>('')
-  const [chapterCondensedText, setChapterCondensedText] = useState<string>('')
-  const [loadingChapter, setLoadingChapter] = useState(false)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [batchDeleting, setBatchDeleting] = useState(false)
+  const [chapterRawText, setChapterRawText] = useState('')
+  const [chapterCondensedText, setChapterCondensedText] = useState('')
+  const [extracting, setExtracting] = useState(false)
+  const [extractConfirmOpen, setExtractConfirmOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [createSubmitting, setCreateSubmitting] = useState(false)
-  const [createForm] = Form.useForm<{ title: string; script_excerpt?: string }>()
-  const [insertMode, setInsertMode] = useState<{ direction: 'before' | 'after'; refShot: ShotRead } | null>(null)
-  const [insertSubmitting, setInsertSubmitting] = useState(false)
-  const [insertForm] = Form.useForm<{ title: string; script_excerpt?: string }>()
   const [chapterDivisionTaskLoading, setChapterDivisionTaskLoading] = useState(false)
-  const [extractConfirmOpen, setExtractConfirmOpen] = useState(false)
-  const [batchDiagnosticsOpen, setBatchDiagnosticsOpen] = useState(false)
-  const [batchDiagnosticsLoading, setBatchDiagnosticsLoading] = useState(false)
-  const [batchDiagnostics, setBatchDiagnostics] = useState<BatchDiagnosticItem[]>([])
-  const batchDiagnosticsRequestSeqRef = useRef(0)
+  const [createForm] = Form.useForm<{ title: string; script_excerpt?: string }>()
 
-  const refresh = async () => {
-    if (!chapterId) return
+  const taskCopy = TASK_COPY.chapterDivision
+  const divideQuote = usePointsQuote({
+    businessType: 'script_divide',
+    category: 'text',
+    modelId: null,
+    enabled: !!chapterId,
+  })
+  const imageQuote = usePointsQuote({
+    businessType: 'image_generation',
+    category: 'image',
+    modelId: null,
+    resolutionProfile: 'standard',
+    enabled: !!chapterId,
+  })
+
+  const refresh = useCallback(async () => {
+    if (!projectId || !chapterId) return
     setLoading(true)
     try {
-      const [res, runtimeRes] = await Promise.all([
+      const [chapterRes, shotsRes] = await Promise.all([
+        StudioChaptersService.getChapterApiV1StudioChaptersChapterIdGet({ chapterId }),
         StudioShotsService.listShotsApiV1StudioShotsGet({
           chapterId,
           page: 1,
@@ -117,41 +90,37 @@ export function ChapterShotsPage() {
           order: 'index',
           isDesc: false,
         }),
-        StudioShotsService.listShotRuntimeSummaryApiV1StudioShotsRuntimeSummaryGet({
-          chapterId,
-        }),
       ])
-      setShots(res.data?.items ?? [])
-      const runtimeItems: ShotRuntimeSummaryRead[] = runtimeRes.data ?? []
-      setShotRuntimeMap(
-        Object.fromEntries(
-          runtimeItems.map((item) => [
-            item.shot_id,
-            {
-              has_active_tasks: item.has_active_tasks,
-              has_active_video_tasks: item.has_active_video_tasks,
-              has_active_prompt_tasks: item.has_active_prompt_tasks,
-              has_active_frame_tasks: item.has_active_frame_tasks,
-              active_task_count: item.active_task_count,
-            },
-          ]),
-        ),
-      )
-      setSelectedRowKeys([])
+      const chapter = chapterRes.data
+      setChapterTitle(chapter?.title ?? '')
+      setChapterIndex(typeof chapter?.index === 'number' ? chapter.index : null)
+      setChapterRawText(chapter?.raw_text?.trim?.() ? chapter.raw_text.trim() : '')
+      setChapterCondensedText(chapter?.condensed_text?.trim?.() ? chapter.condensed_text.trim() : '')
+
+      const firstShot = shotsRes.data?.items?.[0]
+      if (firstShot) {
+        navigate(getChapterShotDetailPath(projectId, chapterId, firstShot.id, 'basic'), { replace: true })
+      }
     } catch {
-      message.error('加载分镜失败')
+      message.error('加载分镜入口失败')
     } finally {
       setLoading(false)
     }
-  }
+  }, [chapterId, navigate, projectId])
 
   const reloadShotsAfterTaskSettled = useCallback(createTaskSettledReloader(refresh), [refresh])
-  const { task: chapterDivisionTask, settledTask: chapterDivisionSettledTask, trackTaskData, applyCancelData } = useCancelableRelationTask({
+  const {
+    task: chapterDivisionTask,
+    settledTask: chapterDivisionSettledTask,
+    trackTaskData,
+    applyCancelData,
+  } = useCancelableRelationTask({
     enabled: !!chapterId,
     relationType: 'chapter_division',
     relationEntityId: chapterId,
     onTaskSettled: reloadShotsAfterTaskSettled,
   })
+
   useTaskPageContext(
     chapterId
       ? [
@@ -163,177 +132,9 @@ export function ChapterShotsPage() {
       : [],
   )
 
-  const divideQuote = usePointsQuote({
-    businessType: 'script_divide',
-    category: 'text',
-    modelId: null,
-    enabled: !!chapterId && shots.length === 0 && !chapterDivisionTask,
-  })
-  const imageQuote = usePointsQuote({
-    businessType: 'image_generation',
-    category: 'image',
-    modelId: null,
-    resolutionProfile: 'standard',
-    enabled: !!chapterId && shots.length === 0 && !chapterDivisionTask,
-  })
-
   useEffect(() => {
-    setSelectedRowKeys([])
     void refresh()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chapterId])
-
-  useEffect(() => {
-    if (!chapterId) return
-    setLoadingChapter(true)
-    StudioChaptersService.getChapterApiV1StudioChaptersChapterIdGet({ chapterId })
-      .then((res) => {
-        const c = res.data
-        setChapterTitle(c?.title ?? '')
-        setChapterIndex(typeof c?.index === 'number' ? c.index : null)
-        setChapterRawText(c?.raw_text?.trim?.() ? c.raw_text.trim() : '')
-        setChapterCondensedText(c?.condensed_text?.trim?.() ? c.condensed_text.trim() : '')
-      })
-      .catch(() => {
-        message.error('章节加载失败')
-      })
-      .finally(() => {
-        setLoadingChapter(false)
-      })
-  }, [chapterId])
-
-  const filteredShots = useMemo(() => {
-    const q = searchText.trim().toLowerCase()
-    const byWorkflow = shots.filter((s) => {
-      const flow = getShotFlowState(s, shotRuntimeMap[s.id])
-      if (listFilter !== 'all') return flow.key === listFilter
-      return true
-    })
-    if (!q) return byWorkflow
-    return byWorkflow.filter((s) => {
-      const title = String(s.title ?? '').toLowerCase()
-      const ex = String(s.script_excerpt ?? '').toLowerCase()
-      const idx = String(s.index)
-      return title.includes(q) || ex.includes(q) || idx.includes(q)
-    })
-  }, [listFilter, searchText, shotRuntimeMap, shots])
-
-  const shotFilterCounts = useMemo(
-    () =>
-      shots.reduce(
-        (acc, shot) => {
-          const flow = getShotFlowState(shot, shotRuntimeMap[shot.id])
-          acc.all += 1
-          if (flow.key !== 'running') {
-            acc[flow.key] += 1
-          }
-          return acc
-        },
-        { all: 0, basic: 0, confirm: 0, generatable: 0, result: 0 },
-      ),
-    [shotRuntimeMap, shots],
-  )
-
-  const selectedShotIds = useMemo(() => selectedRowKeys.map((k) => String(k)), [selectedRowKeys])
-
-  useEffect(() => {
-    const visibleShotIds = new Set(filteredShots.map((shot) => shot.id))
-    setSelectedRowKeys((prev) => {
-      const next = prev.filter((key) => visibleShotIds.has(String(key)))
-      return next.length === prev.length ? prev : next
-    })
-  }, [filteredShots])
-
-  const openCreate = useCallback(() => {
-    createForm.resetFields()
-    setCreateOpen(true)
-  }, [createForm])
-
-  const closeCreate = useCallback(() => {
-    setCreateOpen(false)
-    createForm.resetFields()
-  }, [createForm])
-
-  const submitCreate = useCallback(async () => {
-    if (!chapterId) return
-    try {
-      const v = await createForm.validateFields()
-      setCreateSubmitting(true)
-      const nextIndex = shots.reduce((m, s) => Math.max(m, s.index), 0) + 1
-      const res = await StudioShotsService.createShotApiV1StudioShotsPost({
-        requestBody: {
-          id: generateUUID(),
-          chapter_id: chapterId,
-          index: nextIndex,
-          title: v.title.trim(),
-          script_excerpt: v.script_excerpt?.trim() ? v.script_excerpt.trim() : '',
-          status: 'pending',
-        },
-      })
-      const created = res.data
-      if (created) {
-        setShots((prev) => [...prev, created].sort((a, b) => a.index - b.index))
-        message.success('已创建分镜')
-        closeCreate()
-      }
-    } catch (e: unknown) {
-      if (e && typeof e === 'object' && 'errorFields' in e) return
-      message.error('创建失败')
-    } finally {
-      setCreateSubmitting(false)
-    }
-  }, [chapterId, closeCreate, createForm, shots])
-
-  const openInsert = useCallback(
-    (direction: 'before' | 'after', refShot: ShotRead) => {
-      insertForm.resetFields()
-      setInsertMode({ direction, refShot })
-    },
-    [insertForm],
-  )
-
-  const closeInsert = useCallback(() => {
-    setInsertMode(null)
-    insertForm.resetFields()
-  }, [insertForm])
-
-  const submitInsert = useCallback(async () => {
-    if (!chapterId || !insertMode) return
-    try {
-      const v = await insertForm.validateFields()
-      setInsertSubmitting(true)
-      const { direction, refShot } = insertMode
-      const targetIndex = direction === 'before' ? refShot.index : refShot.index + 1
-      // Shift all shots whose index >= targetIndex up by 1 to make room.
-      // Sort descending so each UPDATE moves a shot to an index that's already free,
-      // avoiding the unique constraint violation on (chapter_id, index).
-      const toShift = shots.filter((s) => s.index >= targetIndex).sort((a, b) => b.index - a.index)
-      for (const s of toShift) {
-        await StudioShotsService.updateShotApiV1StudioShotsShotIdPatch({
-          shotId: s.id,
-          requestBody: { index: s.index + 1 },
-        })
-      }
-      await StudioShotsService.createShotApiV1StudioShotsPost({
-        requestBody: {
-          id: generateUUID(),
-          chapter_id: chapterId,
-          index: targetIndex,
-          title: v.title.trim(),
-          script_excerpt: v.script_excerpt?.trim() ? v.script_excerpt.trim() : '',
-          status: 'pending',
-        },
-      })
-      await refresh()
-      message.success('已插入分镜')
-      closeInsert()
-    } catch (e: unknown) {
-      if (e && typeof e === 'object' && 'errorFields' in e) return
-      message.error('插入失败')
-    } finally {
-      setInsertSubmitting(false)
-    }
-  }, [chapterId, closeInsert, insertForm, insertMode, shots])
+  }, [refresh])
 
   const handleOneClickExtract = useCallback(async () => {
     if (!chapterId) return
@@ -371,7 +172,7 @@ export function ChapterShotsPage() {
     } finally {
       setExtracting(false)
     }
-  }, [chapterCondensedText, chapterId, chapterRawText, divideQuote.refresh, divideQuote.refreshNow])
+  }, [chapterCondensedText, chapterId, chapterRawText, divideQuote.refresh, divideQuote.refreshNow, trackTaskData, taskCopy.reusedMessage, taskCopy.startedMessage])
 
   const handleCancelChapterDivisionTask = useCallback(async () => {
     if (!chapterDivisionTask) return
@@ -379,7 +180,7 @@ export function ChapterShotsPage() {
     try {
       await executeTaskCancel({
         taskId: chapterDivisionTask.taskId,
-        reason: '用户在分镜列表页取消分镜提取',
+        reason: '用户在分镜入口页取消分镜提取',
         applyCancelData,
         cancelledImmediatelyMessage: taskCopy.cancelledImmediatelyMessage,
         cancelRequestedMessage: taskCopy.cancelRequestedMessage,
@@ -390,13 +191,13 @@ export function ChapterShotsPage() {
     } finally {
       setChapterDivisionTaskLoading(false)
     }
-  }, [chapterDivisionTask])
+  }, [applyCancelData, chapterDivisionTask, taskCopy.cancelRequestedMessage, taskCopy.cancelledImmediatelyMessage])
 
   useRelationTaskNotification({
     task: chapterDivisionTask,
     settledTask: chapterDivisionSettledTask,
     title: taskCopy.title,
-    sourceLabel: chapterTitle ? `章节：${chapterTitle}` : '分镜管理页',
+    sourceLabel: chapterTitle ? `章节：${chapterTitle}` : '分镜入口页',
     runningDescription: taskCopy.runningDescription,
     cancellingDescription: taskCopy.cancellingDescription,
     successDescription: taskCopy.successDescription,
@@ -409,311 +210,44 @@ export function ChapterShotsPage() {
         : null,
   })
 
-  const handleDelete = useCallback(
-    async (shotId: string) => {
-      setDeletingId(shotId)
-      try {
-        await StudioShotsService.deleteShotApiV1StudioShotsShotIdDelete({ shotId })
-        setShots((prev) => prev.filter((s) => s.id !== shotId))
-        setSelectedRowKeys((prev) => prev.filter((k) => String(k) !== shotId))
-        message.success('已删除')
-      } catch {
-        message.error('删除失败')
-      } finally {
-        setDeletingId(null)
-      }
-    },
-    [],
-  )
+  const openCreate = useCallback(() => {
+    createForm.resetFields()
+    setCreateOpen(true)
+  }, [createForm])
 
-  const handleBatchDelete = useCallback(async () => {
-    if (selectedShotIds.length === 0) return
-    const ids = [...selectedShotIds]
+  const closeCreate = useCallback(() => {
+    setCreateOpen(false)
+    createForm.resetFields()
+  }, [createForm])
 
-    setBatchDeleting(true)
-    let ok = 0
-    let fail = 0
+  const submitCreate = useCallback(async () => {
+    if (!projectId || !chapterId) return
     try {
-      for (const id of ids) {
-        try {
-          await StudioShotsService.deleteShotApiV1StudioShotsShotIdDelete({ shotId: id })
-          ok += 1
-          setShots((prev) => prev.filter((s) => s.id !== id))
-          setSelectedRowKeys((prev) => prev.filter((k) => String(k) !== id))
-        } catch {
-          fail += 1
-        }
-      }
-    } finally {
-      setBatchDeleting(false)
-    }
-
-    if (ok > 0 && fail === 0) {
-      message.success(`已删除 ${ok} 条`)
-    } else if (ok > 0 && fail > 0) {
-      message.warning(`已删除 ${ok} 条，失败 ${fail} 条`)
-    } else if (ok === 0 && fail > 0) {
-      message.error(`删除失败（共 ${fail} 条）`)
-    }
-  }, [selectedShotIds])
-
-  const openShotDetail = useCallback(
-    (shot: ShotRead, tab: ShotFlowDetailTab) => {
-      if (!projectId || !chapterId) return
-      navigate(getChapterShotDetailPath(projectId, chapterId, shot.id, tab))
-    },
-    [chapterId, navigate, projectId],
-  )
-
-  const confirmBatchDelete = useCallback(() => {
-    if (selectedShotIds.length === 0) return
-    Modal.confirm({
-      title: `确定删除选中的 ${selectedShotIds.length} 条分镜？`,
-      okText: '删除',
-      cancelText: '取消',
-      okButtonProps: { danger: true },
-      onOk: () => handleBatchDelete(),
-    })
-  }, [handleBatchDelete, selectedShotIds.length])
-
-  const confirmDelete = useCallback(
-    (shot: ShotRead) => {
-      Modal.confirm({
-        title: '确定删除该分镜？',
-        content: shot.title || `分镜 ${shot.index}`,
-        okText: '删除',
-        cancelText: '取消',
-        okButtonProps: { danger: true, loading: extracting || deletingId === shot.id, disabled: extracting },
-        cancelButtonProps: { disabled: extracting },
-        onOk: () => handleDelete(shot.id),
+      const values = await createForm.validateFields()
+      setCreateSubmitting(true)
+      const createdRes = await StudioShotsService.createShotApiV1StudioShotsPost({
+        requestBody: {
+          id: generateUUID(),
+          chapter_id: chapterId,
+          index: 1,
+          title: values.title.trim(),
+          script_excerpt: values.script_excerpt?.trim() ? values.script_excerpt.trim() : '',
+          status: 'pending',
+        },
       })
-    },
-    [deletingId, extracting, handleDelete],
-  )
-
-  /**
-   * 对当前选中的镜头逐条拉取视频准备度，供列表页按需查看批量诊断结果。
-   * 单条失败时保留镜头上下文，避免局部错误导致整批结果丢失。
-   */
-  const runBatchDiagnostics = useCallback(async () => {
-    if (selectedShotIds.length === 0) {
-      message.warning('请先选择分镜')
-      return
-    }
-
-    const selectedShots = shots.filter((shot) => selectedShotIds.includes(shot.id))
-    const requestSeq = ++batchDiagnosticsRequestSeqRef.current
-    setBatchDiagnosticsOpen(true)
-    setBatchDiagnosticsLoading(true)
-    setBatchDiagnostics([])
-
-    try {
-      const results: BatchDiagnosticItem[] = []
-      for (const shot of selectedShots) {
-        try {
-          const res = await StudioShotsService.getShotVideoReadinessApiApiV1StudioShotsShotIdVideoReadinessGet({
-            shotId: shot.id,
-            referenceMode: 'first',
-          })
-          if (requestSeq !== batchDiagnosticsRequestSeqRef.current) return
-          results.push({
-            shot,
-            readiness: res.data ?? null,
-          })
-        } catch (error) {
-          if (requestSeq !== batchDiagnosticsRequestSeqRef.current) return
-          results.push({
-            shot,
-            readiness: null,
-            error: defaultTaskActionErrorMessage(error, '诊断失败'),
-          })
-        }
+      const created = createdRes.data
+      if (created) {
+        message.success('已创建分镜')
+        closeCreate()
+        navigate(getChapterShotDetailPath(projectId, chapterId, created.id, 'basic'), { replace: true })
       }
-      if (requestSeq !== batchDiagnosticsRequestSeqRef.current) return
-      setBatchDiagnostics(results)
+    } catch (error: unknown) {
+      if (error && typeof error === 'object' && 'errorFields' in error) return
+      message.error(defaultTaskActionErrorMessage(error, '创建失败'))
     } finally {
-      if (requestSeq === batchDiagnosticsRequestSeqRef.current) {
-        setBatchDiagnosticsLoading(false)
-      }
+      setCreateSubmitting(false)
     }
-  }, [selectedShotIds, shots])
-
-  /**
-   * 关闭批量诊断抽屉时立即失效当前请求，避免旧响应在关闭后回写页面状态。
-   */
-  const closeBatchDiagnostics = useCallback(() => {
-    batchDiagnosticsRequestSeqRef.current += 1
-    setBatchDiagnosticsOpen(false)
-    setBatchDiagnosticsLoading(false)
-    setBatchDiagnostics([])
-  }, [])
-
-  const batchMaintenanceMenuItems: MenuProps['items'] = useMemo(
-    () => [
-      {
-        key: 'hide',
-        label: '隐藏（待接入）',
-        icon: <EyeInvisibleOutlined />,
-        disabled: extracting || batchDeleting,
-        onClick: () => message.warning('隐藏功能待接入，请先使用其他维护动作'),
-      },
-      {
-        key: 'delete',
-        label: '删除',
-        danger: true,
-        icon: <DeleteOutlined />,
-        disabled: extracting || batchDeleting,
-        onClick: confirmBatchDelete,
-      },
-      {
-        key: 'skip-extraction',
-        label: '维护：标记无需提取（待接入）',
-        icon: <StopOutlined />,
-        disabled: extracting || batchDeleting,
-        onClick: () => message.warning('标记无需提取功能待接入'),
-      },
-      {
-        key: 'restore-extraction',
-        label: '维护：恢复提取（待接入）',
-        icon: <UndoOutlined />,
-        disabled: extracting || batchDeleting,
-        onClick: () => message.warning('恢复提取功能待接入'),
-      },
-    ],
-    [batchDeleting, confirmBatchDelete, extracting],
-  )
-
-  const buildActionMenuItems = useCallback(
-    (shot: ShotRead): MenuProps['items'] => [
-      {
-        key: 'edit',
-        label: '编辑基础信息',
-        icon: <EditOutlined />,
-        disabled: extracting,
-        onClick: () => openShotDetail(shot, 'basic'),
-      },
-      {
-        key: 'insert-before',
-        label: '向上插入分镜',
-        icon: <ArrowUpOutlined />,
-        disabled: extracting,
-        onClick: () => openInsert('before', shot),
-      },
-      {
-        key: 'insert-after',
-        label: '向下插入分镜',
-        icon: <ArrowDownOutlined />,
-        disabled: extracting,
-        onClick: () => openInsert('after', shot),
-      },
-      {
-        type: 'divider',
-      },
-      {
-        key: 'delete',
-        label: '删除',
-        danger: true,
-        icon: <DeleteOutlined />,
-        disabled: extracting,
-        onClick: () => confirmDelete(shot),
-      },
-    ],
-    [confirmDelete, extracting, openInsert, openShotDetail],
-  )
-
-  const columns: TableColumnsType<ShotRead> = useMemo(
-    () => [
-      {
-        title: '序号',
-        dataIndex: 'index',
-        key: 'index',
-        width: 72,
-        align: 'center',
-      },
-      {
-        title: '标题',
-        dataIndex: 'title',
-        key: 'title',
-        width: 200,
-        ellipsis: { showTitle: false },
-        render: (t: string) => {
-          const text = t?.trim() ? t : '—'
-          return (
-            <Tooltip title={text}>
-              <span>{text}</span>
-            </Tooltip>
-          )
-        },
-      },
-      {
-        title: '当前步骤',
-        key: 'flow',
-        width: 160,
-        render: (_: unknown, r) => {
-          const flow = getShotFlowState(r, shotRuntimeMap[r.id])
-          return (
-            <div className="space-y-1">
-              <Tag color={flow.tagColor}>{flow.label}</Tag>
-              <div className="text-[11px] text-gray-500 leading-5">{flow.hint}</div>
-            </div>
-          )
-        },
-      },
-      {
-        title: '剧本摘录',
-        dataIndex: 'script_excerpt',
-        key: 'script_excerpt',
-        width: 280,
-        ellipsis: { showTitle: false },
-        render: (v: string | undefined) => {
-          const raw = v?.trim() ?? ''
-          const display = raw || '—'
-          return (
-            <Tooltip title={raw ? raw : undefined} placement="topLeft">
-              <span className="block max-w-full overflow-hidden text-ellipsis whitespace-nowrap">{display}</span>
-            </Tooltip>
-          )
-        },
-      },
-      {
-        title: '操作',
-        key: 'actions',
-        fixed: 'right',
-        width: 180,
-        render: (_: unknown, r) => {
-          const flow = getShotFlowState(r, shotRuntimeMap[r.id])
-          return (
-            <Space size="small">
-              <Button
-                type="primary"
-                size="small"
-                disabled={extracting}
-                loading={extracting || deletingId === r.id}
-                onClick={() => openShotDetail(r, flow.tab)}
-              >
-                {flow.buttonLabel}
-              </Button>
-              <Dropdown disabled={extracting} menu={{ items: buildActionMenuItems(r) }} trigger={['click']}>
-                <Button type="text" size="small" disabled={extracting}>
-                  更多
-                </Button>
-              </Dropdown>
-            </Space>
-          )
-        },
-      },
-    ],
-    [buildActionMenuItems, deletingId, extracting, openShotDetail, shotRuntimeMap],
-  )
-
-  const tableEmpty =
-    !loading && shots.length === 0 ? (
-      <Empty description="暂无分镜" />
-    ) : !loading && filteredShots.length === 0 ? (
-      <Empty description="没有匹配的分镜" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-    ) : undefined
-
-  const tableScrollY = 'calc(100vh - 320px)'
+  }, [chapterId, closeCreate, createForm, navigate, projectId])
 
   if (!projectId || !chapterId) {
     return <Navigate to="/projects" replace />
@@ -732,218 +266,102 @@ export function ChapterShotsPage() {
           gap: 12,
         }}
       >
-        <Link
-          to={`/projects/${projectId}?tab=chapters`}
-          className="text-gray-600 hover:text-blue-600 flex items-center gap-1"
-        >
-          <ArrowLeftOutlined /> 返回章节列表
+        <Link to={`/projects/${projectId}?tab=chapters`} className="text-gray-600 hover:text-blue-600 flex items-center gap-1">
+          <ArrowLeftOutlined />
+          返回章节列表
         </Link>
         <Divider type="vertical" />
-
         <div className="min-w-0 flex-1 overflow-hidden">
-          <Typography.Text
-            strong
-            className="truncate block"
-            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-          >
+          <Typography.Text strong className="truncate block">
             {chapterIndex !== null ? `第${chapterIndex}章 · ${chapterTitle || '未命名'}` : chapterTitle || '章节'}
           </Typography.Text>
-          <Typography.Text
-            type="secondary"
-            className="text-xs truncate block"
-            style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-          >
-            {loadingChapter ? '加载中…' : '分镜列表'}
+          <Typography.Text type="secondary" className="text-xs truncate block">
+            分镜入口
           </Typography.Text>
         </div>
-
       </Header>
 
-      <Content
-        style={{
-          padding: 16,
-          minHeight: 0,
-          overflow: 'hidden',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
+      <Content style={{ padding: 16, minHeight: 0 }}>
         <Card
-          title={
-            <div className="flex flex-wrap items-center gap-3">
-              <span>分镜</span>
-              {shots.length > 0 ? (
-                <Tag color="warning" className="!mr-0">
-                  当前章节已存在分镜，若要重新提取，请先删除现有分镜
-                </Tag>
-              ) : null}
+          style={{ maxWidth: 760, margin: '0 auto' }}
+          bodyStyle={{ padding: 24 }}
+          title="进入分镜"
+        >
+          {loading ? (
+            <div className="flex min-h-[240px] items-center justify-center text-slate-500">
+              <Space>
+                <LoadingOutlined />
+                <span>正在定位分镜详情…</span>
+              </Space>
             </div>
-          }
-          style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
-          bodyStyle={{
-            flex: 1,
-            minHeight: 0,
-            overflow: 'hidden',
-            display: 'flex',
-            flexDirection: 'column',
-            padding: 16,
-          }}
-          extra={
-            <Space wrap>
-              <Tooltip
-                title={
-                  chapterDivisionTask
-                    ? '当前章节已有分镜提取任务在运行'
-                    : shots.length > 0
-                      ? '已存在分镜时不允许同步分镜，需先清空分镜'
-                      : undefined
-                }
-              >
-                <span>
+          ) : (
+            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+              <Alert
+                type="info"
+                showIcon
+                message="当前章节还没有分镜"
+                description="可以先一键提取整章分镜并自动准备，也可以手动新增第一条分镜。章节一旦已有分镜，再进入这里会直接跳到分镜详情页。"
+              />
+
+              <Card size="small" title="快捷操作">
+                <Space wrap>
                   <Button
-                    type={shots.length === 0 ? 'primary' : 'default'}
-                    icon={<ScissorOutlined />}
+                    type="primary"
+                    icon={<ReloadOutlined />}
                     loading={extracting}
-                    disabled={extracting || shots.length > 0 || !!chapterDivisionTask || (shots.length === 0 && !divideQuote.canSubmit)}
-                    onClick={() => shots.length === 0 && !chapterDivisionTask ? setExtractConfirmOpen(true) : undefined}
+                    disabled={!!chapterDivisionTask}
+                    onClick={() => setExtractConfirmOpen(true)}
                   >
-                    {chapterDivisionTask ? '分镜自动准备中' : shots.length === 0 ? '一键提取分镜并自动准备' : '重新提取需先清空分镜'}
+                    一键提取分镜
                   </Button>
-                </span>
-              </Tooltip>
-              <Button icon={<PlusOutlined />} onClick={openCreate} loading={extracting} disabled={extracting}>
-                创建分镜
-              </Button>
-              <Button
-                icon={<ReloadOutlined />}
-                loading={extracting || loading}
-                disabled={extracting || batchDeleting}
-                onClick={() => void refresh()}
-              >
-                刷新
-              </Button>
-              {chapterDivisionTask ? (
-                <Button
-                  danger
-                  icon={<CloseCircleOutlined />}
-                  loading={chapterDivisionTaskLoading}
-                  disabled={chapterDivisionTask.cancelRequested || chapterDivisionTaskLoading}
-                  onClick={() => void handleCancelChapterDivisionTask()}
-                >
-                  {chapterDivisionTask.cancelRequested ? '正在取消' : '取消提取'}
-                </Button>
+                  {chapterDivisionTask ? (
+                    <Button
+                      icon={<StopOutlined />}
+                      loading={chapterDivisionTaskLoading}
+                      onClick={() => void handleCancelChapterDivisionTask()}
+                    >
+                      取消提取
+                    </Button>
+                  ) : null}
+                  <Button icon={<PlusOutlined />} onClick={openCreate}>
+                    新增分镜
+                  </Button>
+                </Space>
+              </Card>
+
+              {!chapterRawText.trim() && !chapterCondensedText.trim() ? (
+                <Alert
+                  type="warning"
+                  showIcon
+                  message="当前章节还没有可提取文本"
+                  description="如果要使用一键提取，请先回章节列表补充原文或 condensed 文本。"
+                />
               ) : null}
             </Space>
-          }
-        >
-          <div className="flex flex-col gap-3 flex-1 min-h-0">
-            <Input.Search
-              allowClear
-              placeholder="搜索序号、标题或剧本摘录…"
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-            />
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <Segmented
-                size="small"
-                value={listFilter}
-                onChange={(value) => setListFilter(value as ShotListFilter)}
-                options={[
-                  { label: `全部 ${shotFilterCounts.all}`, value: 'all' },
-                  { label: `基础待补 ${shotFilterCounts.basic}`, value: 'basic' },
-                  { label: `待确认 ${shotFilterCounts.confirm}`, value: 'confirm' },
-                  { label: `可进入生成 ${shotFilterCounts.generatable}`, value: 'generatable' },
-                  { label: `已有结果 ${shotFilterCounts.result}`, value: 'result' },
-                ]}
-              />
-            </div>
-            {selectedRowKeys.length > 0 ? (
-              <ShotBatchToolbar
-                selectedCount={selectedRowKeys.length}
-                disabled={extracting || batchDeleting}
-                diagnosticLoading={batchDiagnosticsLoading}
-                maintenanceMenuItems={batchMaintenanceMenuItems}
-                onBatchGenerate={() => message.warning('请先完成单镜头生成配置后再批量生成')}
-                onBatchDownload={() => message.warning('当前选中镜头暂无可下载视频')}
-                onBatchDiagnose={() => void runBatchDiagnostics()}
-                onClearSelection={() => setSelectedRowKeys([])}
-              />
-            ) : null}
-            <div className="flex-1 min-h-0">
-              <Table<ShotRead>
-                rowKey="id"
-                size="small"
-                loading={loading}
-                rowSelection={{
-                  selectedRowKeys,
-                  onChange: (keys) => setSelectedRowKeys(keys),
-                  getCheckboxProps: () => ({
-                    disabled: extracting || batchDeleting,
-                  }),
-                }}
-                columns={columns}
-                dataSource={filteredShots}
-                pagination={{ pageSize: 20, showSizeChanger: true, pageSizeOptions: [10, 20, 50, 100] }}
-                scroll={{ x: 1180, y: tableScrollY }}
-                locale={{
-                  emptyText: tableEmpty ?? <Empty description="暂无数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />,
-                }}
-              />
-            </div>
-          </div>
+          )}
         </Card>
       </Content>
 
       <Modal
-        title="创建分镜"
+        title="新增分镜"
         open={createOpen}
-        onCancel={extracting ? undefined : closeCreate}
+        onCancel={closeCreate}
         onOk={() => void submitCreate()}
-        confirmLoading={extracting || createSubmitting}
-        okButtonProps={{ loading: extracting || createSubmitting, disabled: extracting }}
-        cancelButtonProps={{ disabled: extracting }}
-        closable={!extracting}
-        maskClosable={!extracting}
-        keyboard={!extracting}
+        confirmLoading={createSubmitting}
+        okText="创建"
+        cancelText="取消"
         destroyOnClose
-        width={520}
       >
-        <Form form={createForm} layout="vertical" preserve={false}>
-          <Form.Item name="title" label="标题" rules={[{ required: true, message: '请填写标题' }]}>
-            <Input placeholder="分镜标题" />
+        <Form form={createForm} layout="vertical">
+          <Form.Item
+            name="title"
+            label="分镜标题"
+            rules={[{ required: true, message: '请输入分镜标题' }]}
+          >
+            <Input maxLength={120} placeholder="例如：主角推门进入房间" />
           </Form.Item>
           <Form.Item name="script_excerpt" label="剧本摘录">
-            <Input.TextArea rows={8} placeholder="可选" />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal
-        title={insertMode?.direction === 'before' ? '向上插入分镜' : '向下插入分镜'}
-        open={!!insertMode}
-        onCancel={insertSubmitting ? undefined : closeInsert}
-        onOk={() => void submitInsert()}
-        confirmLoading={insertSubmitting}
-        okButtonProps={{ loading: insertSubmitting }}
-        cancelButtonProps={{ disabled: insertSubmitting }}
-        closable={!insertSubmitting}
-        maskClosable={!insertSubmitting}
-        keyboard={!insertSubmitting}
-        destroyOnClose
-        width={520}
-      >
-        {insertMode && (
-          <div className="mb-3 text-sm text-gray-500">
-            将在「{insertMode.refShot.title || `分镜 ${insertMode.refShot.index}`}」
-            {insertMode.direction === 'before' ? '之前' : '之后'}插入新分镜
-          </div>
-        )}
-        <Form form={insertForm} layout="vertical" preserve={false}>
-          <Form.Item name="title" label="标题" rules={[{ required: true, message: '请填写标题' }]}>
-            <Input placeholder="分镜标题" />
-          </Form.Item>
-          <Form.Item name="script_excerpt" label="剧本摘录">
-            <Input.TextArea rows={6} placeholder="可选" />
+            <Input.TextArea rows={4} maxLength={1000} placeholder="可选，先补一个简短摘录也可以" />
           </Form.Item>
         </Form>
       </Modal>
@@ -951,7 +369,10 @@ export function ChapterShotsPage() {
       <ExtractionConfirmModal
         open={extractConfirmOpen}
         title="确认提取分镜并自动准备"
-        onConfirm={() => { setExtractConfirmOpen(false); void handleOneClickExtract() }}
+        onConfirm={() => {
+          setExtractConfirmOpen(false)
+          void handleOneClickExtract()
+        }}
         onCancel={() => setExtractConfirmOpen(false)}
         costRows={[
           {
@@ -970,20 +391,6 @@ export function ChapterShotsPage() {
         ]}
         note="资产图数量由 AI 拆解后生成的分镜数决定，拆解前无法预知；积分不足时对应资产将建档但不生成图片。"
       />
-
-      <VideoDiagnosticsDrawer
-        open={batchDiagnosticsOpen}
-        loading={batchDiagnosticsLoading}
-        title="批量诊断"
-        readiness={null}
-        batchItems={batchDiagnostics.map(({ shot, readiness, error }) => ({
-          title: shot.title || `第 ${shot.index} 镜`,
-          readiness,
-          error,
-        }))}
-        onClose={closeBatchDiagnostics}
-      />
-
     </Layout>
   )
 }

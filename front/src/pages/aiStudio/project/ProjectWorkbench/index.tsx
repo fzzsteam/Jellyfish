@@ -109,7 +109,7 @@ const ProjectWorkbench: React.FC = () => {
     if (state.key === 'prepare_shots') {
       return {
         label: `进入${chapterLabel}分镜`,
-        hint: `${chapterLabel}已有分镜，建议进入分镜列表处理待确认镜头`,
+        hint: `${chapterLabel}已有分镜，建议直接进入分镜详情继续处理待确认镜头`,
         icon: state.primaryIcon,
         onClick: () => navigate(getChapterShotsPath(projectId, recommendedChapter.id)),
       }
