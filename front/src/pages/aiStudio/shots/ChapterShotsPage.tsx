@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Button,
   Card,
@@ -103,6 +103,7 @@ export function ChapterShotsPage() {
   const [batchDiagnosticsOpen, setBatchDiagnosticsOpen] = useState(false)
   const [batchDiagnosticsLoading, setBatchDiagnosticsLoading] = useState(false)
   const [batchDiagnostics, setBatchDiagnostics] = useState<BatchDiagnosticItem[]>([])
+  const batchDiagnosticsRequestSeqRef = useRef(0)
 
   const refresh = async () => {
     if (!chapterId) return
@@ -501,6 +502,7 @@ export function ChapterShotsPage() {
     }
 
     const selectedShots = shots.filter((shot) => selectedShotIds.includes(shot.id))
+    const requestSeq = ++batchDiagnosticsRequestSeqRef.current
     setBatchDiagnosticsOpen(true)
     setBatchDiagnosticsLoading(true)
     setBatchDiagnostics([])
@@ -513,11 +515,13 @@ export function ChapterShotsPage() {
             shotId: shot.id,
             referenceMode: 'first',
           })
+          if (requestSeq !== batchDiagnosticsRequestSeqRef.current) return
           results.push({
             shot,
             readiness: res.data ?? null,
           })
         } catch (error) {
+          if (requestSeq !== batchDiagnosticsRequestSeqRef.current) return
           results.push({
             shot,
             readiness: null,
@@ -525,20 +529,33 @@ export function ChapterShotsPage() {
           })
         }
       }
+      if (requestSeq !== batchDiagnosticsRequestSeqRef.current) return
       setBatchDiagnostics(results)
     } finally {
-      setBatchDiagnosticsLoading(false)
+      if (requestSeq === batchDiagnosticsRequestSeqRef.current) {
+        setBatchDiagnosticsLoading(false)
+      }
     }
   }, [selectedShotIds, shots])
+
+  /**
+   * 关闭批量诊断抽屉时立即失效当前请求，避免旧响应在关闭后回写页面状态。
+   */
+  const closeBatchDiagnostics = useCallback(() => {
+    batchDiagnosticsRequestSeqRef.current += 1
+    setBatchDiagnosticsOpen(false)
+    setBatchDiagnosticsLoading(false)
+    setBatchDiagnostics([])
+  }, [])
 
   const batchMaintenanceMenuItems: MenuProps['items'] = useMemo(
     () => [
       {
         key: 'hide',
-        label: '隐藏',
+        label: '隐藏（待接入）',
         icon: <EyeInvisibleOutlined />,
         disabled: extracting || batchDeleting,
-        onClick: () => message.warning('请先完成维护动作接入'),
+        onClick: () => message.warning('隐藏功能待接入，请先使用其他维护动作'),
       },
       {
         key: 'delete',
@@ -550,17 +567,17 @@ export function ChapterShotsPage() {
       },
       {
         key: 'skip-extraction',
-        label: '维护：标记无需提取',
+        label: '维护：标记无需提取（待接入）',
         icon: <StopOutlined />,
         disabled: extracting || batchDeleting,
-        onClick: () => message.warning('请先完成维护动作接入'),
+        onClick: () => message.warning('标记无需提取功能待接入'),
       },
       {
         key: 'restore-extraction',
-        label: '维护：恢复提取',
+        label: '维护：恢复提取（待接入）',
         icon: <UndoOutlined />,
         disabled: extracting || batchDeleting,
-        onClick: () => message.warning('请先完成维护动作接入'),
+        onClick: () => message.warning('恢复提取功能待接入'),
       },
     ],
     [batchDeleting, confirmBatchDelete, extracting],
@@ -964,7 +981,7 @@ export function ChapterShotsPage() {
           readiness,
           error,
         }))}
-        onClose={() => setBatchDiagnosticsOpen(false)}
+        onClose={closeBatchDiagnostics}
       />
 
     </Layout>
