@@ -6,25 +6,21 @@ import {
   LoadingOutlined,
   MoreOutlined,
   PlusOutlined,
-  ScissorOutlined,
   StopOutlined,
   SyncOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ScriptProcessingService, StudioChaptersService } from '../../../../../services/generated'
+import { StudioChaptersService } from '../../../../../services/generated'
 import { chapterStatusMap } from '../constants'
 import { getChapterShotsPath } from '../routes'
 import { useChapters, newId, type Chapter } from '../hooks/useProjectData'
 import { ChapterRawTextEditorModal } from '../../../chapter/components/ChapterRawTextEditorModal'
 import { getChapterPreparationState } from '../chapterPreparation'
 import { loadChapterFlowStats, type ChapterFlowStats } from '../projectFlowStats'
-import { executeAsyncTaskCreate, executeTaskCancel } from '../../../components/taskActionHelpers'
+import { executeTaskCancel } from '../../../components/taskActionHelpers'
 import { TASK_COPY } from '../../../components/taskCopy'
 import { useTaskPageContext } from '../../../components/taskPageContext'
 import { useTaskUiStore } from '../../../components/taskUiStore'
-import { usePointsQuote } from '../../../../../hooks/usePointsQuote'
-import { PointsBadge } from '../../../../../components/points/PointsBadge'
-import { makePointsAwareGetErrorMessage } from '../../../../../components/points/pointsTaskError'
 import {
   createRelationTaskState,
   upsertRelationTaskStateInMap,
@@ -49,7 +45,6 @@ export function ChaptersTab() {
   const [createContent, setCreateContent] = useState('')
   const [chapterFlowMap, setChapterFlowMap] = useState<Record<string, ChapterFlowStats>>({})
   const [chapterDivisionActionId, setChapterDivisionActionId] = useState<string | null>(null)
-  const [divideConfirmChapter, setDivideConfirmChapter] = useState<Chapter | null>(null)
   const taskUiUpsert = useTaskUiStore((state) => state.upsertTask)
   const taskUiRemove = useTaskUiStore((state) => state.removeTask)
   const syncedTaskIdsRef = useRef<string[]>([])
@@ -65,24 +60,6 @@ export function ChaptersTab() {
     onTasksSettled: async () => {
       await refresh()
     },
-  })
-
-  // 积分试算：分镜提取为文本类业务（script_divide），定价与具体章节无关，全表共享一份 quote_token。
-  const divideQuote = usePointsQuote({
-    businessType: 'script_divide',
-    category: 'text',
-    modelId: null,
-    enabled: chapters.length > 0,
-  })
-
-  // 积分试算：资产图生成（image_generation），仅用于在分镜拆解提示中展示单张资产图单价，
-  // 不参与提交门控（图片实际生成发生在工作室阶段，按真实新建数量计费）。
-  const imageQuote = usePointsQuote({
-    businessType: 'image_generation',
-    category: 'image',
-    modelId: null,
-    resolutionProfile: 'standard',
-    enabled: chapters.length > 0,
   })
 
   const createParam = searchParams.get(CREATE_PARAM)
@@ -152,9 +129,9 @@ export function ChaptersTab() {
     Modal.confirm({
       title: '章节创建成功',
       content: hasRawText
-        ? '这一章已经有原文内容，接下来更适合直接提取分镜并自动准备资产与对白。'
+        ? '这一章已经有原文内容，接下来更适合进入分镜列表发起提取，并继续处理镜头队列。'
         : '这一章还没有原文内容，建议先补章节原文。',
-      okText: hasRawText ? '立即提取并自动准备' : '继续编辑原文',
+      okText: hasRawText ? '进入分镜列表' : '继续编辑原文',
       cancelText: '稍后处理',
       onOk: () => {
         if (hasRawText) {
@@ -250,59 +227,10 @@ export function ChaptersTab() {
     }
     const state = getChapterPreparationState(record)
     if (state.key === 'edit_raw') {
-      openEditModal(record)
-      return
-    }
-    if (state.key === 'extract_shots') {
-      navigate(getChapterShotsPath(projectId, record.id))
-      return
-    }
-    if (state.key === 'prepare_shots') {
       navigate(getChapterShotsPath(projectId, record.id))
       return
     }
     navigate(getChapterShotsPath(projectId, record.id))
-  }
-
-  const handleDivideAsync = async (record: Chapter) => {
-    const scriptText = record.rawText?.trim()
-    if (!scriptText) {
-      message.warning('请先补章节原文')
-      return
-    }
-    setChapterDivisionActionId(record.id)
-    try {
-      const freshQuote = await divideQuote.refreshNow()
-      const quoteToken = freshQuote?.quote_token ?? null
-      if (!freshQuote?.sufficient || !quoteToken) {
-        message.warning('积分试算已刷新，请确认积分充足后再提交')
-        return
-      }
-      await executeAsyncTaskCreate({
-        request: () =>
-          ScriptProcessingService.divideScriptAsyncApiV1ScriptProcessingDivideAsyncPost({
-            requestBody: {
-              chapter_id: record.id,
-              script_text: scriptText,
-              write_to_db: true,
-              quote_token: quoteToken,
-            },
-          }),
-        trackTaskData: (data) => {
-          const tracked = createRelationTaskState(data)
-          setChapterDivisionTaskMap(upsertRelationTaskStateInMap(chapterDivisionTaskMap, record.id, tracked))
-          return tracked
-        },
-        startedMessage: taskCopy.startedMessage,
-        reusedMessage: taskCopy.reusedMessage,
-        fallbackErrorMessage: '启动分镜提取失败',
-        getErrorMessage: makePointsAwareGetErrorMessage(divideQuote.refresh),
-      })
-    } catch {
-      // executeAsyncTaskCreate 已统一处理错误提示
-    } finally {
-      setChapterDivisionActionId(null)
-    }
   }
 
   const handleCancelDivideTask = async (record: Chapter) => {
@@ -378,8 +306,7 @@ export function ChaptersTab() {
     return [
       {
         key: 'shots',
-        label: '查看分镜',
-        icon: <ScissorOutlined />,
+        label: '进入分镜',
         onClick: () => navigate(getChapterShotsPath(projectId, record.id)),
       },
       {
@@ -480,7 +407,7 @@ export function ChaptersTab() {
     {
       title: '操作',
       key: 'action',
-      width: 230,
+      width: 280,
       render: (_, record) => {
         const state = getChapterPreparationState(record)
         const activeTask = chapterDivisionTaskMap[record.id]
@@ -493,42 +420,38 @@ export function ChaptersTab() {
           ? activeTask.cancelRequested
             ? '查看取消进度'
             : '查看提取进度'
-          : state.primaryAction
-        const primaryLoading = chapterDivisionActionId === record.id && state.key === 'extract_shots' && !activeTask
-        // 仅在分镜提取这一可计费动作下，按积分试算结果阻断提交；其他状态（编辑/查看）不受影响。
-        const divideBlocked = state.key === 'extract_shots' && !activeTask && !divideQuote.canSubmit
+          : '进入分镜'
 
         return (
           <Space size={8} direction="vertical" className="items-start">
             <Space size={8}>
-            <Button
-              type="primary"
-              size="small"
-              onClick={() => {
-                if (state.key === 'extract_shots' && !activeTask) {
-                  setDivideConfirmChapter(record)
-                  return
-                }
-                handlePrimaryAction(record)
-              }}
-              style={{ minWidth: 132, justifyContent: 'center' }}
-              icon={primaryIcon}
-              loading={primaryLoading}
-              disabled={divideBlocked}
-            >
-              {primaryText}
-            </Button>
-            <Dropdown
-              trigger={['click']}
-              menu={{ items: buildActionMenuItems(record) }}
-            >
               <Button
                 size="small"
-                icon={<MoreOutlined />}
-                aria-label="更多操作"
-                loading={chapterDivisionActionId === record.id && !!activeTask}
-              />
-            </Dropdown>
+                onClick={() => openEditModal(record)}
+                icon={<EditOutlined />}
+              >
+                编辑原文
+              </Button>
+              <Button
+                type="primary"
+                size="small"
+                onClick={() => handlePrimaryAction(record)}
+                style={{ minWidth: 132, justifyContent: 'center' }}
+                icon={primaryIcon}
+              >
+                {primaryText}
+              </Button>
+              <Dropdown
+                trigger={['click']}
+                menu={{ items: buildActionMenuItems(record) }}
+              >
+                <Button
+                  size="small"
+                  icon={<MoreOutlined />}
+                  aria-label="更多操作"
+                  loading={chapterDivisionActionId === record.id && !!activeTask}
+                />
+              </Dropdown>
             </Space>
           </Space>
         )
@@ -645,46 +568,6 @@ export function ChaptersTab() {
               className="mt-1 font-mono text-sm"
             />
           </div>
-        </div>
-      </Modal>
-
-      {/* 提取分镜积分消耗确认弹窗 */}
-      <Modal
-        title="确认提取分镜并自动准备"
-        open={divideConfirmChapter !== null}
-        onOk={() => {
-          const chapter = divideConfirmChapter
-          setDivideConfirmChapter(null)
-          if (chapter) void handleDivideAsync(chapter)
-        }}
-        onCancel={() => setDivideConfirmChapter(null)}
-        okText="确认，开始提取"
-        cancelText="取消"
-        destroyOnClose
-      >
-        <div className="flex flex-col gap-3 py-2 text-sm text-gray-600">
-          <p>本次操作包含两步，积分消耗如下：</p>
-          <div className="flex flex-col gap-2 rounded-lg bg-gray-50 px-4 py-3">
-            <div className="flex items-center justify-between">
-              <span>分镜拆解 + 信息提取（文本各一次）</span>
-              {divideQuote.quote ? (
-                <PointsBadge value={divideQuote.quote.required_points * 2} size="sm" />
-              ) : (
-                <span className="text-gray-400 text-xs">计算中…</span>
-              )}
-            </div>
-            <div className="flex items-center justify-between">
-              <span>资产图生成（每张）</span>
-              {imageQuote.quote ? (
-                <PointsBadge value={imageQuote.quote.required_points} size="sm" />
-              ) : (
-                <span className="text-gray-400 text-xs">图片模型未配置</span>
-              )}
-            </div>
-          </div>
-          <p className="text-gray-400 text-xs leading-relaxed">
-            资产图数量由 AI 拆解后生成的分镜数决定，拆解前无法预知；积分不足以覆盖某张图时，对应资产将建档但不生成图片。
-          </p>
         </div>
       </Modal>
     </Card>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Button, Card, Divider, Empty, Input, Layout, List, Modal, Popconfirm, Segmented, Space, Spin, Tabs, Tooltip, Typography, message } from 'antd'
-import { ArrowLeftOutlined, ClearOutlined, CloseCircleOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Badge, Button, Card, Checkbox, Divider, Dropdown, Empty, Input, Layout, List, Modal, Popconfirm, Segmented, Space, Spin, Tabs, Typography, message } from 'antd'
+import type { MenuProps } from 'antd'
+import { ArrowLeftOutlined, CloseCircleOutlined, DeleteOutlined, DownloadOutlined, MoreOutlined, ReloadOutlined, StopOutlined, ThunderboltOutlined, ToolOutlined, UndoOutlined } from '@ant-design/icons'
 import type {
   EntityNameExistenceItem,
   ModelRead,
@@ -20,6 +21,7 @@ import type {
 import {
   FilmService,
   LlmService,
+  PointsService,
   ScriptProcessingService,
   StudioChaptersService,
   StudioEntitiesService,
@@ -53,13 +55,14 @@ import { usePointsQuote } from '../../../hooks/usePointsQuote'
 import { PointsCostButton } from '../../../components/points/PointsCostButton'
 import { makePointsAwareGetErrorMessage } from '../../../components/points/pointsTaskError'
 import { ExtractionConfirmModal } from './components/ExtractionConfirmModal'
+import { ShotBatchToolbar } from './components/ShotBatchToolbar'
 import {
   type RelationTaskState,
   SCRIPT_EXTRACTION_RELATION_TYPE,
   useCancelableRelationTask,
 } from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { StudioEntitiesApi } from '../../../services/studioEntities'
-import { resolveAssetUrl } from '../assets/utils'
+import { buildFileDownloadUrl, resolveAssetUrl } from '../assets/utils'
 
 const { Header, Content } = Layout
 const { TextArea } = Input
@@ -119,6 +122,17 @@ function resolveVideoRatio(
     toSupportedVideoRatio(shotDetail?.override_video_ratio) ??
     toSupportedVideoRatio(projectDefaultVideoRatio)
   )
+}
+
+/**
+ * 生成左侧右键与批量操作的展示标题。
+ * 单条显示镜头编号，多条显示数量，便于确认本次动作作用范围。
+ */
+function buildShotActionTitle(targetShots: ShotRead[]): string {
+  if (targetShots.length === 1) {
+    return `镜头 #${targetShots[0].index}`
+  }
+  return `已选 ${targetShots.length} 条镜头`
 }
 
 const DEFAULT_EXTRACTION_SUMMARY: ShotExtractionSummaryRead = {
@@ -265,8 +279,11 @@ export function ChapterShotEditPage() {
   const [extractingAssets, setExtractingAssets] = useState(false)
   const [batchExtractingAssets, setBatchExtractingAssets] = useState(false)
   const [skipExtractionUpdating, setSkipExtractionUpdating] = useState(false)
+  const [batchGenerating, setBatchGenerating] = useState(false)
+  const [batchDownloading, setBatchDownloading] = useState(false)
+  const [batchDeleting, setBatchDeleting] = useState(false)
   const extractInFlightRef = useRef(false)
-  const [selectedShotIds, setSelectedShotIds] = useState<string[]>(shotId ? [shotId] : [])
+  const [selectedShotIds, setSelectedShotIds] = useState<string[]>([])
   const pendingExternalAssetCreateRef = useRef(false)
 
   // 积分试算：单条与批量提取均调用同一个 script_extract 接口，共享同一份 quote_token。
@@ -322,7 +339,13 @@ export function ChapterShotEditPage() {
   const [editorTabKey, setEditorTabKey] = useState<ShotDetailTabKey>('basic')
   const [videoDiagnosticsOpen, setVideoDiagnosticsOpen] = useState(false)
   const [videoDiagnosticsLoading, setVideoDiagnosticsLoading] = useState(false)
+  const [videoDiagnosticsTitle, setVideoDiagnosticsTitle] = useState('视频生成诊断')
   const [videoDiagnosticsReadiness, setVideoDiagnosticsReadiness] = useState<ShotVideoReadinessRead | null>(null)
+  const [videoDiagnosticsBatchItems, setVideoDiagnosticsBatchItems] = useState<Array<{
+    title: string
+    readiness: ShotVideoReadinessRead | null
+    error?: string
+  }> | undefined>(undefined)
   const [firstFrameReadiness, setFirstFrameReadiness] = useState<ShotVideoReadinessRead | null>(null)
   const [firstFrameReadinessLoading, setFirstFrameReadinessLoading] = useState(false)
   const [videoModels, setVideoModels] = useState<VideoModelOption[]>([])
@@ -363,7 +386,7 @@ export function ChapterShotEditPage() {
     () => shotsSorted.filter((item) => selectedShotIds.includes(item.id)),
     [selectedShotIds, shotsSorted],
   )
-  const multiSelectActive = selectedShotIds.length > 1
+  const hasSelection = selectedShotIds.length > 0
   const shotListFilterCounts = useMemo(
     () => ({
       all: shotsSorted.length,
@@ -387,6 +410,9 @@ export function ChapterShotEditPage() {
     }
     return shotsSorted.filter((item) => isPendingExtractionConfirmation(item))
   }, [shotListFilter, shotsSorted])
+  const filteredShotIds = useMemo(() => filteredShots.map((item) => item.id), [filteredShots])
+  const allFilteredSelected = filteredShotIds.length > 0 && filteredShotIds.every((id) => selectedShotIds.includes(id))
+  const partiallyFilteredSelected = filteredShotIds.some((id) => selectedShotIds.includes(id)) && !allFilteredSelected
   const nextActionableShot = useMemo(() => {
     if (!shotId) return shotsSorted.find((item) => isActionablePreparationShot(item)) ?? null
     const currentIndex = shotsSorted.findIndex((item) => item.id === shotId)
@@ -401,6 +427,14 @@ export function ChapterShotEditPage() {
     }
     return null
   }, [shotId, shotsSorted])
+
+  useEffect(() => {
+    const existingIds = new Set(shotsSorted.map((item) => item.id))
+    setSelectedShotIds((prev) => {
+      const next = prev.filter((id) => existingIds.has(id))
+      return next.length === prev.length ? prev : next
+    })
+  }, [shotsSorted])
 
   const unionAssets = useMemo(() => {
     const groups: Record<AssetKind, AssetVM[]> = {
@@ -1053,58 +1087,44 @@ export function ChapterShotEditPage() {
     [applyPreparationState, loadPreparationState, shotId],
   )
 
-  const extractAssets = useCallback(async () => {
-    if (!projectId || !chapterId || !shot) return
-    if (extractInFlightRef.current) return
-    if (notifyExistingTask(extractTask, {
-      cancellingMessage: extractTaskCopy.cancellingMessage,
-      runningMessage: extractTaskCopy.runningMessage,
-    })) {
-      return
-    }
-    extractInFlightRef.current = true
-    setExtractingAssets(true)
-    try {
-      const scriptDivision = {
-        total_shots: 1,
-        shots: [
-          {
-            index: shot.index,
-            start_line: 1,
-            end_line: 1,
-            script_excerpt: shot.script_excerpt ?? '',
-            shot_name: shot.title ?? '',
-          },
-        ],
+  /**
+   * 对任意镜头集合批量切换“无需提取”维护标记。
+   * 当前镜头使用现有本地状态刷新，其余镜头完成后统一整页重载。
+   */
+  const updateSkipExtractionForShots = useCallback(
+    async (targetShots: ShotRead[], skip: boolean) => {
+      if (targetShots.length === 0) return
+      if (targetShots.length === 1 && targetShots[0].id === shotId) {
+        await updateSkipExtraction(skip)
+        return
       }
-      await executeAsyncTaskCreate({
-        request: () =>
-          ScriptProcessingService.extractScriptAsyncApiV1ScriptProcessingExtractAsyncPost({
-            requestBody: {
-              project_id: projectId,
-              chapter_id: chapterId,
-              script_division: scriptDivision as any,
-              consistency: undefined,
-              refresh_cache: true,
-              quote_token: extractQuote.quoteToken,
-            } as any,
-          }),
-        trackTaskData: trackExtractTaskData,
-        startedMessage: extractTaskCopy.startedMessage,
-        reusedMessage: extractTaskCopy.reusedMessage,
-        fallbackErrorMessage: '提取失败',
-        getErrorMessage: makePointsAwareGetErrorMessage(extractQuote.refresh),
-      })
-    } catch {
-      // executeAsyncTaskCreate 已统一处理错误提示
-    } finally {
-      setExtractingAssets(false)
-      extractInFlightRef.current = false
-    }
-  }, [chapterId, extractTask, projectId, shot, extractQuote.quoteToken, extractQuote.refresh])
+      setSkipExtractionUpdating(true)
+      try {
+        await Promise.all(
+          targetShots.map((target) =>
+            StudioShotsService.updateShotSkipExtractionApiV1StudioShotsShotIdSkipExtractionPatch({
+              shotId: target.id,
+              requestBody: { skip },
+            }),
+          ),
+        )
+        message.success(skip ? `已标记 ${targetShots.length} 条镜头为无需提取` : `已恢复 ${targetShots.length} 条镜头的提取流程`)
+        await loadPage()
+      } catch {
+        message.error(skip ? '批量标记无需提取失败' : '批量恢复提取失败')
+      } finally {
+        setSkipExtractionUpdating(false)
+      }
+    },
+    [loadPage, shotId, updateSkipExtraction],
+  )
 
-  const batchExtractAssets = useCallback(async () => {
-    if (!projectId || !chapterId || selectedShots.length === 0) return
+  /**
+   * 对目标镜头集合执行提取与自动准备。
+   * 单条与多条共用同一条提取链路，只在文案和 loading 上区分。
+   */
+  const extractAssetsForShots = useCallback(async (targetShots: ShotRead[]) => {
+    if (!projectId || !chapterId || targetShots.length === 0) return
     if (extractInFlightRef.current) return
     if (notifyExistingTask(extractTask, {
       cancellingMessage: extractTaskCopy.cancellingMessage,
@@ -1113,17 +1133,20 @@ export function ChapterShotEditPage() {
       return
     }
 
-    const actionableShots = selectedShots
+    const actionableShots = targetShots
       .filter((item) => !item.skip_extraction)
       .sort((a, b) => a.index - b.index)
-
     if (actionableShots.length === 0) {
       message.info('当前选中的镜头都已标记为无需提取，如需调整请先恢复提取')
       return
     }
 
     extractInFlightRef.current = true
-    setBatchExtractingAssets(true)
+    if (actionableShots.length > 1) {
+      setBatchExtractingAssets(true)
+    } else {
+      setExtractingAssets(true)
+    }
     try {
       const scriptDivision = {
         total_shots: actionableShots.length,
@@ -1150,16 +1173,26 @@ export function ChapterShotEditPage() {
         trackTaskData: trackExtractTaskData,
         startedMessage: actionableShots.length > 1 ? `已开始提取 ${actionableShots.length} 条镜头` : extractTaskCopy.startedMessage,
         reusedMessage: extractTaskCopy.reusedMessage,
-        fallbackErrorMessage: '批量提取失败',
+        fallbackErrorMessage: actionableShots.length > 1 ? '批量提取失败' : '提取失败',
         getErrorMessage: makePointsAwareGetErrorMessage(extractQuote.refresh),
       })
     } catch {
       // executeAsyncTaskCreate 已统一处理错误提示
     } finally {
+      setExtractingAssets(false)
       setBatchExtractingAssets(false)
       extractInFlightRef.current = false
     }
-  }, [chapterId, extractTask, projectId, selectedShots, extractQuote.quoteToken, extractQuote.refresh])
+  }, [chapterId, extractTask, projectId, extractQuote.quoteToken, extractQuote.refresh])
+
+  const extractAssets = useCallback(async () => {
+    if (!shot) return
+    await extractAssetsForShots([shot])
+  }, [extractAssetsForShots, shot])
+
+  const batchExtractAssets = useCallback(async () => {
+    await extractAssetsForShots(selectedShots)
+  }, [extractAssetsForShots, selectedShots])
 
   const cancelExtractTask = useCallback(async () => {
     if (!extractTask?.taskId) return
@@ -1234,33 +1267,88 @@ export function ChapterShotEditPage() {
     videoPromptPreviewRequestSeqRef.current += 1
     setVideoDiagnosticsOpen(false)
     setVideoDiagnosticsLoading(false)
+    setVideoDiagnosticsTitle('视频生成诊断')
     setVideoDiagnosticsReadiness(null)
+    setVideoDiagnosticsBatchItems(undefined)
     setFirstFrameReadiness(null)
     setFirstFrameReadinessLoading(false)
     setVideoPromptPreviewOpen(false)
     setVideoPromptPreviewLoading(false)
     setVideoPromptPreviewDraft('')
     setVideoPromptPreviewShotId(null)
-    setSelectedShotIds([id])
     navigate(getChapterShotDetailPath(projectId, chapterId, id, editorTabKey))
   }
-  const handleShotListClick = useCallback(
-    (targetShotId: string, e: React.MouseEvent) => {
-      const isToggle = e.metaKey || e.ctrlKey
-      if (isToggle) {
-        setSelectedShotIds((prev) =>
-          prev.includes(targetShotId) ? prev.filter((id) => id !== targetShotId) : [...prev, targetShotId],
-        )
+  /**
+   * 切换当前镜头，同时允许左侧快捷动作直接落到指定 tab。
+   */
+  const goShotToTab = useCallback(
+    (id: string, tab: ShotDetailTabKey) => {
+      if (!projectId || !chapterId) return
+      if (id === shotId) {
+        setEditorTabKey(tab)
+        editorTabMemoryRef.current[id] = tab
+        tabAutoInitShotIdRef.current = id
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev)
+          next.set('tab', tab)
+          return next
+        }, { replace: true })
         return
       }
-      goShot(targetShotId)
+      videoDiagnosticsRequestSeqRef.current += 1
+      firstFrameReadinessRequestSeqRef.current += 1
+      videoPromptPreviewRequestSeqRef.current += 1
+      setVideoDiagnosticsOpen(false)
+      setVideoDiagnosticsLoading(false)
+      setVideoDiagnosticsTitle('视频生成诊断')
+      setVideoDiagnosticsReadiness(null)
+      setVideoDiagnosticsBatchItems(undefined)
+      setFirstFrameReadiness(null)
+      setFirstFrameReadinessLoading(false)
+      setVideoPromptPreviewOpen(false)
+      setVideoPromptPreviewLoading(false)
+      setVideoPromptPreviewDraft('')
+      setVideoPromptPreviewShotId(null)
+      navigate(getChapterShotDetailPath(projectId, chapterId, id, tab))
     },
-    [goShot],
+    [chapterId, navigate, projectId, setSearchParams, shotId],
   )
+  const handleShotListClick = useCallback((targetShotId: string) => {
+    goShot(targetShotId)
+  }, [goShot])
   const goNextActionableShot = useCallback(() => {
     if (!nextActionableShot) return
     goShot(nextActionableShot.id)
   }, [nextActionableShot])
+
+  /**
+   * 勾选集合与当前镜头分离：右键已选项时作用于整个选中集合，未选中时只作用于当前项。
+   */
+  const resolveActionTargets = useCallback((targetShot: ShotRead) => {
+    if (selectedShotIds.includes(targetShot.id)) {
+      return selectedShots.length > 0 ? selectedShots : [targetShot]
+    }
+    return [targetShot]
+  }, [selectedShotIds, selectedShots])
+
+  const toggleShotSelection = useCallback((targetShotId: string, checked: boolean) => {
+    setSelectedShotIds((prev) => {
+      if (checked) {
+        return prev.includes(targetShotId) ? prev : [...prev, targetShotId]
+      }
+      return prev.filter((id) => id !== targetShotId)
+    })
+  }, [])
+
+  const toggleSelectAllFilteredShots = useCallback((checked: boolean) => {
+    setSelectedShotIds((prev) => {
+      if (checked) {
+        return Array.from(new Set([...prev, ...filteredShotIds]))
+      }
+      const filteredSet = new Set(filteredShotIds)
+      return prev.filter((id) => !filteredSet.has(id))
+    })
+  }, [filteredShotIds])
 
   const openLinkingModal = useCallback(
     async (kind: AssetKind, name: string, item: EntityNameExistenceItem, hint: string) => {
@@ -1714,9 +1802,11 @@ export function ChapterShotEditPage() {
     if (!shotId) return
     const requestShotId = shotId
     const requestSeq = ++videoDiagnosticsRequestSeqRef.current
+    setVideoDiagnosticsTitle('视频生成诊断')
     setVideoDiagnosticsOpen(true)
     setVideoDiagnosticsLoading(true)
     setVideoDiagnosticsReadiness(null)
+    setVideoDiagnosticsBatchItems(undefined)
     try {
       const res = await StudioShotsService.getShotVideoReadinessApiApiV1StudioShotsShotIdVideoReadinessGet({
         shotId: requestShotId,
@@ -1734,6 +1824,415 @@ export function ChapterShotEditPage() {
       }
     }
   }, [shotId])
+
+  /**
+   * 对任意镜头集合执行生成诊断。
+   * 单条直接展示详情，多条展示批量诊断列表。
+   */
+  const runDiagnosticsForShots = useCallback(async (targetShots: ShotRead[]) => {
+    if (targetShots.length === 0) return
+    const requestSeq = ++videoDiagnosticsRequestSeqRef.current
+    setVideoDiagnosticsTitle(targetShots.length === 1 ? `${buildShotActionTitle(targetShots)} · 生成诊断` : `批量诊断（${targetShots.length} 条）`)
+    setVideoDiagnosticsOpen(true)
+    setVideoDiagnosticsLoading(true)
+    setVideoDiagnosticsReadiness(null)
+    setVideoDiagnosticsBatchItems(undefined)
+    try {
+      if (targetShots.length === 1) {
+        const res = await StudioShotsService.getShotVideoReadinessApiApiV1StudioShotsShotIdVideoReadinessGet({
+          shotId: targetShots[0].id,
+          referenceMode: 'first',
+        })
+        if (requestSeq !== videoDiagnosticsRequestSeqRef.current) return
+        setVideoDiagnosticsReadiness(res.data ?? null)
+        return
+      }
+
+      const results = []
+      for (const target of targetShots) {
+        try {
+          const res = await StudioShotsService.getShotVideoReadinessApiApiV1StudioShotsShotIdVideoReadinessGet({
+            shotId: target.id,
+            referenceMode: 'first',
+          })
+          if (requestSeq !== videoDiagnosticsRequestSeqRef.current) return
+          results.push({
+            title: `#${target.index} · ${target.title?.trim() || '未命名镜头'}`,
+            readiness: res.data ?? null,
+          })
+        } catch (error) {
+          if (requestSeq !== videoDiagnosticsRequestSeqRef.current) return
+          results.push({
+            title: `#${target.index} · ${target.title?.trim() || '未命名镜头'}`,
+            readiness: null,
+            error: makePointsAwareGetErrorMessage(() => {})(error, '诊断失败'),
+          })
+        }
+      }
+      if (requestSeq !== videoDiagnosticsRequestSeqRef.current) return
+      setVideoDiagnosticsBatchItems(results)
+    } finally {
+      if (requestSeq === videoDiagnosticsRequestSeqRef.current) {
+        setVideoDiagnosticsLoading(false)
+      }
+    }
+  }, [])
+
+  /**
+   * 读取某个镜头生成视频所需的最小上下文。
+   * 右键单条生成和批量生成都通过它拿到最新时长、比例和准备度。
+   */
+  const loadShotGenerationContext = useCallback(async (targetShot: ShotRead) => {
+    const [detailRes, readinessRes] = await Promise.all([
+      StudioShotDetailsService.getShotDetailApiV1StudioShotDetailsShotIdGet({ shotId: targetShot.id }),
+      StudioShotsService.getShotVideoReadinessApiApiV1StudioShotsShotIdVideoReadinessGet({
+        shotId: targetShot.id,
+        referenceMode: 'first',
+      }),
+    ])
+    const detail = detailRes.data ?? null
+    const readiness = readinessRes.data ?? null
+    const ratio = resolveVideoRatio(detail, projectDefaultVideoRatio)
+    return { detail, readiness, ratio }
+  }, [projectDefaultVideoRatio])
+
+  /**
+   * 用当前页模型/清晰度配置直接提交指定镜头的视频生成任务。
+   * 单条右键生成与批量生成都会走这条链路，保持生成参数来源一致。
+   */
+  const generateVideosForShots = useCallback(async (targetShots: ShotRead[]) => {
+    if (targetShots.length === 0) return
+    if (!selectedVideoModelId) {
+      message.warning('请先在右侧生成视频页选择视频模型')
+      if (targetShots.length === 1) {
+        goShotToTab(targetShots[0].id, 'generate')
+      }
+      return
+    }
+
+    setBatchGenerating(true)
+    const blockedDiagnostics: Array<{ title: string; readiness: ShotVideoReadinessRead | null; error?: string }> = []
+    let successCount = 0
+    let failCount = 0
+    let skippedCount = 0
+
+    try {
+      for (const targetShot of targetShots) {
+        try {
+          const { detail, readiness, ratio } = await loadShotGenerationContext(targetShot)
+          if (!readiness?.ready) {
+            blockedDiagnostics.push({
+              title: `#${targetShot.index} · ${targetShot.title?.trim() || '未命名镜头'}`,
+              readiness,
+            })
+            skippedCount += 1
+            continue
+          }
+          if (!detail?.duration || detail.duration <= 0 || !ratio) {
+            blockedDiagnostics.push({
+              title: `#${targetShot.index} · ${targetShot.title?.trim() || '未命名镜头'}`,
+              readiness,
+              error: !detail?.duration || detail.duration <= 0 ? '未设置镜头时长' : '未设置视频比例',
+            })
+            skippedCount += 1
+            continue
+          }
+
+          const previewRes = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
+            requestBody: {
+              shot_id: targetShot.id,
+              reference_mode: 'first',
+              prompt: null,
+              images: [],
+              ratio,
+            },
+          })
+          const prompt = String(previewRes.data?.prompt ?? '').trim()
+          if (!prompt) {
+            blockedDiagnostics.push({
+              title: `#${targetShot.index} · ${targetShot.title?.trim() || '未命名镜头'}`,
+              readiness,
+              error: '未生成有效提示词',
+            })
+            skippedCount += 1
+            continue
+          }
+
+          const quoteRes = await PointsService.quoteMyPointsApiV1PointsQuotePost({
+            requestBody: {
+              business_type: 'video_generation',
+              category: 'video',
+              model_id: selectedVideoModelId,
+              duration_seconds: detail.duration,
+              resolution: videoResolution,
+              generation_count: 1,
+            },
+          })
+          const quoteToken = quoteRes.data?.quote_token ?? null
+          if (!quoteToken) {
+            failCount += 1
+            message.error(`镜头 #${targetShot.index} 试算失败，未拿到 quote token`)
+            continue
+          }
+
+          await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
+            requestBody: {
+              shot_id: targetShot.id,
+              model_id: selectedVideoModelId,
+              reference_mode: 'first',
+              prompt,
+              images: [],
+              ratio,
+              resolution: videoResolution,
+              quote_token: quoteToken,
+            },
+          })
+          successCount += 1
+        } catch (error) {
+          failCount += 1
+          const pointsAware = makePointsAwareGetErrorMessage(() => {})
+          message.error(`镜头 #${targetShot.index}：${pointsAware(error, '发起视频生成失败')}`)
+        }
+      }
+
+      if (blockedDiagnostics.length > 0) {
+        setVideoDiagnosticsTitle(`批量诊断（${blockedDiagnostics.length} 条待补齐）`)
+        setVideoDiagnosticsReadiness(null)
+        setVideoDiagnosticsBatchItems(blockedDiagnostics)
+        setVideoDiagnosticsOpen(true)
+      }
+
+      if (targetShots.length === 1 && successCount === 1) {
+        const target = targetShots[0]
+        if (target.id === shotId) {
+          message.success('视频生成任务已提交')
+          void loadPage()
+        } else {
+          message.success('视频生成任务已提交，已切到该镜头结果页')
+          goShotToTab(target.id, 'results')
+        }
+        return
+      }
+
+      const parts = [`${successCount} 成功`]
+      if (skippedCount > 0) parts.push(`${skippedCount} 跳过`)
+      if (failCount > 0) parts.push(`${failCount} 失败`)
+      message[failCount > 0 ? 'warning' : 'success'](`批量生成提交完成：${parts.join('，')}`)
+      await loadPage()
+    } finally {
+      setBatchGenerating(false)
+    }
+  }, [goShotToTab, loadPage, loadShotGenerationContext, selectedVideoModelId, shotId, videoResolution])
+
+  /**
+   * 下载目标镜头的已生成视频。
+   * 批量模式下逐个触发浏览器下载，不再引入旧工作室的本地目录选择流程。
+   */
+  const downloadVideosForShots = useCallback(async (targetShots: ShotRead[]) => {
+    const downloadable = targetShots
+      .map((target) => ({
+        shot: target,
+        url: buildFileDownloadUrl(target.generated_video_file_id?.trim()),
+      }))
+      .filter((item): item is { shot: ShotRead; url: string } => Boolean(item.url))
+
+    if (downloadable.length === 0) {
+      message.warning('当前目标镜头暂无可下载视频')
+      return
+    }
+
+    setBatchDownloading(true)
+    try {
+      for (const item of downloadable) {
+        const anchor = document.createElement('a')
+        anchor.href = item.url
+        anchor.download = `${item.shot.index}-${item.shot.title?.trim() || 'shot'}.mp4`
+        anchor.target = '_blank'
+        anchor.rel = 'noreferrer'
+        document.body.appendChild(anchor)
+        anchor.click()
+        document.body.removeChild(anchor)
+      }
+      message.success(downloadable.length === 1 ? '已开始下载视频' : `已开始下载 ${downloadable.length} 条视频`)
+    } finally {
+      setBatchDownloading(false)
+    }
+  }, [])
+
+  /**
+   * 删除目标镜头，并在当前镜头被删掉时自动切换到剩余镜头或返回列表页。
+   */
+  const deleteShots = useCallback(async (targetShots: ShotRead[]) => {
+    if (!projectId || !chapterId || targetShots.length === 0) return
+    const deletedIds = new Set(targetShots.map((item) => item.id))
+    const remainingShots = shotsSorted.filter((item) => !deletedIds.has(item.id))
+    const nextShotId = remainingShots[0]?.id
+    setBatchDeleting(true)
+    try {
+      await Promise.all(targetShots.map((target) => StudioShotsService.deleteShotApiV1StudioShotsShotIdDelete({ shotId: target.id })))
+      setSelectedShotIds((prev) => prev.filter((id) => !deletedIds.has(id)))
+      if (shotId && deletedIds.has(shotId)) {
+        if (nextShotId) {
+          goShotToTab(nextShotId, editorTabKey)
+        } else {
+          navigate(getChapterShotsPath(projectId, chapterId))
+        }
+      } else {
+        await loadPage()
+      }
+      message.success(targetShots.length === 1 ? '已删除镜头' : `已删除 ${targetShots.length} 条镜头`)
+    } catch {
+      message.error(targetShots.length === 1 ? '删除镜头失败' : '批量删除失败')
+    } finally {
+      setBatchDeleting(false)
+    }
+  }, [chapterId, editorTabKey, goShotToTab, loadPage, navigate, projectId, shotId, shotsSorted])
+
+  const batchMaintenanceMenuItems: MenuProps['items'] = useMemo(() => [
+    {
+      key: 'delete',
+      label: '删除',
+      danger: true,
+      icon: <DeleteOutlined />,
+      disabled: batchDeleting || batchGenerating,
+      onClick: () => {
+        const targets = selectedShots
+        if (targets.length === 0) return
+        Modal.confirm({
+          title: `删除 ${targets.length} 条镜头？`,
+          okText: '删除',
+          okButtonProps: { danger: true, loading: batchDeleting },
+          cancelText: '取消',
+          onOk: () => deleteShots(targets),
+        })
+      },
+    },
+    { type: 'divider' },
+    {
+      key: 'skip-extraction',
+      label: '标记无需提取',
+      icon: <StopOutlined />,
+      disabled: skipExtractionUpdating || selectedShots.every((item) => item.skip_extraction),
+      onClick: () => {
+        const targets = selectedShots.filter((item) => !item.skip_extraction)
+        if (targets.length === 0) return
+        Modal.confirm({
+          title: `将 ${targets.length} 条镜头标记为无需提取？`,
+          content: '标记后这些镜头会直接按“提取确认已完成”处理。',
+          okText: '确认',
+          okButtonProps: { danger: true, loading: skipExtractionUpdating },
+          cancelText: '取消',
+          onOk: () => updateSkipExtractionForShots(targets, true),
+        })
+      },
+    },
+    {
+      key: 'restore-extraction',
+      label: '恢复提取',
+      icon: <UndoOutlined />,
+      disabled: skipExtractionUpdating || selectedShots.every((item) => !item.skip_extraction),
+      onClick: () => {
+        const targets = selectedShots.filter((item) => item.skip_extraction)
+        if (targets.length === 0) return
+        void updateSkipExtractionForShots(targets, false)
+      },
+    },
+  ], [batchDeleting, batchGenerating, deleteShots, selectedShots, skipExtractionUpdating, updateSkipExtractionForShots])
+
+  /**
+   * 构造左侧镜头行的右键菜单。
+   * 单项和多选共用同一组动作，只根据目标集合动态调整文案与禁用态。
+   */
+  const buildShotContextMenuItems = useCallback((targetShot: ShotRead): MenuProps['items'] => {
+    const targets = resolveActionTargets(targetShot)
+    const downloadableTargets = targets.filter((item) => Boolean(item.generated_video_file_id?.trim()))
+    const activeTitle = buildShotActionTitle(targets)
+    return [
+      {
+        key: 'extract',
+        label: '提取',
+        icon: <ReloadOutlined />,
+        disabled: extractTaskActive || !extractQuote.canSubmit,
+        onClick: () => {
+          if (targets.length > 1) {
+            setSelectedShotIds(targets.map((item) => item.id))
+            setExtractConfirmTarget('batch')
+            setExtractConfirmOpen(true)
+            return
+          }
+          void extractAssetsForShots(targets)
+        },
+      },
+      {
+        key: 'diagnose',
+        label: '诊断',
+        icon: <ToolOutlined />,
+        disabled: batchGenerating,
+        onClick: () => void runDiagnosticsForShots(targets),
+      },
+      {
+        key: 'generate',
+        label: '生成视频',
+        icon: <ThunderboltOutlined />,
+        disabled: batchGenerating,
+        onClick: () => void generateVideosForShots(targets),
+      },
+      {
+        key: 'download',
+        label: targets.length > 1 ? `下载视频（${downloadableTargets.length}）` : '下载视频',
+        icon: <DownloadOutlined />,
+        disabled: downloadableTargets.length === 0 || batchDownloading,
+        onClick: () => void downloadVideosForShots(downloadableTargets),
+      },
+      { type: 'divider' },
+      {
+        key: 'delete',
+        label: '删除',
+        danger: true,
+        icon: <DeleteOutlined />,
+        disabled: batchDeleting,
+        onClick: () => {
+          Modal.confirm({
+            title: `${activeTitle}将被删除`,
+            okText: '删除',
+            okButtonProps: { danger: true, loading: batchDeleting },
+            cancelText: '取消',
+            onOk: () => deleteShots(targets),
+          })
+        },
+      },
+      { type: 'divider' },
+      {
+        key: 'skip-extraction',
+        label: '标记无需提取',
+        icon: <StopOutlined />,
+        disabled: skipExtractionUpdating || targets.every((item) => item.skip_extraction),
+        onClick: () => {
+          const applicableTargets = targets.filter((item) => !item.skip_extraction)
+          if (applicableTargets.length === 0) return
+          Modal.confirm({
+            title: `${activeTitle}标记为无需提取？`,
+            content: '标记后这些镜头会直接按“提取确认已完成”处理。',
+            okText: '确认',
+            okButtonProps: { danger: true, loading: skipExtractionUpdating },
+            cancelText: '取消',
+            onOk: () => updateSkipExtractionForShots(applicableTargets, true),
+          })
+        },
+      },
+      {
+        key: 'restore-extraction',
+        label: '恢复提取',
+        icon: <UndoOutlined />,
+        disabled: skipExtractionUpdating || targets.every((item) => !item.skip_extraction),
+        onClick: () => {
+          const applicableTargets = targets.filter((item) => item.skip_extraction)
+          if (applicableTargets.length === 0) return
+          void updateSkipExtractionForShots(applicableTargets, false)
+        },
+      },
+    ]
+  }, [batchDeleting, batchDownloading, batchGenerating, deleteShots, downloadVideosForShots, extractAssetsForShots, extractQuote.canSubmit, extractTaskActive, generateVideosForShots, resolveActionTargets, runDiagnosticsForShots, skipExtractionUpdating, updateSkipExtractionForShots])
 
   const prefetchExistenceForNewAssets = useCallback(
     async (kind: AssetKind, items: AssetVM[]) => {
@@ -2235,39 +2734,18 @@ export function ChapterShotEditPage() {
                   <div className="flex min-w-0 items-center justify-between gap-2">
                     <Space size={8} className="min-w-0 overflow-hidden">
                       <span className="font-medium shrink-0">{`镜头（${shotsSorted.length}）`}</span>
-                      {!multiSelectActive ? (
-                        <Space size={4} className="min-w-0 text-[11px] text-slate-500">
-                          <ReloadOutlined className="shrink-0" />
-                          <span className="truncate" title="Command/Ctrl + 点击多选">
-                            Command/Ctrl + 点击多选
-                          </span>
-                        </Space>
-                      ) : (
+                      {hasSelection ? (
                         <span className="text-xs font-normal text-slate-500 shrink-0">{`已选 ${selectedShotIds.length} 条`}</span>
+                      ) : (
+                        <span className="text-[11px] text-slate-500 truncate">左侧支持勾选与右键操作</span>
                       )}
                     </Space>
-                    {multiSelectActive ? (
-                      <Space size={6} className="shrink-0 items-center">
-                        <Button
-                          size="small"
-                          type="primary"
-                          icon={<ReloadOutlined />}
-                          loading={batchExtractingAssets || extractTaskActive}
-                          disabled={extractTaskActive || !extractQuote.canSubmit}
-                          onClick={() => { setExtractConfirmTarget('batch'); setExtractConfirmOpen(true) }}
-                        >
-                          批量提取
-                        </Button>
-                        <Tooltip title="清空选择">
-                          <Button
-                            size="small"
-                            shape="circle"
-                            icon={<ClearOutlined />}
-                            onClick={() => setSelectedShotIds(shotId ? [shotId] : [])}
-                          />
-                        </Tooltip>
-                      </Space>
-                    ) : null}
+                    <Dropdown
+                      menu={{ items: buildShotContextMenuItems(shot) }}
+                      trigger={['click']}
+                    >
+                      <Button size="small" type="text" icon={<MoreOutlined />} />
+                    </Dropdown>
                   </div>
                 }
                 style={{
@@ -2305,6 +2783,47 @@ export function ChapterShotEditPage() {
                         : '当前没有待处理镜头'}
                     </Button>
                   </div>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <Checkbox
+                      checked={allFilteredSelected}
+                      indeterminate={partiallyFilteredSelected}
+                      onChange={(event) => toggleSelectAllFilteredShots(event.target.checked)}
+                    >
+                      当前列表全选
+                    </Checkbox>
+                    {hasSelection ? (
+                      <Button size="small" type="text" onClick={() => setSelectedShotIds([])}>
+                        清空
+                      </Button>
+                    ) : null}
+                  </div>
+                  {hasSelection ? (
+                    <div className="mt-2">
+                      <ShotBatchToolbar
+                        selectedCount={selectedShotIds.length}
+                        extracting={batchExtractingAssets || extractingAssets}
+                        generating={batchGenerating}
+                        downloading={batchDownloading}
+                        diagnosticLoading={videoDiagnosticsLoading}
+                        disabled={extractTaskActive || batchDeleting}
+                        maintenanceMenuItems={batchMaintenanceMenuItems}
+                        extractLabel="提取"
+                        generateLabel="生成"
+                        downloadLabel="下载"
+                        diagnoseLabel="诊断"
+                        moreLabel="更多"
+                        clearLabel="清空"
+                        onBatchExtract={() => {
+                          setExtractConfirmTarget('batch')
+                          setExtractConfirmOpen(true)
+                        }}
+                        onBatchGenerate={() => void generateVideosForShots(selectedShots)}
+                        onBatchDownload={() => void downloadVideosForShots(selectedShots)}
+                        onBatchDiagnose={() => void runDiagnosticsForShots(selectedShots)}
+                        onClearSelection={() => setSelectedShotIds([])}
+                      />
+                    </div>
+                  ) : null}
                 </div>
                 <List
                   size="small"
@@ -2319,38 +2838,46 @@ export function ChapterShotEditPage() {
                     const itemActionable = isActionablePreparationShot(item) || !itemBasicReady
                     const itemCompleted = itemBasicReady && !itemActionable
                     return (
-                      <List.Item
-                        onClick={(e) => handleShotListClick(item.id, e)}
-                        style={{
-                          cursor: 'pointer',
-                          borderRadius: 10,
-                          padding: '8px 10px',
-                          background: active
-                            ? itemCompleted
-                              ? 'rgba(34,197,94,0.12)'
-                              : 'rgba(59,130,246,0.10)'
-                            : selected
-                              ? 'rgba(59,130,246,0.06)'
-                            : itemActionable
-                              ? 'rgba(245,158,11,0.06)'
-                              : itemCompleted
-                                ? 'rgba(34,197,94,0.04)'
-                              : undefined,
-                          border: active
-                            ? itemCompleted
-                              ? '1px solid rgba(34,197,94,0.28)'
-                              : '1px solid rgba(59,130,246,0.25)'
-                            : selected
-                              ? '1px solid rgba(59,130,246,0.18)'
-                            : itemActionable
-                              ? '1px solid rgba(245,158,11,0.22)'
-                              : itemCompleted
-                                ? '1px solid rgba(34,197,94,0.16)'
-                              : '1px solid transparent',
-                          boxShadow: active && itemCompleted ? '0 0 0 1px rgba(34,197,94,0.08) inset' : undefined,
-                        }}
-                      >
-                        <div className="min-w-0">
+                      <Dropdown menu={{ items: buildShotContextMenuItems(item) }} trigger={['contextMenu']}>
+                        <List.Item
+                          onClick={() => handleShotListClick(item.id)}
+                          style={{
+                            cursor: 'pointer',
+                            borderRadius: 10,
+                            padding: '8px 10px',
+                            background: active
+                              ? itemCompleted
+                                ? 'rgba(34,197,94,0.12)'
+                                : 'rgba(59,130,246,0.10)'
+                              : selected
+                                ? 'rgba(59,130,246,0.06)'
+                              : itemActionable
+                                ? 'rgba(245,158,11,0.06)'
+                                : itemCompleted
+                                  ? 'rgba(34,197,94,0.04)'
+                                  : undefined,
+                            border: active
+                              ? itemCompleted
+                                ? '1px solid rgba(34,197,94,0.28)'
+                                : '1px solid rgba(59,130,246,0.25)'
+                              : selected
+                                ? '1px solid rgba(59,130,246,0.18)'
+                              : itemActionable
+                                ? '1px solid rgba(245,158,11,0.22)'
+                                : itemCompleted
+                                  ? '1px solid rgba(34,197,94,0.16)'
+                                  : '1px solid transparent',
+                            boxShadow: active && itemCompleted ? '0 0 0 1px rgba(34,197,94,0.08) inset' : undefined,
+                          }}
+                        >
+                          <div className="flex min-w-0 items-start gap-2">
+                            <Checkbox
+                              className="mt-1 shrink-0"
+                              checked={selected}
+                              onClick={(event) => event.stopPropagation()}
+                              onChange={(event) => toggleShotSelection(item.id, event.target.checked)}
+                            />
+                            <div className="min-w-0 flex-1">
                           <div className="flex items-center justify-between gap-2">
                             <div className="font-medium truncate">
                               #{item.index} · {item.title?.trim() ? item.title : '未命名镜头'}
@@ -2409,8 +2936,10 @@ export function ChapterShotEditPage() {
                               {itemConfirmStatus.text}
                             </span>
                           </div>
-                        </div>
-                      </List.Item>
+                            </div>
+                          </div>
+                        </List.Item>
+                      </Dropdown>
                     )
                   }}
                 />
@@ -2455,7 +2984,9 @@ export function ChapterShotEditPage() {
       <VideoDiagnosticsDrawer
         open={videoDiagnosticsOpen}
         loading={videoDiagnosticsLoading}
+        title={videoDiagnosticsTitle}
         readiness={videoDiagnosticsReadiness}
+        batchItems={videoDiagnosticsBatchItems}
         onClose={() => setVideoDiagnosticsOpen(false)}
       />
 

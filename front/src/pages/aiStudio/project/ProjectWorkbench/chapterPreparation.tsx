@@ -54,7 +54,7 @@ export function getChapterPreparationState(chapter: Chapter): ChapterPreparation
     text: '待确认分镜',
     color: 'blue',
     hint: '已有分镜，建议进入分镜列表处理待确认镜头',
-    primaryAction: '处理分镜',
+    primaryAction: '进入分镜',
     primaryIcon: <FileSearchOutlined />,
   }
 }
