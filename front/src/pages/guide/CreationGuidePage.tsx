@@ -18,7 +18,7 @@ const guideSections: GuideSection[] = [
   { id: 'interface', title: '登录与认识界面', eyebrow: '1', summary: '全站导航、顶部流程、头像与任务中心。' },
   { id: 'project', title: '创建项目', eyebrow: '2', summary: '填写项目名称、视觉风格、视频风格和比例。' },
   { id: 'chapter', title: '录入章节剧本', eyebrow: '3', summary: '在项目工作台创建章节并粘贴剧本原文。' },
-  { id: 'extract', title: '一键提取分镜并自动准备', eyebrow: '4', summary: '拆镜头、识别资产对白、生成缺失资产图。' },
+  { id: 'extract', title: '一键提取分镜并自动准备', eyebrow: '4', summary: '拆镜头、准备候选，并尽量关联已有资产。' },
   { id: 'prepare', title: '镜头详情四步', eyebrow: '5', summary: '在基础信息、提取确认、生成视频、视频结果四步里推进单镜头。' },
   { id: 'studio', title: '镜头详情生成视频', eyebrow: '6', summary: '在生成视频与视频结果步骤里出片、选片、下载。' },
   { id: 'assets', title: '资产管理与图片编辑', eyebrow: '7', summary: '管理角色、场景、道具、服装等素材。' },
@@ -34,9 +34,9 @@ const flowSteps: FlowStep[] = [
 const quickSteps: FlowStep[] = [
   { title: '建项目', description: '选好视觉 / 视频风格与视频比例' },
   { title: '建章节 · 粘贴剧本', description: '把整段剧本贴进「章节内容」' },
-  { title: '一键提取分镜并自动准备', description: 'AI 自动拆镜头，并准备资产与台词' },
-  { title: '逐镜准备与确认', description: '确认资产 / 对白 / 基础信息，推进到准备完成' },
-  { title: '进入镜头详情生成视频', description: '切到「生成视频 / 视频结果」步骤，检查诊断后生成视频' },
+  { title: '进入分镜列表', description: '在章节里发起提取后进入章节镜头队列' },
+  { title: '镜头详情四步准备', description: '在基础信息 / 提取确认里确认资产、对白和镜头信息' },
+  { title: '镜头详情生成视频', description: '切到「生成视频 / 视频结果」步骤，检查诊断后生成视频' },
   { title: '选片下载', description: '在结果区选用满意视频并下载成片素材' },
 ]
 
@@ -144,7 +144,7 @@ const CreationGuidePage: React.FC = () => {
                   ]}
                   dataSource={[
                     { key: 'script', stage: '① 剧本', page: '项目列表 → 项目工作台「章节」', work: '建项目、建章节、粘贴剧本原文' },
-                    { key: 'shot', stage: '② 分镜', page: '分镜列表 + 镜头详情四步', work: '一键拆分镜、确认资产/对白、补镜头信息' },
+                    { key: 'shot', stage: '② 分镜', page: '项目工作台 → 分镜列表 → 镜头详情四步', work: '一键拆分镜、确认资产/对白、补镜头信息' },
                     { key: 'video', stage: '③ 生成出片', page: '镜头详情「生成视频 / 视频结果」+ 分镜列表工具栏', work: '出关键帧、改提示词、生成视频、选片下载成片' },
                   ]}
                 />
@@ -207,7 +207,7 @@ const CreationGuidePage: React.FC = () => {
             </GuideBlock>
 
             <GuideBlock id="extract" number="4" title="一键提取分镜并自动准备">
-              <p>在章节列表点「提取分镜并自动准备」，系统会把剧本拆成分镜、识别每个镜头的资产和台词，并自动关联或新建缺失资产。</p>
+              <p>在章节列表点「提取分镜并自动准备」，系统会把剧本拆成分镜、识别每个镜头的资产和台词，自动准备候选，并尽量自动关联已有资产。</p>
               <Figure {...screenshots[5]} />
               <p>确认积分后任务会在后台运行，可在任务中心查看进度或取消。提取完成后进入分镜列表。</p>
               <Figure {...screenshots[6]} />
@@ -241,7 +241,7 @@ const CreationGuidePage: React.FC = () => {
             </GuideBlock>
 
             <GuideBlock id="assets" number="7" title="资产管理与图片编辑">
-              <p>资产管理用于维护全局素材库，包含演员、角色、场景、道具、服装。分镜提取时 AI 自动建的资产也会出现在这里。</p>
+              <p>资产管理用于维护全局素材库，包含演员、角色、场景、道具、服装。它是保证一致性的常用辅助环节，不是主路径的硬性前置；分镜提取时 AI 自动准备并关联到的资产也会出现在这里。</p>
               <Figure {...screenshots[14]} />
               <Figure {...screenshots[15]} />
               <p>资产编辑页支持用文字描述改图，也支持在描述中输入「@」引用其他资产参与融合生图。主要角色和主场景越统一，后续视频越稳定。</p>
