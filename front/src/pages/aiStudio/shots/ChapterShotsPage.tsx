@@ -34,7 +34,11 @@ import {
 } from '@ant-design/icons'
 import type { ShotRead, ShotRuntimeSummaryRead, ShotVideoReadinessRead } from '../../../services/generated'
 import { ScriptProcessingService, StudioChaptersService, StudioShotsService } from '../../../services/generated'
-import { executeAsyncTaskCreate, executeTaskCancel } from '../components/taskActionHelpers'
+import {
+  defaultTaskActionErrorMessage,
+  executeAsyncTaskCreate,
+  executeTaskCancel,
+} from '../components/taskActionHelpers'
 import { Link, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { getChapterShotDetailPath, getChapterShotsPath } from '../project/ProjectWorkbench/routes'
 import { useCancelableRelationTask } from '../project/ProjectWorkbench/chapterDivisionTasks'
@@ -513,11 +517,11 @@ export function ChapterShotsPage() {
             shot,
             readiness: res.data ?? null,
           })
-        } catch {
+        } catch (error) {
           results.push({
             shot,
             readiness: null,
-            error: '诊断失败',
+            error: defaultTaskActionErrorMessage(error, '诊断失败'),
           })
         }
       }
