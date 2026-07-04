@@ -33,6 +33,7 @@ type ChapterShotDialogueConfirmationProps = {
   draftDialogueLine: { speakerName: string; targetName: string; text: string } | null
   onUpdateDraftDialogueLine: (patch: Partial<{ speakerName: string; targetName: string; text: string }>) => void
   onBlurDraftDialogueLine: () => void
+  onDiscardDraftDialogueLine: () => void
   draftDialogueSaving: boolean
 }
 
@@ -55,6 +56,7 @@ export function ChapterShotDialogueConfirmation({
   draftDialogueLine,
   onUpdateDraftDialogueLine,
   onBlurDraftDialogueLine,
+  onDiscardDraftDialogueLine,
   draftDialogueSaving,
 }: ChapterShotDialogueConfirmationProps) {
   const pendingCount = extractedDialogLines.length
@@ -189,7 +191,7 @@ export function ChapterShotDialogueConfirmation({
               danger
               icon={<DeleteOutlined />}
               loading={draftDialogueSaving}
-              onClick={onBlurDraftDialogueLine}
+              onClick={onDiscardDraftDialogueLine}
             />
             <Input
               className="w-36 shrink-0 text-xs"

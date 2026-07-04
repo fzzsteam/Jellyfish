@@ -796,6 +796,10 @@ export function ChapterShotEditPage() {
     }
   }, [draftDialogueLine, draftDialogueSaving, savedDialogLines, shotId])
 
+  const discardDraftDialogueLine = useCallback(() => {
+    setDraftDialogueLine(null)
+  }, [])
+
   const updateExtractedDialogText = useCallback((candidateId: number, text: string) => {
     setExtractedDialogLines((prev) => prev.map((l) => (l.id === candidateId ? { ...l, text } : l)))
   }, [])
@@ -2715,6 +2719,7 @@ export function ChapterShotEditPage() {
             draftDialogueLine={draftDialogueLine}
             onUpdateDraftDialogueLine={updateDraftDialogueLine}
             onBlurDraftDialogueLine={() => void commitDraftDialogueLine()}
+            onDiscardDraftDialogueLine={discardDraftDialogueLine}
             draftDialogueSaving={draftDialogueSaving}
           />
         </div>
