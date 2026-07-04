@@ -13,6 +13,8 @@ import type {
   ShotDialogLineUpdate,
   ShotExtractionSummaryRead,
   ShotExtractedDialogueCandidateRead,
+  ShotFrameImageRead,
+  ShotFrameType,
   ShotPreparationStateRead,
   ShotRead,
   ShotVideoReadinessRead,
@@ -28,6 +30,7 @@ import {
   StudioProjectsService,
   StudioShotDetailsService,
   StudioShotDialogLinesService,
+  StudioShotFrameImagesService,
   StudioShotsService,
 } from '../../../services/generated'
 import { executeAsyncTaskCreate, executeTaskCancel, notifyExistingTask } from '../components/taskActionHelpers'
@@ -63,6 +66,8 @@ import {
 import { StudioEntitiesApi } from '../../../services/studioEntities'
 import { buildFileDownloadUrl, resolveAssetUrl } from '../assets/utils'
 import { generateUUID } from '../../../utils'
+import type { ShotKeyframeCandidate } from './components/ShotKeyframeCard'
+import { listTaskLinksNormalized } from '../../../services/filmTaskLinks'
 
 const { Header, Content } = Layout
 const { TextArea } = Input
@@ -341,6 +346,17 @@ export function ChapterShotEditPage() {
   }> | undefined>(undefined)
   const [firstFrameReadiness, setFirstFrameReadiness] = useState<ShotVideoReadinessRead | null>(null)
   const [firstFrameReadinessLoading, setFirstFrameReadinessLoading] = useState(false)
+  // 参考模式：决定生成视频时需要哪些帧类型（首帧/尾帧/关键帧）参与，骨架阶段先本地维护、不联动生成请求体。
+  const [videoReferenceMode, setVideoReferenceMode] = useState<'first' | 'last' | 'key' | 'first_last' | 'first_last_key' | 'text_only'>('first')
+  // 当前镜头细节下的分镜帧图片槽位（首帧/尾帧/关键帧各一条，含当前使用中的 file_id）。
+  const [frameImages, setFrameImages] = useState<ShotFrameImageRead[]>([])
+  // 各帧类型的历史候选缩略图（来自任务关联记录），供关键帧卡片展示与切换使用。
+  const [keyframeCandidatesByType, setKeyframeCandidatesByType] = useState<Record<ShotFrameType, ShotKeyframeCandidate[]>>({
+    first: [],
+    last: [],
+    key: [],
+  })
+  const [keyframeApplyingFileId, setKeyframeApplyingFileId] = useState<string | null>(null)
   const [videoModels, setVideoModels] = useState<VideoModelOption[]>([])
   const [selectedVideoModelId, setSelectedVideoModelId] = useState<string | null>(null)
   const [videoModelsLoading, setVideoModelsLoading] = useState(false)
@@ -992,6 +1008,91 @@ export function ChapterShotEditPage() {
       }
     })()
   }, [preparationState?.ready_for_generation, shotId])
+
+  // 拉取当前镜头细节下的分镜帧图片槽位（首帧/尾帧/关键帧），用于展示"当前使用中"图片与定位候选查询所需的槽位 id。
+  const refreshFrameImages = useCallback(async () => {
+    if (!shotId) return
+    try {
+      const res = await StudioShotFrameImagesService.listShotFrameImagesApiV1StudioShotFrameImagesGet({
+        shotDetailId: shotId,
+        order: null,
+        isDesc: false,
+        page: 1,
+        pageSize: 100,
+      })
+      setFrameImages((res.data?.items ?? []) as ShotFrameImageRead[])
+    } catch {
+      setFrameImages([])
+    }
+  }, [shotId])
+
+  // 拉取某帧类型槽位关联的历史生成任务图片，作为候选缩略图列表（按 file_id 去重，保留最新一条链接）。
+  const refreshKeyframeCandidates = useCallback(
+    async (frameType: ShotFrameType) => {
+      const slotId = frameImages.find((x) => x.frame_type === frameType)?.id
+      if (!slotId) {
+        setKeyframeCandidatesByType((prev) => ({ ...prev, [frameType]: [] }))
+        return
+      }
+      const links = await listTaskLinksNormalized({
+        resourceType: 'image',
+        relationType: 'shot_frame_image',
+        relationEntityId: String(slotId),
+        order: 'updated_at',
+        isDesc: true,
+        page: 1,
+        pageSize: 100,
+      })
+      const seen = new Set<string>()
+      const candidates: ShotKeyframeCandidate[] = links
+        .filter((l) => Boolean(l.file_id))
+        .filter((l) => {
+          const fid = String(l.file_id)
+          if (seen.has(fid)) return false
+          seen.add(fid)
+          return true
+        })
+        .map((l) => ({
+          linkId: l.id,
+          fileId: String(l.file_id),
+          thumbUrl: buildFileDownloadUrl(String(l.file_id)) ?? '',
+        }))
+      setKeyframeCandidatesByType((prev) => ({ ...prev, [frameType]: candidates }))
+    },
+    [frameImages],
+  )
+
+  useEffect(() => {
+    void refreshFrameImages()
+  }, [refreshFrameImages])
+
+  useEffect(() => {
+    void refreshKeyframeCandidates('first')
+    void refreshKeyframeCandidates('last')
+    void refreshKeyframeCandidates('key')
+  }, [refreshKeyframeCandidates])
+
+  // "使用"候选缩略图：将该候选图片的 file_id 写回对应帧类型槽位，使其成为当前使用中的图片。
+  const applyKeyframeCandidate = useCallback(
+    async (frameType: ShotFrameType, fileId: string) => {
+      const slotId = frameImages.find((x) => x.frame_type === frameType)?.id
+      if (!slotId) return
+      setKeyframeApplyingFileId(fileId)
+      try {
+        await StudioShotFrameImagesService.updateShotFrameImageApiV1StudioShotFrameImagesImageIdPatch({
+          imageId: slotId,
+          requestBody: { file_id: fileId },
+        })
+        message.success('已设为当前使用图片')
+        await refreshFrameImages()
+      } catch {
+        message.error('设置失败')
+      } finally {
+        setKeyframeApplyingFileId(null)
+      }
+    },
+    [frameImages, refreshFrameImages],
+  )
 
   useEffect(() => {
     if (!projectId || !chapterId || !shotId) return
@@ -2750,6 +2851,17 @@ export function ChapterShotEditPage() {
           videoRatio={resolvedVideoRatio}
           videoReadinessReady={firstFrameReadiness?.ready ?? null}
           videoReadinessLoading={firstFrameReadinessLoading}
+          referenceMode={videoReferenceMode}
+          onReferenceModeChange={setVideoReferenceMode}
+          keyframeCandidatesByType={keyframeCandidatesByType}
+          keyframeCurrentFileIdByType={{
+            first: frameImages.find((x) => x.frame_type === 'first')?.file_id ?? null,
+            last: frameImages.find((x) => x.frame_type === 'last')?.file_id ?? null,
+            key: frameImages.find((x) => x.frame_type === 'key')?.file_id ?? null,
+          }}
+          keyframeApplyingFileId={keyframeApplyingFileId}
+          onGenerateKeyframe={() => {}}
+          onApplyKeyframe={(frameType, fileId) => void applyKeyframeCandidate(frameType, fileId)}
           quoteNode={
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="min-w-0">

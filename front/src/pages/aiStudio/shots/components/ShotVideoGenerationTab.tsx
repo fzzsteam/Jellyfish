@@ -1,7 +1,29 @@
 import type { ReactNode } from 'react'
 import { Button, Card, Descriptions, Segmented, Select, Space, Tag, Tooltip, Typography } from 'antd'
 import { SettingOutlined, ToolOutlined, VideoCameraAddOutlined } from '@ant-design/icons'
-import type { ShotDetailRead, ShotPreparationStateRead, ShotRead } from '../../../../services/generated'
+import type { ShotDetailRead, ShotFrameType, ShotPreparationStateRead, ShotRead } from '../../../../services/generated'
+import { ShotKeyframeCard, type ShotKeyframeCandidate } from './ShotKeyframeCard'
+
+/** 视频生成参考模式：决定需要哪些帧类型（首帧/尾帧/关键帧）参与生成。 */
+type ReferenceMode = 'first' | 'last' | 'key' | 'first_last' | 'first_last_key' | 'text_only'
+
+const REFERENCE_MODE_OPTIONS: Array<{ value: ReferenceMode; label: string }> = [
+  { value: 'text_only', label: '纯文字（不用参考帧）' },
+  { value: 'first', label: '首帧参考' },
+  { value: 'last', label: '尾帧参考' },
+  { value: 'key', label: '关键帧参考' },
+  { value: 'first_last', label: '首尾帧' },
+  { value: 'first_last_key', label: '首尾 + 关键帧' },
+]
+
+const REQUIRED_FRAME_TYPES_BY_MODE: Record<ReferenceMode, ShotFrameType[]> = {
+  text_only: [],
+  first: ['first'],
+  last: ['last'],
+  key: ['key'],
+  first_last: ['first', 'last'],
+  first_last_key: ['first', 'last', 'key'],
+}
 
 type ShotVideoGenerationTabProps = {
   shot: ShotRead | null
@@ -14,6 +36,13 @@ type ShotVideoGenerationTabProps = {
   videoRatio: string | null
   videoReadinessReady: boolean | null
   videoReadinessLoading: boolean
+  referenceMode: ReferenceMode
+  onReferenceModeChange: (mode: ReferenceMode) => void
+  keyframeCandidatesByType: Record<ShotFrameType, ShotKeyframeCandidate[]>
+  keyframeCurrentFileIdByType: Record<ShotFrameType, string | null>
+  keyframeApplyingFileId: string | null
+  onGenerateKeyframe: (frameType: ShotFrameType) => void
+  onApplyKeyframe: (frameType: ShotFrameType, fileId: string) => void
   quoteNode: ReactNode
   onModelChange: (modelId: string) => void
   onResolutionChange: (resolution: '720p' | '1080p') => void
@@ -59,6 +88,13 @@ export function ShotVideoGenerationTab({
   videoRatio,
   videoReadinessReady,
   videoReadinessLoading,
+  referenceMode,
+  onReferenceModeChange,
+  keyframeCandidatesByType,
+  keyframeCurrentFileIdByType,
+  keyframeApplyingFileId,
+  onGenerateKeyframe,
+  onApplyKeyframe,
   quoteNode,
   onModelChange,
   onResolutionChange,
@@ -110,6 +146,35 @@ export function ShotVideoGenerationTab({
               {preparationState?.ready_for_generation ? '准备完成' : '待继续准备'}
             </Descriptions.Item>
           </Descriptions>
+
+          <div className="space-y-1">
+            <Typography.Text className="text-xs text-slate-500">参考模式</Typography.Text>
+            <Select
+              className="w-full"
+              value={referenceMode}
+              onChange={onReferenceModeChange}
+              options={REFERENCE_MODE_OPTIONS}
+            />
+          </div>
+
+          {REQUIRED_FRAME_TYPES_BY_MODE[referenceMode].length > 0 ? (
+            <div className="space-y-2">
+              <Typography.Text className="text-xs text-slate-500">关键帧与参考图</Typography.Text>
+              <div className="grid gap-2 md:grid-cols-2">
+                {REQUIRED_FRAME_TYPES_BY_MODE[referenceMode].map((frameType) => (
+                  <ShotKeyframeCard
+                    key={frameType}
+                    frameType={frameType}
+                    currentFileId={keyframeCurrentFileIdByType[frameType]}
+                    candidates={keyframeCandidatesByType[frameType]}
+                    applyingFileId={keyframeApplyingFileId}
+                    onGenerate={onGenerateKeyframe}
+                    onApply={onApplyKeyframe}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-1">
