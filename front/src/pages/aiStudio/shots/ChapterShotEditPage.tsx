@@ -784,10 +784,12 @@ export function ChapterShotEditPage() {
         },
       })
       const created = res.data
-      if (created) {
-        setSavedDialogLines((prev) => [...prev, created])
-        message.success('已新增对白')
+      if (!created) {
+        message.error('新增对白失败：接口未返回数据')
+        return
       }
+      setSavedDialogLines((prev) => [...prev, created])
+      message.success('已新增对白')
       setDraftDialogueLine(null)
     } catch {
       message.error('新增对白失败')

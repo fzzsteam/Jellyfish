@@ -191,14 +191,24 @@ export function ChapterShotDialogueConfirmation({
               danger
               icon={<DeleteOutlined />}
               loading={draftDialogueSaving}
+              onMouseDown={(e) => e.preventDefault()}
               onClick={onDiscardDraftDialogueLine}
             />
             <Input
-              className="w-36 shrink-0 text-xs"
+              className="w-24 shrink-0 text-xs"
               size="small"
               value={draftDialogueLine.speakerName}
               placeholder="说话人"
               onChange={(e) => onUpdateDraftDialogueLine({ speakerName: e.target.value })}
+              onBlur={onBlurDraftDialogueLine}
+            />
+            <Input
+              className="w-24 shrink-0 text-xs"
+              size="small"
+              value={draftDialogueLine.targetName}
+              placeholder="对象"
+              onChange={(e) => onUpdateDraftDialogueLine({ targetName: e.target.value })}
+              onBlur={onBlurDraftDialogueLine}
             />
             <Input.TextArea
               value={draftDialogueLine.text}
