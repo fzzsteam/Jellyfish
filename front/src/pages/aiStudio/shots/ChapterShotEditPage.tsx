@@ -198,6 +198,21 @@ function getExtractionStateMeta(
   }
 }
 
+// 视频提示词预览弹窗展示参考模式时用的文案，需与 ShotVideoGenerationTab.tsx 里
+// REFERENCE_MODE_OPTIONS 的 label 保持一致（两处各自维护，避免为了一个只读展示字符串
+// 而在组件间建立额外的类型/常量导出耦合）。
+const VIDEO_REFERENCE_MODE_LABEL: Record<
+  'first' | 'last' | 'key' | 'first_last' | 'first_last_key' | 'text_only',
+  string
+> = {
+  text_only: '纯文字（不用参考帧）',
+  first: '首帧参考',
+  last: '尾帧参考',
+  key: '关键帧参考',
+  first_last: '首尾帧',
+  first_last_key: '首尾 + 关键帧',
+}
+
 function getShotExtractionSummary(shot: ShotRead | null | undefined): ShotExtractionSummaryRead {
   return shot?.extraction ?? DEFAULT_EXTRACTION_SUMMARY
 }
@@ -3559,7 +3574,7 @@ export function ChapterShotEditPage() {
         ) : (
           <div className="space-y-3">
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-              <div>参考模式：首帧</div>
+              <div>参考模式：{VIDEO_REFERENCE_MODE_LABEL[videoReferenceMode]}</div>
               <div>视频比例：{resolvedVideoRatio ?? '未设置'}</div>
               <div>清晰度：{videoResolution}</div>
             </div>
