@@ -27,6 +27,13 @@ type ChapterShotDialogueConfirmationProps = {
   onAddExtractedDialogLine: (line: ShotExtractedDialogueCandidateRead) => void
   onIgnoreExtractedDialogLine: (line: ShotExtractedDialogueCandidateRead) => void
   onUpdateExtractedDialogText: (candidateId: number, text: string) => void
+  /** 新增一条本地草稿对白（尚未持久化），插入到已保存列表末尾 */
+  onAddDraftDialogueLine: () => void
+  /** 草稿行内容变化（说话人/对象/文本），非空文本时由父组件负责创建持久化记录 */
+  draftDialogueLine: { speakerName: string; targetName: string; text: string } | null
+  onUpdateDraftDialogueLine: (patch: Partial<{ speakerName: string; targetName: string; text: string }>) => void
+  onBlurDraftDialogueLine: () => void
+  draftDialogueSaving: boolean
 }
 
 export function ChapterShotDialogueConfirmation({
@@ -44,6 +51,11 @@ export function ChapterShotDialogueConfirmation({
   onAddExtractedDialogLine,
   onIgnoreExtractedDialogLine,
   onUpdateExtractedDialogText,
+  onAddDraftDialogueLine,
+  draftDialogueLine,
+  onUpdateDraftDialogueLine,
+  onBlurDraftDialogueLine,
+  draftDialogueSaving,
 }: ChapterShotDialogueConfirmationProps) {
   const pendingCount = extractedDialogLines.length
   const dialogueStatus = (() => {
@@ -106,6 +118,9 @@ export function ChapterShotDialogueConfirmation({
           <div className="text-[11px] text-slate-500 mt-1">系统会自动写入可用对白；这里只处理仍需补录、修正或忽略的对白。</div>
         </div>
         <div className="flex items-center gap-2">
+          <Button size="small" icon={<PlusOutlined />} disabled={!!draftDialogueLine} onClick={onAddDraftDialogueLine}>
+            新增对白
+          </Button>
           {extractedDialogLines.length > 0 ? (
             <>
               <Button size="small" loading={batchDialogAdding} onClick={onAcceptAll}>
@@ -158,6 +173,39 @@ export function ChapterShotDialogueConfirmation({
                   />
                 </div>
               ))}
+          </div>
+        ) : null}
+
+        {draftDialogueLine ? (
+          <div className="flex items-start gap-2">
+            <Tooltip title="新增草稿，输入内容后自动保存">
+              <span className="mt-1 text-slate-400">
+                <PlusOutlined />
+              </span>
+            </Tooltip>
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              loading={draftDialogueSaving}
+              onClick={onBlurDraftDialogueLine}
+            />
+            <Input
+              className="w-36 shrink-0 text-xs"
+              size="small"
+              value={draftDialogueLine.speakerName}
+              placeholder="说话人"
+              onChange={(e) => onUpdateDraftDialogueLine({ speakerName: e.target.value })}
+            />
+            <Input.TextArea
+              value={draftDialogueLine.text}
+              onChange={(e) => onUpdateDraftDialogueLine({ text: e.target.value })}
+              onBlur={onBlurDraftDialogueLine}
+              autoSize={{ minRows: 1, maxRows: 4 }}
+              placeholder="对白内容，输入后自动保存"
+              disabled={draftDialogueSaving}
+            />
           </div>
         ) : null}
 

@@ -326,6 +326,8 @@ export function ChapterShotEditPage() {
   const [dialogDeletingIds, setDialogDeletingIds] = useState<Record<number, boolean>>({})
   const [dialogAddingKeys, setDialogAddingKeys] = useState<Record<string, boolean>>({})
   const [batchDialogAdding, setBatchDialogAdding] = useState(false)
+  const [draftDialogueLine, setDraftDialogueLine] = useState<{ speakerName: string; targetName: string; text: string } | null>(null)
+  const [draftDialogueSaving, setDraftDialogueSaving] = useState(false)
   const [candidateActionIds, setCandidateActionIds] = useState<Record<number, boolean>>({})
   const [editorTabKey, setEditorTabKey] = useState<ShotDetailTabKey>('basic')
   const [videoDiagnosticsOpen, setVideoDiagnosticsOpen] = useState(false)
@@ -746,6 +748,53 @@ export function ChapterShotEditPage() {
     },
     [dialogDeletingIds],
   )
+
+  const addDraftDialogueLine = useCallback(() => {
+    setDraftDialogueLine({ speakerName: '', targetName: '', text: '' })
+  }, [])
+
+  const updateDraftDialogueLine = useCallback(
+    (patch: Partial<{ speakerName: string; targetName: string; text: string }>) => {
+      setDraftDialogueLine((prev) => (prev ? { ...prev, ...patch } : prev))
+    },
+    [],
+  )
+
+  /**
+   * 草稿行失焦时：内容非空则创建持久化对白记录并转为已保存行；内容为空则直接丢弃草稿，不调用接口。
+   */
+  const commitDraftDialogueLine = useCallback(async () => {
+    if (!shotId || !draftDialogueLine) return
+    const text = draftDialogueLine.text.trim()
+    if (!text) {
+      setDraftDialogueLine(null)
+      return
+    }
+    if (draftDialogueSaving) return
+    setDraftDialogueSaving(true)
+    try {
+      const nextIndex = savedDialogLines.reduce((max, l) => Math.max(max, l.index ?? 0), 0) + 1
+      const res = await StudioShotDialogLinesService.createShotDialogLineApiV1StudioShotDialogLinesPost({
+        requestBody: {
+          shot_detail_id: shotId,
+          index: nextIndex,
+          text,
+          speaker_name: draftDialogueLine.speakerName.trim() || null,
+          target_name: draftDialogueLine.targetName.trim() || null,
+        },
+      })
+      const created = res.data
+      if (created) {
+        setSavedDialogLines((prev) => [...prev, created])
+        message.success('已新增对白')
+      }
+      setDraftDialogueLine(null)
+    } catch {
+      message.error('新增对白失败')
+    } finally {
+      setDraftDialogueSaving(false)
+    }
+  }, [draftDialogueLine, draftDialogueSaving, savedDialogLines, shotId])
 
   const updateExtractedDialogText = useCallback((candidateId: number, text: string) => {
     setExtractedDialogLines((prev) => prev.map((l) => (l.id === candidateId ? { ...l, text } : l)))
@@ -2662,6 +2711,11 @@ export function ChapterShotEditPage() {
             onAddExtractedDialogLine={(line) => void addExtractedDialogLine(line)}
             onIgnoreExtractedDialogLine={(line) => void ignoreExtractedDialogLine(line)}
             onUpdateExtractedDialogText={updateExtractedDialogText}
+            onAddDraftDialogueLine={addDraftDialogueLine}
+            draftDialogueLine={draftDialogueLine}
+            onUpdateDraftDialogueLine={updateDraftDialogueLine}
+            onBlurDraftDialogueLine={() => void commitDraftDialogueLine()}
+            draftDialogueSaving={draftDialogueSaving}
           />
         </div>
       ),
