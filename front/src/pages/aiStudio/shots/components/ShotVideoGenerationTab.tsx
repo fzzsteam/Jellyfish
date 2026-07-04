@@ -69,7 +69,7 @@ function getGenerateDisabledReason(
   if (!videoRatio) return '请先设置视频比例'
   if (!selectedVideoModelId) return '未选择视频模型'
   if (videoReadinessLoading) return '检查生成条件中'
-  if (videoReadinessReady !== true) return '首帧未就绪'
+  if (videoReadinessReady !== true) return '当前参考模式所需条件未就绪，请查看诊断'
   return null
 }
 
@@ -127,7 +127,7 @@ export function ShotVideoGenerationTab({
             <div className="min-w-0">
               <Typography.Text strong>{shot ? `镜头 #${shot.index} · ${shot.title || '未命名镜头'}` : '未选择镜头'}</Typography.Text>
               <div className="mt-1 text-xs text-slate-500">
-                当前先支持首帧参考模式；提示词预览确认后再提交视频生成任务。
+                按下方选择的参考模式检查生成条件；提示词预览确认后再提交视频生成任务。
               </div>
             </div>
             <Tag color={readyForGeneration ? 'green' : 'gold'}>

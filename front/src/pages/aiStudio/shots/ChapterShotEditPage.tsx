@@ -2108,7 +2108,7 @@ export function ChapterShotEditPage() {
 
   /**
    * 打开单镜头视频提示词预览。
-   * 本页仅迁移首帧参考模式的最小生成路径；提交前先让用户确认提示词和积分消耗。
+   * 使用用户在"参考模式"里选择的 videoReferenceMode；提交前先让用户确认提示词和积分消耗。
    */
   const openVideoPromptPreview = useCallback(async () => {
     if (!shotId) {
@@ -2132,11 +2132,14 @@ export function ChapterShotEditPage() {
       return
     }
     if (firstFrameReadinessLoading) {
-      message.warning('正在检查首帧生成条件，请稍后再试')
+      message.warning('正在检查生成条件，请稍后再试')
       return
     }
     if (firstFrameReadiness?.ready !== true) {
-      message.warning('当前参考模式所需的参考帧还未就绪，请先在下方关键帧卡片生成或查看诊断')
+      // 不同参考模式的缺口可能是参考帧、模型、时长等任意一项；直接取后端返回的第一条未通过检查项文案，
+      // 避免固定提示"参考帧未就绪"——比如 text_only 模式本就不需要参考帧，卡在别的原因时这句话会指向不存在的入口。
+      const failingCheck = firstFrameReadiness?.checks?.find((check) => !check.ok)
+      message.warning(failingCheck?.message || '当前镜头暂不满足生成条件，请查看诊断')
       return
     }
 
@@ -2259,7 +2262,7 @@ export function ChapterShotEditPage() {
   ])
 
   /**
-   * 打开视频生成诊断抽屉，并按首帧参考模式读取当前镜头准备度。
+   * 打开视频生成诊断抽屉，并按用户当前选择的参考模式读取镜头准备度。
    * 诊断只用于展示缺口，不承载生成任务的运行态信息。
    */
   const openVideoDiagnostics = useCallback(async () => {
