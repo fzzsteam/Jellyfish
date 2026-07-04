@@ -763,13 +763,16 @@ export function ChapterShotEditPage() {
   /**
    * 草稿行失焦时：内容非空则创建持久化对白记录并转为已保存行；内容为空则直接丢弃草稿，不调用接口。
    */
+  /**
+   * 失焦时的保存逻辑：只在对白内容非空时才创建持久化记录；内容为空时保持草稿原样（no-op），
+   * 不清空草稿——说话人/对象/内容三个输入框都绑定了这个回调，若为空就清空会导致用户
+   * 只是切换字段（还没来得及填写对白内容）就把已经填好的说话人/对象丢失。
+   * 草稿的丢弃只应该通过"删除"按钮（discardDraftDialogueLine）触发。
+   */
   const commitDraftDialogueLine = useCallback(async () => {
     if (!shotId || !draftDialogueLine) return
     const text = draftDialogueLine.text.trim()
-    if (!text) {
-      setDraftDialogueLine(null)
-      return
-    }
+    if (!text) return
     if (draftDialogueSaving) return
     setDraftDialogueSaving(true)
     try {
