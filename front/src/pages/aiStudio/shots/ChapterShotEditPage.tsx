@@ -2011,16 +2011,24 @@ export function ChapterShotEditPage() {
    * 轮询关键帧生成任务：间隔 2 秒，最多 30 次。成功后刷新槽位与候选缩略图；
    * frameSlotIdByTypeRef 由前面 useMemo/useRef 组合维护，总是反映最新的槽位 id
    * （不管这是该帧类型第一次生成、还是往已有槽位补充新候选图，都能拿到正确的 slotId）。
+   *
+   * requestShotId 是提交生成任务时的镜头 id：这个页面切换镜头只换路由参数、组件不会卸载，
+   * 轮询最长可能跨越 60 秒，如果期间用户切到了别的镜头，必须提前停止并放弃写入任何状态，
+   * 否则会把 A 镜头生成的结果写进 B 镜头当前显示的候选列表里（与文件里其它地方用
+   * currentShotIdRef 校验陈旧响应是同一类问题）。
    */
   const pollKeyframeTask = useCallback(
-    async (taskId: string, frameType: ShotFrameType) => {
+    async (taskId: string, frameType: ShotFrameType, requestShotId: string) => {
       for (let attempt = 0; attempt < 30; attempt += 1) {
         await new Promise((resolve) => setTimeout(resolve, 2000))
+        if (currentShotIdRef.current !== requestShotId) return
         try {
           const res = await FilmService.getTaskStatusApiV1FilmTasksTaskIdStatusGet({ taskId })
+          if (currentShotIdRef.current !== requestShotId) return
           const status = res.data?.status
           if (status === 'succeeded') {
             await refreshFrameImages()
+            if (currentShotIdRef.current !== requestShotId) return
             const slotId = frameSlotIdByTypeRef.current[frameType]
             await refreshKeyframeCandidates(frameType, slotId)
             return
@@ -2032,6 +2040,9 @@ export function ChapterShotEditPage() {
         } catch {
           return
         }
+      }
+      if (currentShotIdRef.current === requestShotId) {
+        message.warning('关键帧生成任务耗时较长，请稍后手动刷新查看结果')
       }
     },
     [refreshFrameImages, refreshKeyframeCandidates],
@@ -2075,15 +2086,17 @@ export function ChapterShotEditPage() {
       message.success('已提交生成任务')
       setKeyframeModalOpen(false)
       if (taskId) {
-        void pollKeyframeTask(taskId, keyframeModalFrameType)
+        void pollKeyframeTask(taskId, keyframeModalFrameType, shotId)
       }
-    } catch {
-      message.error('提交生成任务失败')
+    } catch (error) {
+      const pointsAware = makePointsAwareGetErrorMessage(keyframeImageQuote.refresh)
+      message.error(pointsAware(error, '提交生成任务失败'))
     } finally {
       setKeyframeModalSubmitting(false)
     }
   }, [
     keyframeImageQuote.quoteToken,
+    keyframeImageQuote.refresh,
     keyframeModalFrameType,
     keyframeModalPrompt,
     keyframeModalSelectedFileIds,
