@@ -1042,7 +1042,7 @@ export function ChapterShotEditPage() {
       try {
         const res = await StudioShotsService.getShotVideoReadinessApiApiV1StudioShotsShotIdVideoReadinessGet({
           shotId: requestShotId,
-          referenceMode: 'first',
+          referenceMode: videoReferenceMode,
         })
         if (requestSeq !== firstFrameReadinessRequestSeqRef.current || currentShotIdRef.current !== requestShotId) return
         setFirstFrameReadiness(res.data ?? null)
@@ -1055,7 +1055,7 @@ export function ChapterShotEditPage() {
         }
       }
     })()
-  }, [preparationState?.ready_for_generation, shotId])
+  }, [preparationState?.ready_for_generation, shotId, videoReferenceMode])
 
   // 拉取当前镜头细节下的分镜帧图片槽位（首帧/尾帧/关键帧），用于展示"当前使用中"图片与定位候选查询所需的槽位 id。
   // 沿用文件里其它镜头维度请求的约定：响应返回前对比 currentShotIdRef，丢弃已经切换镜头后的过期响应。
@@ -2136,7 +2136,7 @@ export function ChapterShotEditPage() {
       return
     }
     if (firstFrameReadiness?.ready !== true) {
-      message.warning('当前镜头首帧模式还未就绪，请先查看诊断')
+      message.warning('当前参考模式所需的参考帧还未就绪，请先在下方关键帧卡片生成或查看诊断')
       return
     }
 
@@ -2150,7 +2150,7 @@ export function ChapterShotEditPage() {
       const res = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
         requestBody: {
           shot_id: requestShotId,
-          reference_mode: 'first',
+          reference_mode: videoReferenceMode,
           prompt: null,
           images: [],
           ratio: resolvedVideoRatio,
@@ -2176,6 +2176,7 @@ export function ChapterShotEditPage() {
     selectedVideoModelId,
     shotDetail?.duration,
     shotId,
+    videoReferenceMode,
   ])
 
   /**
@@ -2215,7 +2216,7 @@ export function ChapterShotEditPage() {
         requestBody: {
           shot_id: shotId,
           model_id: selectedVideoModelId,
-          reference_mode: 'first',
+          reference_mode: videoReferenceMode,
           prompt,
           images: [],
           ratio: resolvedVideoRatio,
@@ -2253,6 +2254,7 @@ export function ChapterShotEditPage() {
     videoPromptPreviewShotId,
     videoQuote.quoteToken,
     videoQuote.refresh,
+    videoReferenceMode,
     videoResolution,
   ])
 
@@ -2272,7 +2274,7 @@ export function ChapterShotEditPage() {
     try {
       const res = await StudioShotsService.getShotVideoReadinessApiApiV1StudioShotsShotIdVideoReadinessGet({
         shotId: requestShotId,
-        referenceMode: 'first',
+        referenceMode: videoReferenceMode,
       })
       if (requestSeq !== videoDiagnosticsRequestSeqRef.current || currentShotIdRef.current !== requestShotId) return
       setVideoDiagnosticsReadiness(res.data ?? null)
@@ -2285,7 +2287,7 @@ export function ChapterShotEditPage() {
         setVideoDiagnosticsLoading(false)
       }
     }
-  }, [shotId])
+  }, [shotId, videoReferenceMode])
 
   /**
    * 对任意镜头集合执行生成诊断。
