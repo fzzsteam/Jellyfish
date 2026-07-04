@@ -15,6 +15,7 @@ import type {
   ShotExtractedDialogueCandidateRead,
   ShotFrameImageRead,
   ShotFrameType,
+  ShotLinkedAssetItem,
   ShotPreparationStateRead,
   ShotRead,
   ShotVideoReadinessRead,
@@ -27,6 +28,7 @@ import {
   ScriptProcessingService,
   StudioChaptersService,
   StudioEntitiesService,
+  StudioImageTasksService,
   StudioProjectsService,
   StudioShotDetailsService,
   StudioShotDialogLinesService,
@@ -67,6 +69,7 @@ import { StudioEntitiesApi } from '../../../services/studioEntities'
 import { buildFileDownloadUrl, resolveAssetUrl } from '../assets/utils'
 import { generateUUID } from '../../../utils'
 import type { ShotKeyframeCandidate } from './components/ShotKeyframeCard'
+import { ShotKeyframeGenerateModal, type KeyframeReferenceOption } from './components/ShotKeyframeGenerateModal'
 import { listTaskLinksNormalized } from '../../../services/filmTaskLinks'
 
 const { Header, Content } = Layout
@@ -357,6 +360,21 @@ export function ChapterShotEditPage() {
     key: [],
   })
   const [keyframeApplyingFileId, setKeyframeApplyingFileId] = useState<string | null>(null)
+  // 关键帧生成弹窗状态：打开的帧类型、编辑中的提示词、已选参考图 file_id 顺序列表、提交中标记。
+  const [keyframeModalOpen, setKeyframeModalOpen] = useState(false)
+  const [keyframeModalFrameType, setKeyframeModalFrameType] = useState<ShotFrameType | null>(null)
+  const [keyframeModalPrompt, setKeyframeModalPrompt] = useState('')
+  const [keyframeModalSelectedFileIds, setKeyframeModalSelectedFileIds] = useState<string[]>([])
+  const [keyframeModalSubmitting, setKeyframeModalSubmitting] = useState(false)
+  // 关键帧生成的积分试算：独立于资产图片生成的 imageQuote 实例，因为需要额外传 resolutionProfile
+  // 才能让 quote_token 的 params_hash 与创建任务时提交的 resolution_profile 对齐。
+  const keyframeImageQuote = usePointsQuote({
+    businessType: 'image_generation',
+    category: 'image',
+    modelId: null,
+    resolutionProfile: 'standard',
+    enabled: keyframeModalOpen,
+  })
   const [videoModels, setVideoModels] = useState<VideoModelOption[]>([])
   const [selectedVideoModelId, setSelectedVideoModelId] = useState<string | null>(null)
   const [videoModelsLoading, setVideoModelsLoading] = useState(false)
@@ -458,6 +476,32 @@ export function ChapterShotEditPage() {
     }
     return groups
   }, [shotAssetsOverview])
+
+  // 关键帧生成弹窗的参考图候选：取当前镜头资产总览里已关联（含生成中）且有 file_id 的条目，
+  // 按资产种类摊平成 ShotLinkedAssetItem 结构，供弹窗默认全选与手动增减。
+  const keyframeReferenceOptions = useMemo<KeyframeReferenceOption[]>(() => {
+    const kindToType: Record<AssetKind, ShotLinkedAssetItem['type']> = {
+      scene: 'scene',
+      actor: 'character',
+      prop: 'prop',
+      costume: 'costume',
+    }
+    const options: KeyframeReferenceOption[] = []
+    ;(['scene', 'actor', 'prop', 'costume'] as AssetKind[]).forEach((kind) => {
+      unionAssets[kind]
+        .filter((asset) => (asset.status === 'linked' || asset.status === 'generating') && !!asset.file_id)
+        .forEach((asset) => {
+          options.push({
+            kind,
+            type: kindToType[kind],
+            id: asset.id ?? asset.name,
+            name: asset.name,
+            file_id: asset.file_id ?? null,
+          })
+        })
+    })
+    return options
+  }, [unionAssets])
 
   const [expandedKinds, setExpandedKinds] = useState<Record<AssetKind, boolean>>({
     scene: false,
@@ -1118,6 +1162,25 @@ export function ChapterShotEditPage() {
       }
     },
     [frameImages, refreshFrameImages],
+  )
+
+  // 打开关键帧生成弹窗：提示词取该帧类型已保存的草稿，参考图默认全选当前镜头已关联资产。
+  const openKeyframeGenerateModal = useCallback(
+    (frameType: ShotFrameType) => {
+      setKeyframeModalFrameType(frameType)
+      const basePrompt =
+        frameType === 'first'
+          ? shotDetail?.first_frame_prompt ?? ''
+          : frameType === 'last'
+            ? shotDetail?.last_frame_prompt ?? ''
+            : shotDetail?.key_frame_prompt ?? ''
+      setKeyframeModalPrompt(basePrompt)
+      setKeyframeModalSelectedFileIds(
+        keyframeReferenceOptions.map((option) => option.file_id).filter((id): id is string => !!id),
+      )
+      setKeyframeModalOpen(true)
+    },
+    [keyframeReferenceOptions, shotDetail],
   )
 
   useEffect(() => {
@@ -1943,6 +2006,92 @@ export function ChapterShotEditPage() {
     () => resolveVideoRatio(shotDetail, projectDefaultVideoRatio),
     [projectDefaultVideoRatio, shotDetail],
   )
+
+  /**
+   * 轮询关键帧生成任务：间隔 2 秒，最多 30 次。成功后刷新槽位与候选缩略图；
+   * frameSlotIdByTypeRef 由前面 useMemo/useRef 组合维护，总是反映最新的槽位 id
+   * （不管这是该帧类型第一次生成、还是往已有槽位补充新候选图，都能拿到正确的 slotId）。
+   */
+  const pollKeyframeTask = useCallback(
+    async (taskId: string, frameType: ShotFrameType) => {
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+        try {
+          const res = await FilmService.getTaskStatusApiV1FilmTasksTaskIdStatusGet({ taskId })
+          const status = res.data?.status
+          if (status === 'succeeded') {
+            await refreshFrameImages()
+            const slotId = frameSlotIdByTypeRef.current[frameType]
+            await refreshKeyframeCandidates(frameType, slotId)
+            return
+          }
+          if (status === 'failed' || status === 'cancelled') {
+            message.error('关键帧生成任务失败')
+            return
+          }
+        } catch {
+          return
+        }
+      }
+    },
+    [refreshFrameImages, refreshKeyframeCandidates],
+  )
+
+  // 提交关键帧生成任务：将弹窗内已选参考图（按顺序）转为 ShotLinkedAssetItem 传给后端，
+  // 成功后关闭弹窗并异步轮询任务结果。
+  const submitKeyframeGeneration = useCallback(async () => {
+    if (!shotId || !keyframeModalFrameType) return
+    const prompt = keyframeModalPrompt.trim()
+    if (!prompt) return
+    const ratio = resolvedVideoRatio
+    if (!ratio) {
+      message.warning('请先设置视频比例')
+      return
+    }
+    if (!keyframeImageQuote.quoteToken) {
+      message.warning('请等待积分试算完成后再提交')
+      return
+    }
+    setKeyframeModalSubmitting(true)
+    try {
+      const images: ShotLinkedAssetItem[] = keyframeModalSelectedFileIds
+        .map((fileId) => keyframeReferenceOptions.find((option) => option.file_id === fileId))
+        .filter((option): option is KeyframeReferenceOption => !!option)
+        .map((option) => ({ type: option.type, id: option.id, name: option.name, file_id: option.file_id }))
+
+      const created = await StudioImageTasksService.createShotFrameImageGenerationTaskApiV1StudioImageTasksShotShotIdFrameImageTasksPost({
+        shotId,
+        requestBody: {
+          frame_type: keyframeModalFrameType,
+          model_id: null,
+          prompt,
+          images,
+          target_ratio: ratio,
+          resolution_profile: 'standard',
+          quote_token: keyframeImageQuote.quoteToken,
+        },
+      })
+      const taskId = created.data?.task_id ?? null
+      message.success('已提交生成任务')
+      setKeyframeModalOpen(false)
+      if (taskId) {
+        void pollKeyframeTask(taskId, keyframeModalFrameType)
+      }
+    } catch {
+      message.error('提交生成任务失败')
+    } finally {
+      setKeyframeModalSubmitting(false)
+    }
+  }, [
+    keyframeImageQuote.quoteToken,
+    keyframeModalFrameType,
+    keyframeModalPrompt,
+    keyframeModalSelectedFileIds,
+    keyframeReferenceOptions,
+    pollKeyframeTask,
+    resolvedVideoRatio,
+    shotId,
+  ])
 
   /**
    * 打开单镜头视频提示词预览。
@@ -2886,7 +3035,7 @@ export function ChapterShotEditPage() {
             key: frameImages.find((x) => x.frame_type === 'key')?.file_id ?? null,
           }}
           keyframeApplyingFileId={keyframeApplyingFileId}
-          onGenerateKeyframe={() => {}}
+          onGenerateKeyframe={(frameType) => openKeyframeGenerateModal(frameType)}
           onApplyKeyframe={(frameType, fileId) => void applyKeyframeCandidate(frameType, fileId)}
           quoteNode={
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -3405,6 +3554,28 @@ export function ChapterShotEditPage() {
           </div>
         )}
       </Modal>
+
+      <ShotKeyframeGenerateModal
+        open={keyframeModalOpen}
+        frameType={keyframeModalFrameType}
+        frameLabel={keyframeModalFrameType === 'first' ? '首帧' : keyframeModalFrameType === 'last' ? '尾帧' : '关键帧'}
+        loading={false}
+        submitting={keyframeModalSubmitting}
+        prompt={keyframeModalPrompt}
+        onPromptChange={setKeyframeModalPrompt}
+        quoteText={
+          keyframeImageQuote.quote
+            ? `预计消耗 ${keyframeImageQuote.quote.required_points} 积分`
+            : keyframeImageQuote.loading
+              ? '积分试算中…'
+              : null
+        }
+        referenceOptions={keyframeReferenceOptions}
+        selectedFileIds={keyframeModalSelectedFileIds}
+        onChangeSelectedFileIds={setKeyframeModalSelectedFileIds}
+        onClose={() => setKeyframeModalOpen(false)}
+        onSubmit={() => void submitKeyframeGeneration()}
+      />
 
       <ExtractionConfirmModal
         open={chapterDivideConfirmOpen}
