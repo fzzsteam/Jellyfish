@@ -297,7 +297,7 @@ export function ChapterShotAssetConfirmation({
             <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-slate-900 px-1.5 text-[11px] font-semibold text-white">
               2.1
             </span>
-            <div className="text-sm font-medium text-slate-900">资产候选确认</div>
+            <div className="text-sm font-medium text-slate-900">资产关联</div>
             <Tag color={assetStatus.color} className="m-0">
               {assetStatus.text}
             </Tag>

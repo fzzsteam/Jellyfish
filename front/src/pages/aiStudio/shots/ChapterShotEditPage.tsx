@@ -2560,7 +2560,7 @@ export function ChapterShotEditPage() {
             className="inline-block h-2 w-2 rounded-full"
             style={{ background: confirmReady ? '#22c55e' : '#f59e0b' }}
           />
-          <span>2 提取确认</span>
+          <span>2 资产与对白确认</span>
           {pendingConfirmCount > 0 ? <Badge count={pendingConfirmCount} size="small" /> : null}
         </div>
       ),
@@ -2568,7 +2568,7 @@ export function ChapterShotEditPage() {
         <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-4 space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-sm font-medium text-slate-900">提取确认工作区</div>
+              <div className="text-sm font-medium text-slate-900">资产与对白确认工作区</div>
               <div className="text-[11px] text-slate-500 mt-1">
                 分镜提取后系统会自动准备资产和对白；这里只处理缺失、低置信或需要人工修正的内容。
               </div>

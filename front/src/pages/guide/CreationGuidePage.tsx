@@ -19,7 +19,7 @@ const guideSections: GuideSection[] = [
   { id: 'project', title: '创建项目', eyebrow: '2', summary: '填写项目名称、视觉风格、视频风格和比例。' },
   { id: 'chapter', title: '录入章节剧本', eyebrow: '3', summary: '在项目工作台创建章节并粘贴剧本原文。' },
   { id: 'extract', title: '一键提取分镜并自动准备', eyebrow: '4', summary: '拆镜头、准备候选，并尽量关联已有资产。' },
-  { id: 'prepare', title: '镜头详情四步', eyebrow: '5', summary: '在基础信息、提取确认、生成视频、视频结果四步里推进单镜头。' },
+  { id: 'prepare', title: '镜头详情四步', eyebrow: '5', summary: '在基础信息、资产与对白确认、生成视频、视频结果四步里推进单镜头。' },
   { id: 'studio', title: '镜头详情生成视频', eyebrow: '6', summary: '在生成视频与视频结果步骤里出片、选片、下载。' },
   { id: 'assets', title: '资产管理与图片编辑', eyebrow: '7', summary: '管理角色、场景、道具、服装等素材。' },
   { id: 'quickstart', title: '一条最短上手路径', eyebrow: '8', summary: '按最短主线完成从剧本到素材下载。' },
@@ -35,7 +35,7 @@ const quickSteps: FlowStep[] = [
   { title: '建项目', description: '选好视觉 / 视频风格与视频比例' },
   { title: '建章节 · 粘贴剧本', description: '把整段剧本贴进「章节内容」' },
   { title: '进入分镜列表', description: '在章节里发起提取后进入章节镜头队列' },
-  { title: '镜头详情四步准备', description: '在基础信息 / 提取确认里确认资产、对白和镜头信息' },
+  { title: '镜头详情四步准备', description: '在基础信息 / 资产与对白确认里确认资产、对白和镜头信息' },
   { title: '镜头详情生成视频', description: '切到「生成视频 / 视频结果」步骤，检查诊断后生成视频' },
   { title: '选片下载', description: '在结果区选用满意视频并下载成片素材' },
 ]
@@ -53,8 +53,8 @@ const projectFields = [
 const chapterStates = [
   { key: 'raw', status: '待录入原文', meaning: '还没粘贴剧本。', action: '编辑原文' },
   { key: 'extract', status: '待提取分镜', meaning: '已有剧本，但还没拆成镜头。', action: '提取分镜并自动准备' },
-  { key: 'prepare', status: '待准备镜头', meaning: '镜头已拆好，还需要进入镜头详情完成基础信息与提取确认。', action: '进入分镜列表或镜头详情' },
-  { key: 'shoot', status: '待继续生成', meaning: '镜头已完成提取确认，但是否可生成仍要看视频准备度。', action: '进入分镜列表或镜头详情的生成视频步骤' },
+  { key: 'prepare', status: '待准备镜头', meaning: '镜头已拆好，还需要进入镜头详情完成基础信息与资产与对白确认。', action: '进入分镜列表或镜头详情' },
+  { key: 'shoot', status: '待继续生成', meaning: '镜头已完成资产与对白确认，但是否可生成仍要看视频准备度。', action: '进入分镜列表或镜头详情的生成视频步骤' },
 ]
 
 const screenshots = [
@@ -66,7 +66,7 @@ const screenshots = [
   { src: '/guide/guide-shot-005.jpg', caption: '图 06 一键提取 · 积分确认弹窗' },
   { src: '/guide/guide-shot-006.jpg', caption: '图 07 分镜列表页' },
   { src: '/guide/guide-shot-007.jpg', caption: '图 08 镜头详情 · 基础信息' },
-  { src: '/guide/guide-shot-008.jpg', caption: '图 09 镜头详情 · 提取确认' },
+  { src: '/guide/guide-shot-008.jpg', caption: '图 09 镜头详情 · 资产与对白确认' },
   { src: '/guide/guide-shot-009.jpg', caption: '图 10 镜头详情 · 生成视频' },
   { src: '/guide/guide-shot-010.jpg', caption: '图 11 镜头详情 · 视频生成参数' },
   { src: '/guide/guide-shot-011.jpg', caption: '图 12 镜头详情 · 生成视频' },
@@ -219,12 +219,12 @@ const CreationGuidePage: React.FC = () => {
               />
             </GuideBlock>
 
-            <GuideBlock id="prepare" number="5" title="镜头详情四步（基础信息 / 提取确认 / 生成视频 / 视频结果）">
-              <p>在分镜列表点「编辑」进入镜头详情。镜头详情按「基础信息 / 提取确认 / 生成视频 / 视频结果」四个步骤组织，前两个步骤先把镜头准备完整，后两个步骤再承担生成与结果回看。</p>
+            <GuideBlock id="prepare" number="5" title="镜头详情四步（基础信息 / 资产与对白确认 / 生成视频 / 视频结果）">
+              <p>在分镜列表点「编辑」进入镜头详情。镜头详情按「基础信息 / 资产与对白确认 / 生成视频 / 视频结果」四个步骤组织，前两个步骤先把镜头准备完整，后两个步骤再承担生成与结果回看。</p>
               <Figure {...screenshots[7]} />
               <p>基础信息里重点确认标题、剧本摘录、景别、机位、运镜、时长和动作拍点。动作拍点保留 2-4 条即可。</p>
               <Figure {...screenshots[8]} />
-              <p>提取确认里检查场景、角色、道具、服装和对白。主路径里系统会先自动准备候选；手动重新提取只作为修复入口。待确认候选需要关联或忽略；纯画面镜头可标记「无需提取」。`shot.status = ready` 只表示这里的确认完成，不等于已经满足视频生成条件。</p>
+              <p>资产与对白确认里检查场景、角色、道具、服装和对白。主路径里系统会先自动准备候选；手动重新提取只作为修复入口。待确认候选需要关联或忽略；纯画面镜头可标记「无需提取」。`shot.status = ready` 只表示这里的确认完成，不等于已经满足视频生成条件。</p>
               <Alert type="success" showIcon message="效率建议" description="先把所有镜头逐个确认好，再用分镜列表顶部工具栏批量生成视频。" />
             </GuideBlock>
 
