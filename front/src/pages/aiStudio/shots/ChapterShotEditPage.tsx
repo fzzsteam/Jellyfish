@@ -977,6 +977,10 @@ export function ChapterShotEditPage() {
     setVideoPromptPreviewLoading(false)
     setVideoPromptPreviewDraft('')
     setVideoPromptPreviewShotId(null)
+    // 切换镜头时清空关键帧相关状态，避免短暂闪现上一个镜头的候选图片/槽位数据。
+    setFrameImages([])
+    setKeyframeCandidatesByType({ first: [], last: [], key: [] })
+    setKeyframeApplyingFileId(null)
   }, [shotId])
 
   useEffect(() => {
@@ -1010,8 +1014,10 @@ export function ChapterShotEditPage() {
   }, [preparationState?.ready_for_generation, shotId])
 
   // 拉取当前镜头细节下的分镜帧图片槽位（首帧/尾帧/关键帧），用于展示"当前使用中"图片与定位候选查询所需的槽位 id。
+  // 沿用文件里其它镜头维度请求的约定：响应返回前对比 currentShotIdRef，丢弃已经切换镜头后的过期响应。
   const refreshFrameImages = useCallback(async () => {
     if (!shotId) return
+    const requestShotId = shotId
     try {
       const res = await StudioShotFrameImagesService.listShotFrameImagesApiV1StudioShotFrameImagesGet({
         shotDetailId: shotId,
@@ -1020,57 +1026,77 @@ export function ChapterShotEditPage() {
         page: 1,
         pageSize: 100,
       })
+      if (currentShotIdRef.current !== requestShotId) return
       setFrameImages((res.data?.items ?? []) as ShotFrameImageRead[])
     } catch {
+      if (currentShotIdRef.current !== requestShotId) return
       setFrameImages([])
     }
   }, [shotId])
 
-  // 拉取某帧类型槽位关联的历史生成任务图片，作为候选缩略图列表（按 file_id 去重，保留最新一条链接）。
-  const refreshKeyframeCandidates = useCallback(
-    async (frameType: ShotFrameType) => {
-      const slotId = frameImages.find((x) => x.frame_type === frameType)?.id
-      if (!slotId) {
-        setKeyframeCandidatesByType((prev) => ({ ...prev, [frameType]: [] }))
-        return
-      }
-      const links = await listTaskLinksNormalized({
-        resourceType: 'image',
-        relationType: 'shot_frame_image',
-        relationEntityId: String(slotId),
-        order: 'updated_at',
-        isDesc: true,
-        page: 1,
-        pageSize: 100,
-      })
-      const seen = new Set<string>()
-      const candidates: ShotKeyframeCandidate[] = links
-        .filter((l) => Boolean(l.file_id))
-        .filter((l) => {
-          const fid = String(l.file_id)
-          if (seen.has(fid)) return false
-          seen.add(fid)
-          return true
-        })
-        .map((l) => ({
-          linkId: l.id,
-          fileId: String(l.file_id),
-          thumbUrl: buildFileDownloadUrl(String(l.file_id)) ?? '',
-        }))
-      setKeyframeCandidatesByType((prev) => ({ ...prev, [frameType]: candidates }))
-    },
+  // 按帧类型拆分 frameImages 派生出的槽位 id：每种帧类型各自作为独立依赖值，
+  // 避免任一帧位变化都让三种帧类型的候选查询一起重新请求。
+  const frameSlotIdByType = useMemo<Record<ShotFrameType, number | null>>(
+    () => ({
+      first: frameImages.find((x) => x.frame_type === 'first')?.id ?? null,
+      last: frameImages.find((x) => x.frame_type === 'last')?.id ?? null,
+      key: frameImages.find((x) => x.frame_type === 'key')?.id ?? null,
+    }),
     [frameImages],
   )
+  const frameSlotIdByTypeRef = useRef(frameSlotIdByType)
+  frameSlotIdByTypeRef.current = frameSlotIdByType
+
+  // 拉取某帧类型槽位关联的历史生成任务图片，作为候选缩略图列表（按 file_id 去重，保留最新一条链接）。
+  // slotId 由调用方传入（而不是内部查 frameImages），使这个回调本身不依赖 frameImages 整个数组；
+  // 响应返回后再对比 frameSlotIdByTypeRef 最新值，若该帧类型已经指向其它槽位（通常是切换了镜头），丢弃这次响应。
+  const refreshKeyframeCandidates = useCallback(async (frameType: ShotFrameType, slotId: number | null) => {
+    if (!slotId) {
+      setKeyframeCandidatesByType((prev) => ({ ...prev, [frameType]: [] }))
+      return
+    }
+    const links = await listTaskLinksNormalized({
+      resourceType: 'image',
+      relationType: 'shot_frame_image',
+      relationEntityId: String(slotId),
+      order: 'updated_at',
+      isDesc: true,
+      page: 1,
+      pageSize: 100,
+    })
+    if (frameSlotIdByTypeRef.current[frameType] !== slotId) return
+    const seen = new Set<string>()
+    const candidates: ShotKeyframeCandidate[] = links
+      .filter((l) => Boolean(l.file_id))
+      .filter((l) => {
+        const fid = String(l.file_id)
+        if (seen.has(fid)) return false
+        seen.add(fid)
+        return true
+      })
+      .map((l) => ({
+        linkId: l.id,
+        fileId: String(l.file_id),
+        thumbUrl: buildFileDownloadUrl(String(l.file_id)) ?? '',
+      }))
+    setKeyframeCandidatesByType((prev) => ({ ...prev, [frameType]: candidates }))
+  }, [])
 
   useEffect(() => {
     void refreshFrameImages()
   }, [refreshFrameImages])
 
   useEffect(() => {
-    void refreshKeyframeCandidates('first')
-    void refreshKeyframeCandidates('last')
-    void refreshKeyframeCandidates('key')
-  }, [refreshKeyframeCandidates])
+    void refreshKeyframeCandidates('first', frameSlotIdByType.first)
+  }, [refreshKeyframeCandidates, frameSlotIdByType.first])
+
+  useEffect(() => {
+    void refreshKeyframeCandidates('last', frameSlotIdByType.last)
+  }, [refreshKeyframeCandidates, frameSlotIdByType.last])
+
+  useEffect(() => {
+    void refreshKeyframeCandidates('key', frameSlotIdByType.key)
+  }, [refreshKeyframeCandidates, frameSlotIdByType.key])
 
   // "使用"候选缩略图：将该候选图片的 file_id 写回对应帧类型槽位，使其成为当前使用中的图片。
   const applyKeyframeCandidate = useCallback(
