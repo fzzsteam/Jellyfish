@@ -194,27 +194,6 @@ function getShotExtractionSummary(shot: ShotRead | null | undefined): ShotExtrac
   return shot?.extraction ?? DEFAULT_EXTRACTION_SUMMARY
 }
 
-function getExtractionListStatus(shot: ShotRead): {
-  text: string
-  background: string
-  color: string
-} {
-  const state = getShotExtractionSummary(shot).state
-  if (state === 'skipped') {
-    return { text: '已跳过', background: '#e0f2fe', color: '#075985' }
-  }
-  if (state === 'not_extracted') {
-    return { text: '未提取', background: '#fef3c7', color: '#92400e' }
-  }
-  if (state === 'extracted_empty') {
-    return { text: '已提取无结果', background: '#dbeafe', color: '#1d4ed8' }
-  }
-  if (state === 'extracted_resolved' || shot.status === 'ready') {
-    return { text: '确认已完成', background: '#dbeafe', color: '#1d4ed8' }
-  }
-  return { text: '待确认', background: '#fef3c7', color: '#92400e' }
-}
-
 function isPendingExtractionConfirmation(shot: ShotRead): boolean {
   return getShotExtractionSummary(shot).state === 'extracted_pending'
 }
@@ -224,26 +203,26 @@ function isActionablePreparationShot(shot: ShotRead): boolean {
   return state === 'not_extracted' || state === 'extracted_pending'
 }
 
-function getShotPreparationIssueSummary(shot: ShotRead): {
+/**
+ * 合并"基础信息完整性"与"资产/对白候选处理进度"两件事，输出分镜列表唯一的准备阶段徽标。
+ * 待处理数量 = 待确认资产候选数 + 待确认对白候选数，取自 ShotExtractionSummaryRead 的
+ * pending_asset_count / pending_dialogue_count 字段（已确认这是生成客户端里的实际字段名）。
+ */
+function getShotPreparationBadge(shot: ShotRead): {
   text: string
   tone: 'gold' | 'blue' | 'green'
 } {
   const basicReady = !!shot.title?.trim() && !!shot.script_excerpt?.trim()
-  const extractionState = getShotExtractionSummary(shot).state
   if (!basicReady) {
     return { text: '基础待补', tone: 'gold' }
   }
-  if (extractionState === 'not_extracted') {
+  const extraction = getShotExtractionSummary(shot)
+  const pendingCount = (extraction.pending_asset_count ?? 0) + (extraction.pending_dialogue_count ?? 0)
+  if (extraction.state === 'not_extracted') {
     return { text: '待执行提取', tone: 'gold' }
   }
-  if (extractionState === 'extracted_pending') {
-    return { text: '待确认候选', tone: 'gold' }
-  }
-  if (extractionState === 'extracted_empty') {
-    return { text: '已提取无结果', tone: 'blue' }
-  }
-  if (extractionState === 'skipped') {
-    return { text: '已跳过提取', tone: 'blue' }
+  if (pendingCount > 0) {
+    return { text: `待关联确认 ${pendingCount} 项`, tone: 'gold' }
   }
   return { text: '准备完成', tone: 'green' }
 }
@@ -2917,8 +2896,7 @@ export function ChapterShotEditPage() {
                     const active = item.id === shotId
                     const selected = selectedShotIds.includes(item.id)
                     const itemBasicReady = !!item.title?.trim() && !!item.script_excerpt?.trim()
-                    const itemConfirmStatus = getExtractionListStatus(item)
-                    const itemIssueSummary = getShotPreparationIssueSummary(item)
+                    const itemPreparationBadge = getShotPreparationBadge(item)
                     const itemActionable = isActionablePreparationShot(item) || !itemBasicReady
                     const itemCompleted = itemBasicReady && !itemActionable
                     return (
@@ -2982,44 +2960,24 @@ export function ChapterShotEditPage() {
                                 className="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-medium"
                                 style={{
                                   background:
-                                    itemIssueSummary.tone === 'green'
+                                    itemPreparationBadge.tone === 'green'
                                       ? '#dcfce7'
-                                      : itemIssueSummary.tone === 'blue'
+                                      : itemPreparationBadge.tone === 'blue'
                                         ? '#dbeafe'
                                         : '#fef3c7',
                                   color:
-                                    itemIssueSummary.tone === 'green'
+                                    itemPreparationBadge.tone === 'green'
                                       ? '#166534'
-                                      : itemIssueSummary.tone === 'blue'
+                                      : itemPreparationBadge.tone === 'blue'
                                         ? '#1d4ed8'
                                         : '#92400e',
                                 }}
                               >
-                                {itemIssueSummary.text}
+                                {itemPreparationBadge.text}
                               </span>
                             </div>
                           </div>
                           <div className="text-xs text-gray-500 truncate">{item.script_excerpt ?? ''}</div>
-                          <div className="mt-1 flex flex-wrap items-center gap-1">
-                            <span
-                              className="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-medium"
-                              style={{
-                                background: itemBasicReady ? '#dcfce7' : '#fef3c7',
-                                color: itemBasicReady ? '#166534' : '#92400e',
-                              }}
-                            >
-                              {itemBasicReady ? '基础已完成' : '基础待补'}
-                            </span>
-                            <span
-                              className="inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-medium"
-                              style={{
-                                background: itemConfirmStatus.background,
-                                color: itemConfirmStatus.color,
-                              }}
-                            >
-                              {itemConfirmStatus.text}
-                            </span>
-                          </div>
                             </div>
                           </div>
                         </List.Item>
