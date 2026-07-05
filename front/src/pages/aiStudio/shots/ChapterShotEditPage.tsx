@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Badge, Button, Card, Checkbox, Divider, Dropdown, Empty, Form, Input, Layout, List, Modal, Popconfirm, Segmented, Spin, Tabs, Tooltip, Typography, message } from 'antd'
+import { Badge, Button, Card, Checkbox, Divider, Dropdown, Empty, Form, Image, Input, Layout, List, Modal, Popconfirm, Segmented, Spin, Tabs, Tag, Tooltip, Typography, message } from 'antd'
 import type { MenuProps } from 'antd'
 import { ArrowLeftOutlined, CloseCircleOutlined, DeleteOutlined, DownloadOutlined, MoreOutlined, PlusOutlined, ReloadOutlined, StopOutlined, ThunderboltOutlined, ToolOutlined, UndoOutlined } from '@ant-design/icons'
 import type {
@@ -18,6 +18,7 @@ import type {
   ShotLinkedAssetItem,
   ShotPreparationStateRead,
   ShotRead,
+  ShotVideoPromptPackRead,
   ShotVideoReadinessRead,
   VideoPromptPreviewRequest,
 } from '../../../services/generated'
@@ -399,6 +400,22 @@ export function ChapterShotEditPage() {
   const [videoPromptPreviewSubmitting, setVideoPromptPreviewSubmitting] = useState(false)
   const [videoPromptPreviewDraft, setVideoPromptPreviewDraft] = useState('')
   const [videoPromptPreviewShotId, setVideoPromptPreviewShotId] = useState<string | null>(null)
+  // 镜头连续性上下文包（含动作拍点、上一/下一镜头衔接建议等）与关联参考图，均由预览接口一并返回。
+  const [videoPromptPreviewPack, setVideoPromptPreviewPack] = useState<ShotVideoPromptPackRead | null>(null)
+  const [videoPromptPreviewImages, setVideoPromptPreviewImages] = useState<string[]>([])
+  // 连续性上下文默认折叠，仅展示动作拍点摘要，减少弹窗信息密度。
+  const [videoPromptContextCollapsed, setVideoPromptContextCollapsed] = useState(true)
+  // 动作拍点展示数据：优先使用带阶段推断的 action_beat_phases，回退到无阶段信息的 action_beats 纯文本。
+  const videoActionBeats = useMemo(() => {
+    const phases = videoPromptPreviewPack?.action_beat_phases ?? []
+    if (phases.length > 0) {
+      return phases.map((item) => ({ text: item.text, phase: item.phase as 'trigger' | 'peak' | 'aftermath' | null }))
+    }
+    return (videoPromptPreviewPack?.action_beats ?? []).map((text) => ({ text, phase: null as null }))
+  }, [videoPromptPreviewPack])
+  // 折叠态下仅展示前两条动作拍点，避免弹窗信息过载；展开后展示全部拍点与其余连续性字段。
+  const videoVisibleActionBeats = videoPromptContextCollapsed ? videoActionBeats.slice(0, 2) : videoActionBeats
+  const hiddenVideoActionBeatCount = Math.max(0, videoActionBeats.length - videoVisibleActionBeats.length)
   // 视频生成试算绑定模型、镜头时长与清晰度；提示词预览弹窗提交时复用同一 quote_token。
   const videoQuote = usePointsQuote({
     businessType: 'video_generation',
@@ -1036,6 +1053,9 @@ export function ChapterShotEditPage() {
     setVideoPromptPreviewLoading(false)
     setVideoPromptPreviewDraft('')
     setVideoPromptPreviewShotId(null)
+    setVideoPromptPreviewPack(null)
+    setVideoPromptPreviewImages([])
+    setVideoPromptContextCollapsed(true)
     // 切换镜头时清空关键帧相关状态，避免短暂闪现上一个镜头的候选图片/槽位数据。
     setFrameImages([])
     setKeyframeCandidatesByType({ first: [], last: [], key: [] })
@@ -1534,6 +1554,8 @@ export function ChapterShotEditPage() {
     setVideoPromptPreviewLoading(false)
     setVideoPromptPreviewDraft('')
     setVideoPromptPreviewShotId(null)
+    setVideoPromptPreviewPack(null)
+    setVideoPromptPreviewImages([])
     navigate(getChapterShotDetailPath(projectId, chapterId, id, editorTabKey))
   }
   /**
@@ -1567,6 +1589,8 @@ export function ChapterShotEditPage() {
       setVideoPromptPreviewLoading(false)
       setVideoPromptPreviewDraft('')
       setVideoPromptPreviewShotId(null)
+      setVideoPromptPreviewPack(null)
+      setVideoPromptPreviewImages([])
       navigate(getChapterShotDetailPath(projectId, chapterId, id, tab))
     },
     [chapterId, navigate, projectId, setSearchParams, shotId],
@@ -2161,6 +2185,9 @@ export function ChapterShotEditPage() {
     const requestShotId = shotId
     const requestSeq = ++videoPromptPreviewRequestSeqRef.current
     setVideoPromptPreviewDraft('')
+    setVideoPromptPreviewPack(null)
+    setVideoPromptPreviewImages([])
+    setVideoPromptContextCollapsed(true)
     setVideoPromptPreviewShotId(requestShotId)
     setVideoPromptPreviewOpen(true)
     setVideoPromptPreviewLoading(true)
@@ -2176,11 +2203,15 @@ export function ChapterShotEditPage() {
       })
       if (requestSeq !== videoPromptPreviewRequestSeqRef.current || currentShotIdRef.current !== requestShotId) return
       setVideoPromptPreviewDraft(res.data?.prompt ?? '')
+      setVideoPromptPreviewPack(res.data?.pack ?? null)
+      setVideoPromptPreviewImages(res.data?.images ?? [])
     } catch {
       if (requestSeq !== videoPromptPreviewRequestSeqRef.current || currentShotIdRef.current !== requestShotId) return
       message.error('获取视频提示词预览失败')
       setVideoPromptPreviewOpen(false)
       setVideoPromptPreviewShotId(null)
+      setVideoPromptPreviewPack(null)
+      setVideoPromptPreviewImages([])
     } finally {
       if (requestSeq === videoPromptPreviewRequestSeqRef.current && currentShotIdRef.current === requestShotId) {
         setVideoPromptPreviewLoading(false)
@@ -2256,6 +2287,8 @@ export function ChapterShotEditPage() {
       setVideoPromptPreviewOpen(false)
       setVideoPromptPreviewShotId(null)
       setVideoPromptPreviewDraft('')
+      setVideoPromptPreviewPack(null)
+      setVideoPromptPreviewImages([])
     } catch (error) {
       const pointsAware = makePointsAwareGetErrorMessage(videoQuote.refresh)
       message.error(pointsAware(error, '发起视频生成失败'))
@@ -3537,6 +3570,8 @@ export function ChapterShotEditPage() {
           setVideoPromptPreviewLoading(false)
           setVideoPromptPreviewDraft('')
           setVideoPromptPreviewShotId(null)
+          setVideoPromptPreviewPack(null)
+          setVideoPromptPreviewImages([])
         }}
         width={900}
         destroyOnClose
@@ -3549,6 +3584,8 @@ export function ChapterShotEditPage() {
                 setVideoPromptPreviewLoading(false)
                 setVideoPromptPreviewDraft('')
                 setVideoPromptPreviewShotId(null)
+                setVideoPromptPreviewPack(null)
+                setVideoPromptPreviewImages([])
               }}
               disabled={videoPromptPreviewSubmitting}
             >
@@ -3578,6 +3615,97 @@ export function ChapterShotEditPage() {
               <div>视频比例：{resolvedVideoRatio ?? '未设置'}</div>
               <div>清晰度：{videoResolution}</div>
             </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-medium text-slate-700">镜头连续性上下文</div>
+                  <div className="mt-1 text-[11px] leading-5 text-slate-500">
+                    这些上下文会参与视频模板渲染和最终提示词补强，默认先展示摘要，需要时再展开细节。
+                  </div>
+                </div>
+                <Button
+                  type="link"
+                  size="small"
+                  className="px-0"
+                  onClick={() => setVideoPromptContextCollapsed((prev) => !prev)}
+                >
+                  {videoPromptContextCollapsed ? '展开细节' : '收起细节'}
+                </Button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Tag color="blue">{`动作节拍 ${videoActionBeats.length}`}</Tag>
+                {videoPromptPreviewPack?.previous_shot_summary ? <Tag color="purple">上一镜头</Tag> : null}
+                {videoPromptPreviewPack?.next_shot_goal ? <Tag color="cyan">下一镜头</Tag> : null}
+                {videoPromptPreviewPack?.continuity_guidance ? <Tag color="gold">连续性</Tag> : null}
+              </div>
+              <div className="mt-3 space-y-3">
+                <div>
+                  <div className="text-slate-500">动作节拍</div>
+                  {videoVisibleActionBeats.length > 0 ? (
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {videoVisibleActionBeats.map((item, index) => (
+                        <Tag
+                          key={`${index}:${item.phase ?? 'raw'}:${item.text}`}
+                          color={
+                            item.phase === 'trigger' ? 'gold' : item.phase === 'peak' ? 'blue' : item.phase === 'aftermath' ? 'green' : 'default'
+                          }
+                        >
+                          {item.phase
+                            ? `${item.phase === 'trigger' ? '触发' : item.phase === 'peak' ? '峰值' : '收束'} · ${item.text}`
+                            : item.text}
+                        </Tag>
+                      ))}
+                      {videoPromptContextCollapsed && hiddenVideoActionBeatCount > 0 ? (
+                        <Tag>{`+${hiddenVideoActionBeatCount}`}</Tag>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-gray-400">暂无动作节拍</div>
+                  )}
+                </div>
+                {!videoPromptContextCollapsed ? (
+                  <>
+                    <div>
+                      <div className="text-slate-500">上一镜头摘要</div>
+                      <div className="mt-1 whitespace-pre-wrap text-slate-700">{videoPromptPreviewPack?.previous_shot_summary || '无'}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">下一镜头目标</div>
+                      <div className="mt-1 whitespace-pre-wrap text-slate-700">{videoPromptPreviewPack?.next_shot_goal || '无'}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">连续性建议</div>
+                      <div className="mt-1 whitespace-pre-wrap text-slate-700">{videoPromptPreviewPack?.continuity_guidance || '无'}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">构图与空间锚点</div>
+                      <div className="mt-1 whitespace-pre-wrap text-slate-700">{videoPromptPreviewPack?.composition_anchor || '无'}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">朝向与视线建议</div>
+                      <div className="mt-1 whitespace-pre-wrap text-slate-700">{videoPromptPreviewPack?.screen_direction_guidance || '无'}</div>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs text-gray-500 mb-2">关联图片（参考图）</div>
+              {videoPromptPreviewImages.length === 0 ? (
+                <div className="text-xs text-gray-400">暂无关联图片</div>
+              ) : (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  <Image.PreviewGroup>
+                    {videoPromptPreviewImages.map((fid) => (
+                      <Image key={fid} width={72} height={72} style={{ objectFit: 'cover', borderRadius: 8 }} src={buildFileDownloadUrl(fid)} />
+                    ))}
+                  </Image.PreviewGroup>
+                </div>
+              )}
+            </div>
+
             <TextArea
               rows={14}
               value={videoPromptPreviewDraft}
