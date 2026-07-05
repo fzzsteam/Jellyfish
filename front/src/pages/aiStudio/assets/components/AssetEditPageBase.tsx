@@ -22,6 +22,8 @@ import type { AssetImageCandidateRead, ModelRead, ProviderRead, TaskStatus } fro
 import { buildFileDownloadUrl } from '../utils'
 import { AssetImageCandidateGallery } from './AssetImageCandidateGallery'
 import { DisplayImageCard } from './DisplayImageCard'
+import { AssetReferencePickerDrawer, type AssetReferenceKind, type AssetReferenceOption } from './AssetReferencePickerDrawer'
+import { AssetReferencePanel } from './AssetReferencePanel'
 import { defaultTaskActionErrorMessage, executeAsyncTaskCreate, executeTaskCancel, notifyExistingTask } from '../../components/taskActionHelpers'
 import { handleTaskResultSafely } from '../../components/taskResultHelpers'
 import { useRelationTaskNotification } from '../../components/taskNotificationHelpers'
@@ -42,7 +44,6 @@ import {
 } from '../../project/ProjectWorkbench/chapterDivisionTasks'
 
 const MAX_VIEW_COUNT = 4
-const ASSET_MENTION_PAGE_SIZE = 100
 // 与后端 `AssetViewAngle`（backend/app/models/studio.py）一致的枚举值
 export type AssetViewAngle =
   | 'FRONT'
@@ -106,19 +107,6 @@ const ASSET_IMAGE_RESOLUTION_OPTIONS: Array<{ value: AssetImageResolutionProfile
 
 type ImageModelOption = ModelRead & {
   provider_name: string
-}
-
-type MentionEntityRecord = {
-  id?: string
-  name?: string | null
-  title?: string | null
-}
-
-type MentionImageRecord = {
-  id?: number | string
-  file_id?: string | null
-  view_angle?: string | null
-  name?: string | null
 }
 
 export type AssetEditPageBaseProps<TAsset extends BaseAsset, TImage extends BaseAssetImage> = {
@@ -194,44 +182,7 @@ function getAssetNavigateRelationType(relationType: string): string | null {
 }
 
 // Loads every entity page for an @ mention category so the picker can expose all asset images.
-async function listMentionEntities(entityType: MentionAssetKind): Promise<MentionEntityRecord[]> {
-  const result: MentionEntityRecord[] = []
-  let page = 1
-  let maxPage = 1
-  do {
-    const res = await StudioEntitiesService.listEntitiesApiV1StudioEntitiesEntityTypeGet({
-      entityType,
-      page,
-      pageSize: ASSET_MENTION_PAGE_SIZE,
-    })
-    const data = res.data
-    result.push(...((data?.items ?? []) as MentionEntityRecord[]))
-    maxPage = data?.pagination?.max_page ?? page
-    page += 1
-  } while (page <= maxPage)
-  return result
-}
-
 // Loads every image page for one asset entity, keeping only records that have file_id.
-async function listMentionEntityImages(entityType: MentionAssetKind, entityId: string): Promise<MentionImageRecord[]> {
-  const result: MentionImageRecord[] = []
-  let page = 1
-  let maxPage = 1
-  do {
-    const res = await StudioEntitiesService.listEntityImagesApiV1StudioEntitiesEntityTypeEntityIdImagesGet({
-      entityType,
-      entityId,
-      page,
-      pageSize: ASSET_MENTION_PAGE_SIZE,
-    })
-    const data = res.data
-    result.push(...((data?.items ?? []) as MentionImageRecord[]).filter((item) => Boolean(item.file_id)))
-    maxPage = data?.pagination?.max_page ?? page
-    page += 1
-  } while (page <= maxPage)
-  return result
-}
-
 export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseAssetImage>({
   assetId,
   missingAssetIdText,
@@ -285,9 +236,17 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   const [historyCandidates, setHistoryCandidates] = useState<AssetImageCandidateRead[]>([])
   const [editingSlotImage, setEditingSlotImage] = useState<TImage | null>(null)
   const [adoptingImageId, setAdoptingImageId] = useState<number | null>(null)
-  const [deletingCandidateId, setDeletingCandidateId] = useState<number | null>(null)
   const [uploadingCandidates, setUploadingCandidates] = useState(false)
-  const [mentionedFileIds, setMentionedFileIds] = useState<string[]>([])
+  const [referenceOptions, setReferenceOptions] = useState<AssetReferenceOption[]>([])
+  const [referenceFileIds, setReferenceFileIds] = useState<string[]>([])
+  const [referencePickerOpen, setReferencePickerOpen] = useState(false)
+  const [referencePickerInitialKind, setReferencePickerInitialKind] = useState<AssetReferenceKind>('scene')
+  const [referenceReplaceFileId, setReferenceReplaceFileId] = useState<string | null>(null)
+  const [pendingGenerateImage, setPendingGenerateImage] = useState<TImage | null>(null)
+  const [generateConfirmOpen, setGenerateConfirmOpen] = useState(false)
+  const [generateConfirmLoading, setGenerateConfirmLoading] = useState(false)
+  const [generateConfirmPrompt, setGenerateConfirmPrompt] = useState('')
+  const [generateConfirmImages, setGenerateConfirmImages] = useState<string[]>([])
   const [assetImageResolutionProfile, setAssetImageResolutionProfile] =
     useState<AssetImageResolutionProfile>('standard')
 
@@ -707,8 +666,9 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     onNavigate: () => onNavigate(location.pathname),
   })
 
-  // Saves current form edits and starts generation directly from the description field.
-  const handleGenerateImage = async (image: TImage) => {
+  // Saves current form edits, fetches the rendered prompt+reference preview, and opens the
+  // confirmation modal so users see exactly what will be sent before a billed generation starts.
+  const openGenerateConfirm = async (image: TImage) => {
     if (!assetId || !asset) return
     const prompt = formDesc.trim()
     if (!prompt) {
@@ -724,9 +684,32 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       const nextAsset = await updateAsset(assetId, payload)
       if (nextAsset) setAsset(nextAsset)
 
-      const taskId = await createGenerationTask(assetId, image.id, {
+      const rendered = await renderPromptPreview(assetId, image.id, {
         prompt,
-        images: mentionedFileIds,
+        images: referenceFileIds,
+      })
+      setGenerateConfirmPrompt(rendered?.prompt ?? prompt)
+      setGenerateConfirmImages(rendered?.images ?? referenceFileIds)
+      setPendingGenerateImage(image)
+      setGenerateConfirmOpen(true)
+    } catch {
+      message.error('生成预览失败')
+    } finally {
+      setSavingBase(false)
+      setGeneratingByImageId((prev) => ({ ...prev, [image.id]: false }))
+    }
+  }
+
+  // Runs the actual billed generation using the previewed prompt/images once the user confirms.
+  const confirmGenerateImage = async () => {
+    if (!assetId || !pendingGenerateImage) return
+    const image = pendingGenerateImage
+    setGenerateConfirmLoading(true)
+    setGeneratingByImageId((prev) => ({ ...prev, [image.id]: true }))
+    try {
+      const taskId = await createGenerationTask(assetId, image.id, {
+        prompt: generateConfirmPrompt,
+        images: generateConfirmImages,
         model_id: selectedImageModelId,
         quote_token: imageQuote.quoteToken,
         resolution_profile: assetImageResolutionProfile,
@@ -735,6 +718,8 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
         message.error('生成任务创建失败：缺少任务 ID')
         return
       }
+      setGenerateConfirmOpen(false)
+      setPendingGenerateImage(null)
       setGenerationTask({
         taskId,
         status: 'pending',
@@ -777,7 +762,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
         message.error(msg)
       }
     } finally {
-      setSavingBase(false)
+      setGenerateConfirmLoading(false)
       setGeneratingByImageId((prev) => ({ ...prev, [image.id]: false }))
     }
   }
@@ -858,28 +843,43 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
     }
   }
 
-  // Loads all reusable asset images for the selected @ mention category and deduplicates by file_id.
-  const loadMentionImagesByKind = useCallback(async (kind: MentionAssetKind): Promise<MentionImageOption[]> => {
-    const entities = await listMentionEntities(kind)
-    const seen = new Set<string>()
-    const options: MentionImageOption[] = []
-    for (const entity of entities) {
-      if (!entity.id) continue
-      const entityName = entity.name || entity.title || entity.id
-      const entityImages = await listMentionEntityImages(kind, entity.id)
-      entityImages.forEach((image, index) => {
-        if (!image.file_id || seen.has(image.file_id)) return
-        seen.add(image.file_id)
-        options.push({
-          id: `${kind}:${entity.id}:${image.id ?? index}`,
-          file_id: image.file_id,
-          label: entityName,
-          subtitle: image.name || entityName,
-        })
-      })
-    }
-    return options
+  // 打开资产库抽屉以"新增"一张参考图。
+  const openReferencePickerToAdd = useCallback(() => {
+    setReferencePickerInitialKind('scene')
+    setReferenceReplaceFileId(null)
+    setReferencePickerOpen(true)
   }, [])
+
+  // 打开资产库抽屉以"替换"已选参考图列表里的某一项；按 fileId 反查其所属资产类型作为默认 tab。
+  const openReferencePickerToReplace = useCallback(
+    (fileId: string) => {
+      const existing = referenceOptions.find((option) => option.file_id === fileId)
+      setReferencePickerInitialKind(existing?.kind ?? 'scene')
+      setReferenceReplaceFileId(fileId)
+      setReferencePickerOpen(true)
+    },
+    [referenceOptions],
+  )
+
+  /**
+   * 资产库选图确认回调：只把选中的资产图片临时加入本次生成的参考图候选，
+   * 不写入任何资产关联关系——与镜头详情页关键帧生成的"临时参考图"语义一致。
+   */
+  const handleReferencePicked = useCallback(
+    (option: AssetReferenceOption) => {
+      setReferenceOptions((prev) => {
+        const withoutDuplicate = prev.filter((item) => item.file_id !== option.file_id)
+        return [...withoutDuplicate, option]
+      })
+      if (referenceReplaceFileId) {
+        setReferenceFileIds((prev) => prev.map((id) => (id === referenceReplaceFileId ? option.file_id : id)))
+      } else {
+        setReferenceFileIds((prev) => (prev.includes(option.file_id) ? prev : [...prev, option.file_id]))
+      }
+      setReferencePickerOpen(false)
+    },
+    [referenceReplaceFileId],
+  )
 
   if (!assetId) {
     return (
@@ -959,15 +959,12 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                         </>
                       ) : null}
                     </div>
-                  <MentionEditor
+                  <Input.TextArea
                     value={formDesc}
-                    onChange={(text, fileIds) => {
-                      setFormDesc(text)
-                      setMentionedFileIds(fileIds)
-                    }}
+                    onChange={(e) => setFormDesc(e.target.value)}
                     disabled={smartDetectBusy || savingBase}
-                    placeholder="支持输入 @ 选择资产图片作为参考"
-                    loadImagesByKind={loadMentionImagesByKind}
+                    placeholder="请输入描述"
+                    rows={4}
                   />
                 </div>
                 <div>
@@ -1186,6 +1183,13 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
           </div>
         )}
       </Modal>
+
+      <AssetReferencePickerDrawer
+        open={referencePickerOpen}
+        initialKind={referencePickerInitialKind}
+        onSelect={handleReferencePicked}
+        onClose={() => setReferencePickerOpen(false)}
+      />
     </div>
   )
 }
