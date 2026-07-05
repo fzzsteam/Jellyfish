@@ -237,6 +237,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   const [historyCandidates, setHistoryCandidates] = useState<AssetImageCandidateRead[]>([])
   const [editingSlotImage, setEditingSlotImage] = useState<TImage | null>(null)
   const [adoptingImageId, setAdoptingImageId] = useState<number | null>(null)
+  const [deletingCandidateId, setDeletingCandidateId] = useState<number | null>(null)
   const [uploadingCandidates, setUploadingCandidates] = useState(false)
   const [referenceOptions, setReferenceOptions] = useState<AssetReferenceOption[]>([])
   const [referenceFileIds, setReferenceFileIds] = useState<string[]>([])
@@ -1193,6 +1194,66 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        title="确认生成"
+        open={generateConfirmOpen}
+        onCancel={() => {
+          if (generateConfirmLoading) return
+          setGenerateConfirmOpen(false)
+          setPendingGenerateImage(null)
+        }}
+        footer={
+          <Space>
+            <Button
+              disabled={generateConfirmLoading}
+              onClick={() => {
+                setGenerateConfirmOpen(false)
+                setPendingGenerateImage(null)
+              }}
+            >
+              取消
+            </Button>
+            <PointsCostButton
+              type="primary"
+              loading={generateConfirmLoading}
+              disabled={!generateConfirmPrompt.trim()}
+              quote={imageQuote.quote}
+              quoteLoading={imageQuote.loading}
+              quoteError={imageQuote.error}
+              onClick={() => void confirmGenerateImage()}
+            >
+              确认生成
+            </PointsCostButton>
+          </Space>
+        }
+        destroyOnClose
+        width={720}
+      >
+        <div className="space-y-3">
+          <div>
+            <div className="text-gray-600 text-sm mb-1">最终提示词</div>
+            <Input.TextArea value={generateConfirmPrompt} readOnly autoSize={{ minRows: 3, maxRows: 8 }} />
+          </div>
+          <div>
+            <div className="text-gray-600 text-sm mb-1">参考图（{generateConfirmImages.length}）</div>
+            {generateConfirmImages.length === 0 ? (
+              <div className="text-xs text-gray-400">无参考图，本次为纯文生图</div>
+            ) : (
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {generateConfirmImages.map((fid, index) => (
+                  <img
+                    key={fid}
+                    src={buildFileDownloadUrl(fid)}
+                    alt={`参考图${index + 1}`}
+                    className="h-16 w-16 shrink-0 rounded object-cover border border-slate-200"
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </Modal>
 
       <AssetReferencePickerDrawer
