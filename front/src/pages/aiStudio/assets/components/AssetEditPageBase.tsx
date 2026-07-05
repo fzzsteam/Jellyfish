@@ -197,6 +197,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   adoptImageCandidate,
   deleteImageCandidate,
   createGenerationTask,
+  renderPromptPreview,
   attachImageCandidates,
   onNavigate,
 }: AssetEditPageBaseProps<TAsset, TImage>) {
@@ -966,6 +967,16 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                     placeholder="请输入描述"
                     rows={4}
                   />
+                  <div className="mt-3">
+                    <AssetReferencePanel
+                      options={referenceOptions}
+                      selectedFileIds={referenceFileIds}
+                      onChangeSelectedFileIds={setReferenceFileIds}
+                      onAddFromLibrary={openReferencePickerToAdd}
+                      onReplaceFromLibrary={openReferencePickerToReplace}
+                      disabled={smartDetectBusy || savingBase}
+                    />
+                  </div>
                 </div>
                 <div>
                   <div className="text-gray-600 text-sm mb-2">模型选择</div>
@@ -1053,7 +1064,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
                               quote={imageQuote.quote}
                               quoteLoading={imageQuote.loading}
                               quoteError={imageQuote.error}
-                              onClick={() => slot.image && void handleGenerateImage(slot.image)}
+                              onClick={() => slot.image && void openGenerateConfirm(slot.image)}
                             >
                               生成
                             </PointsCostButton>
