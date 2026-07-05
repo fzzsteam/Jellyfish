@@ -26,14 +26,9 @@ from app.services.studio.image_task_references import (
     resolve_reference_image_refs_by_file_ids as _resolve_reference_image_refs_by_file_ids_service,
 )
 from app.services.studio.generation.asset_image import (
-    build_actor_image_base_draft as _build_actor_image_base_draft_service,
     build_actor_image_submission_payload as _build_actor_image_submission_payload_service,
-    build_asset_image_base_draft as _build_asset_image_base_draft_service,
-    build_asset_image_context as _build_asset_image_context_service,
     build_asset_image_submission_payload as _build_asset_image_submission_payload_service,
-    build_character_image_base_draft as _build_character_image_base_draft_service,
     build_character_image_submission_payload as _build_character_image_submission_payload_service,
-    derive_asset_image_preview as _derive_asset_image_preview_service,
 )
 from app.services.studio.generation.frame import (
     build_frame_base_draft as _build_frame_base_draft_service,
