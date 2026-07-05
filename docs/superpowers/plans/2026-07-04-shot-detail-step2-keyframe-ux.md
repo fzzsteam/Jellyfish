@@ -1903,6 +1903,1017 @@ git commit -m "feat: 关键帧生成弹窗支持从资产库新增/替换临时�
 
 ---
 
+### Task 9: 关键帧生成弹窗接入分镜工作室"AI 生成提示词"全套能力
+
+**背景**：Task 5/8 做的关键帧生成弹窗（`ShotKeyframeGenerateModal.tsx`）是简化版——纯手动提示词 + 按类型分组勾选参考图。用户明确要求改为使用分镜工作室 `ChapterStudio.tsx` 里"首帧/关键帧/尾帧图片生成提示词预览"弹窗（`keyframePromptPreviewOpen`，源码约 4340-6111 行）的完整能力：参考图有序缩略图（图1/图2标签 + 左移/右移）、AI 生成基础提示词（异步任务+积分计费+质量校验+guidance摘要）、最终提示词只读渲染（token 映射 + guidance 取舍展示）。同时在此基础上新增 Task 8 已实现但 `ChapterStudio.tsx` 原版没有的能力：参考图可自由从项目资产库新增/替换（仍然维持 Task 8 定下的"仅本次生成临时使用，不写入镜头资产关联关系"语义）。
+
+`ChapterStudio.tsx` 里这套逻辑依赖的后端接口全部已存在，不需要新增/修改 OpenAPI：
+- `FilmService.createShotFramePromptTaskApiV1FilmTasksShotFramePromptsPost` — 创建"AI 生成基础提示词"异步任务
+- `FilmService.getTaskStatusApiV1FilmTasksTaskIdStatusGet` / `getTaskResultApiV1FilmTasksTaskIdResultGet` — 轮询任务状态与取结果
+- `StudioImageTasksService.renderShotFramePromptApiV1StudioImageTasksShotShotIdFrameRenderPromptPost` — 把基础提示词+参考图渲染为最终提示词（含 guidance 取舍、token 映射）
+- `StudioImageTasksService.createShotFrameImageGenerationTaskApiV1StudioImageTasksShotShotIdFrameImageTasksPost` — 创建关键帧图片生成任务（Task 5 已在用，签名不变）
+- `StudioShotDetailsService.updateShotDetailApiV1StudioShotDetailsShotIdPatch` — `ShotDetailUpdate` 已含 `first_frame_prompt`/`last_frame_prompt`/`key_frame_prompt` 字段，用于持久化 AI 生成结果
+
+**Files:**
+- Modify: `front/src/pages/aiStudio/shots/ChapterShotEditPage.tsx`
+- Modify: `front/src/pages/aiStudio/shots/components/ShotKeyframeGenerateModal.tsx`
+
+- [ ] **Step 1: 在 `ChapterShotEditPage.tsx` 引入 `useGenerationDraft` 与新增类型**
+
+在顶部 import 区补充（与已有 `import { ... } from '../../../services/generated'` 合并，不要重复 import 同一模块）：
+```tsx
+import { useGenerationDraft, type GenerationDraftState } from '../hooks/useGenerationDraft'
+import type { FrameGuidanceDecisionRead, ShotFramePromptMappingRead } from '../../../services/generated'
+```
+
+在文件顶部模块级别（其他本地类型定义附近）新增：
+```tsx
+type ShotFramePromptDebugContext = Record<string, unknown>
+
+type ShotFramePromptQualityChecks = { passed: boolean; issues: string[] } | null
+
+type FramePromptDerived = {
+  basePrompt: string
+  renderedPrompt: string
+  selectedGuidance: string[]
+  droppedGuidance: string[]
+  selectedGuidanceDetails: FrameGuidanceDecisionRead[]
+  droppedGuidanceDetails: FrameGuidanceDecisionRead[]
+  images: string[]
+  mappings: ShotFramePromptMappingRead[]
+}
+```
+
+- [ ] **Step 2: 移除旧的 `keyframeModalPrompt`/`keyframeModalSelectedFileIds` 状态，新增提示词草稿与派生结果状态**
+
+在 `ChapterShotEditPage.tsx` 里找到（约第 379-386 行）：
+```tsx
+  // 关键帧生成弹窗状态：打开的帧类型、编辑中的提示词、已选参考图 file_id 顺序列表、提交中标记。
+  const [keyframeModalOpen, setKeyframeModalOpen] = useState(false)
+  const [keyframeModalFrameType, setKeyframeModalFrameType] = useState<ShotFrameType | null>(null)
+  const [keyframeModalPrompt, setKeyframeModalPrompt] = useState('')
+  const [keyframeModalSelectedFileIds, setKeyframeModalSelectedFileIds] = useState<string[]>([])
+  const [keyframeModalSubmitting, setKeyframeModalSubmitting] = useState(false)
+```
+替换为（删掉 `keyframeModalPrompt`/`keyframeModalSelectedFileIds` 两行，改由下面的 `keyframePromptDraft` 承载；新增 AI 生成/质量校验/折叠态状态）：
+```tsx
+  // 关键帧生成弹窗状态：打开的帧类型、提交中标记。提示词与参考图顺序改由 keyframePromptDraft 承载。
+  const [keyframeModalOpen, setKeyframeModalOpen] = useState(false)
+  const [keyframeModalFrameType, setKeyframeModalFrameType] = useState<ShotFrameType | null>(null)
+  const [keyframeModalSubmitting, setKeyframeModalSubmitting] = useState(false)
+  // AI 生成基础提示词的结果附带信息：质量校验、调试上下文（项目风格/连续性/动作节拍等），仅用于展示。
+  const [keyframePromptDebugContext, setKeyframePromptDebugContext] = useState<ShotFramePromptDebugContext | null>(null)
+  const [keyframePromptQualityChecks, setKeyframePromptQualityChecks] = useState<ShotFramePromptQualityChecks>(null)
+  const [keyframePromptActionLoading, setKeyframePromptActionLoading] = useState(false)
+  const [keyframePromptDebugCollapsed, setKeyframePromptDebugCollapsed] = useState(true)
+  const [keyframeDirectiveCollapsed, setKeyframeDirectiveCollapsed] = useState(true)
+  const [keyframePromptDecisionCollapsed, setKeyframePromptDecisionCollapsed] = useState(true)
+```
+
+紧接着（原 `keyframeImageQuote` 定义之后）新增文本类计费的积分试算实例：
+```tsx
+  // 关键帧"AI 生成基础提示词"走文本 LLM，属文本类计费业务，与图片生成的 keyframeImageQuote 分开试算。
+  const shotFramePromptQuote = usePointsQuote({
+    businessType: 'shot_frame_prompt',
+    category: 'text',
+    modelId: null,
+    enabled: keyframeModalOpen,
+  })
+```
+
+- [ ] **Step 3: 新增 `deriveKeyframePromptPreview`（渲染最终提示词）与 `keyframePromptDraft` 实例**
+
+在 `keyframeReferenceOptions` 定义（约第 520 行附近）与 `openKeyframeGenerateModal` 之间新增：
+```tsx
+  // 关键帧参考图的完整候选集合：第 2 步已关联资产 + 本次弹窗里从资产库临时新增的资产。
+  // deriveKeyframePromptPreview/submit 都要在这个合并集合里按 file_id 反查资产信息，
+  // 否则用户临时新增的参考图会在渲染/提交时被当成"未知资产"处理。
+  const allKeyframeReferenceOptions = useMemo<KeyframeReferenceOption[]>(
+    () => [...keyframeReferenceOptions, ...keyframeModalExtraOptions],
+    [keyframeReferenceOptions, keyframeModalExtraOptions],
+  )
+
+  // 把基础提示词 + 有序参考图渲染为最终提示词：调用 render-prompt 接口拿到 token 映射与
+  // guidance 取舍结果。这一步不消耗积分（只读渲染），真正计费点在"AI 生成基础提示词"与
+  // "提交关键帧图片生成"两处。
+  const deriveKeyframePromptPreview = useCallback(
+    async ({
+      base,
+      context,
+    }: {
+      base: { frameType: ShotFrameType; prompt: string }
+      context: { refFileIds: string[] }
+    }): Promise<FramePromptDerived> => {
+      if (!shotId) throw new Error('shot is required')
+      const basePrompt = (base.prompt || '').trim()
+      const refFileIds = (context.refFileIds || []).filter(Boolean)
+      if (!basePrompt) {
+        return {
+          basePrompt: '',
+          renderedPrompt: '',
+          selectedGuidance: [],
+          droppedGuidance: [],
+          selectedGuidanceDetails: [],
+          droppedGuidanceDetails: [],
+          images: [],
+          mappings: [],
+        }
+      }
+      const imagesPayload: ShotLinkedAssetItem[] = refFileIds
+        .map((fid) => allKeyframeReferenceOptions.find((option) => option.file_id === fid))
+        .filter((option): option is KeyframeReferenceOption => !!option)
+        .map((option) => ({ type: option.type, id: option.id, name: option.name, file_id: option.file_id }))
+
+      const rendered = await StudioImageTasksService.renderShotFramePromptApiV1StudioImageTasksShotShotIdFrameRenderPromptPost({
+        shotId,
+        requestBody: {
+          frame_type: base.frameType,
+          prompt: basePrompt,
+          images: imagesPayload,
+        },
+      })
+      const d = rendered.data
+      return {
+        basePrompt: d?.base_prompt ?? basePrompt,
+        renderedPrompt: d?.rendered_prompt ?? '',
+        selectedGuidance: d?.selected_guidance ?? [],
+        droppedGuidance: d?.dropped_guidance ?? [],
+        selectedGuidanceDetails: d?.selected_guidance_details ?? [],
+        droppedGuidanceDetails: d?.dropped_guidance_details ?? [],
+        images: d?.images ?? [],
+        mappings: d?.mappings ?? [],
+      }
+    },
+    [allKeyframeReferenceOptions, shotId],
+  )
+
+  // 关键帧提示词草稿：base=帧类型+基础提示词，context=有序参考图 file_id 列表，
+  // derived=渲染后的最终提示词与 guidance 取舍。submit 直接创建关键帧图片生成任务。
+  const keyframePromptDraft = useGenerationDraft<
+    { frameType: ShotFrameType; prompt: string },
+    { refFileIds: string[] },
+    FramePromptDerived,
+    { taskId: string | null }
+  >({
+    initialBase: { frameType: 'key', prompt: '' },
+    initialContext: { refFileIds: [] },
+    derive: deriveKeyframePromptPreview,
+    submit: async ({ base, context }) => {
+      if (!shotId) throw new Error('shot is required')
+      const ratio = resolvedVideoRatio
+      if (!ratio) throw new Error('video ratio is required')
+      if (!keyframeImageQuote.quoteToken) throw new Error('quote token is required')
+      const images: ShotLinkedAssetItem[] = context.refFileIds
+        .map((fid) => allKeyframeReferenceOptions.find((option) => option.file_id === fid))
+        .filter((option): option is KeyframeReferenceOption => !!option)
+        .map((option) => ({ type: option.type, id: option.id, name: option.name, file_id: option.file_id }))
+      const created = await StudioImageTasksService.createShotFrameImageGenerationTaskApiV1StudioImageTasksShotShotIdFrameImageTasksPost({
+        shotId,
+        requestBody: {
+          frame_type: base.frameType,
+          model_id: null,
+          prompt: base.prompt.trim(),
+          images,
+          target_ratio: ratio,
+          resolution_profile: 'standard',
+          quote_token: keyframeImageQuote.quoteToken,
+        },
+      })
+      return { taskId: created.data?.task_id ?? null }
+    },
+  })
+```
+
+注意：`resolvedVideoRatio` 在原文件中定义于 `pollKeyframeTask`/`submitKeyframeGeneration` 之前（约第 2120 行），比这里晚。由于 `keyframePromptDraft` 的 `submit` 是箭头函数在调用时才读取闭包变量，只要 `resolvedVideoRatio`/`keyframeImageQuote`/`allKeyframeReferenceOptions` 在同一组件函数体内即可，不需要严格按声明顺序前置——但为避免 TDZ（暂时性死区）报错，如果 TypeScript/构建报"used before declaration"，把 `resolvedVideoRatio` 的 `useMemo` 定义整段挪到本步骤代码之前（`keyframeReferenceOptions` 定义之后即可）。
+
+- [ ] **Step 4: 新增自动同步渲染的防抖 effect 与"重新同步"回调**
+
+紧接着 `keyframePromptDraft` 定义之后新增：
+```tsx
+  // 基础提示词或参考图顺序变化后，防抖 400ms 自动重新渲染最终提示词（对应文本类渲染较便宜、
+  // 可以更激进地自动触发）。手动点击"重新同步"按钮时走 deriveNow 立即执行，不受防抖影响。
+  //
+  // 依赖数组特意只列 state/base/context/deriveNow 这几个粒度更细的字段，不直接依赖
+  // `keyframePromptDraft` 整个对象——因为 useGenerationDraft 每次渲染都会返回一个新的
+  // 对象字面量，若把整个对象放进依赖数组，这个 effect 会在页面任何一次无关重渲染时都
+  // 重新执行并重置 400ms 计时器，导致只要页面渲染频率高于 400ms 就永远等不到真正触发。
+  // base/context 只有在 setBase/setContext 真正被调用时才会换成新引用，deriveNow 只有
+  // 在 base/context/derive 变化时才会换成新引用，这样才能让防抖真正生效。
+  useEffect(() => {
+    if (!keyframeModalOpen) return
+    if (keyframePromptDraft.state !== 'draft_changed' && keyframePromptDraft.state !== 'context_changed') return
+    const basePrompt = keyframePromptDraft.base.prompt.trim()
+    if (!basePrompt) return
+    const timer = window.setTimeout(() => {
+      void keyframePromptDraft.deriveNow()
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [
+    keyframeModalOpen,
+    keyframePromptDraft.state,
+    keyframePromptDraft.base,
+    keyframePromptDraft.context,
+    keyframePromptDraft.deriveNow,
+  ])
+```
+
+- [ ] **Step 5: 新增"AI 生成基础提示词"函数 `regenerateKeyframeBasePrompt`**
+
+在 `pollKeyframeTask` 定义之前新增（复用同样的 30 次 × 2 秒轮询节奏）：
+```tsx
+  /**
+   * AI 生成关键帧基础提示词：创建 shot-frame-prompt 异步任务并轮询，成功后：
+   * 1) 把生成结果写入 keyframePromptDraft 的基础提示词（供用户继续编辑）；
+   * 2) 持久化到 shotDetail 对应帧类型的 prompt 字段，下次打开弹窗默认带出这次结果；
+   * 3) 保存 debug_context/quality_checks 供下方 UI 展示；
+   * 4) 立即触发一次渲染，避免用户还要再等一次 400ms 防抖。
+   * requestShotId/requestFrameType 用于防止轮询期间镜头或帧类型已经切换（弹窗关闭前提交按钮/取消
+   * 按钮在 loading 期间都会被禁用，但仍保留这层校验作为兜底，与文件里其它异步流程的约定一致）。
+   */
+  const regenerateKeyframeBasePrompt = useCallback(async () => {
+    if (!shotId || !keyframeModalFrameType) return
+    if (!shotFramePromptQuote.quoteToken) {
+      message.warning('积分试算未就绪，请稍后再试')
+      return
+    }
+    const requestShotId = shotId
+    const requestFrameType = keyframeModalFrameType
+    setKeyframePromptActionLoading(true)
+    try {
+      const created = await FilmService.createShotFramePromptTaskApiV1FilmTasksShotFramePromptsPost({
+        requestBody: {
+          shot_id: requestShotId,
+          frame_type: requestFrameType,
+          quote_token: shotFramePromptQuote.quoteToken,
+        },
+      })
+      const taskId = created.data?.task_id
+      if (!taskId) {
+        message.error('生成任务创建失败：缺少任务 ID')
+        return
+      }
+      let finalStatus = 'pending'
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+        if (currentShotIdRef.current !== requestShotId) return
+        const statusRes = await FilmService.getTaskStatusApiV1FilmTasksTaskIdStatusGet({ taskId })
+        const status = statusRes.data?.status
+        if (!status) continue
+        finalStatus = status
+        if (status === 'succeeded' || status === 'failed' || status === 'cancelled') break
+      }
+      if (currentShotIdRef.current !== requestShotId) return
+      if (finalStatus !== 'succeeded') {
+        if (finalStatus !== 'failed' && finalStatus !== 'cancelled') {
+          message.warning('生成任务仍在执行，请稍后重试')
+        } else {
+          message.error('生成提示词失败')
+        }
+        return
+      }
+      const resultRes = await FilmService.getTaskResultApiV1FilmTasksTaskIdResultGet({ taskId })
+      const result = (resultRes.data?.result ?? null) as Record<string, unknown> | null
+      const generatedPrompt = typeof result?.prompt === 'string' ? result.prompt : ''
+      if (!generatedPrompt.trim()) {
+        message.warning('生成完成，但未返回提示词')
+        return
+      }
+      if (currentShotIdRef.current !== requestShotId || keyframeModalFrameType !== requestFrameType) return
+      const debugContext =
+        result?.debug_context && typeof result.debug_context === 'object'
+          ? (result.debug_context as ShotFramePromptDebugContext)
+          : null
+      const rawQualityChecks = result?.quality_checks as Record<string, unknown> | undefined
+      const qualityChecks =
+        rawQualityChecks && typeof rawQualityChecks.passed === 'boolean'
+          ? {
+              passed: Boolean(rawQualityChecks.passed),
+              issues: Array.isArray(rawQualityChecks.issues)
+                ? rawQualityChecks.issues.map((item) => String(item ?? '').trim()).filter(Boolean)
+                : [],
+            }
+          : null
+      setKeyframePromptDebugContext(debugContext)
+      setKeyframePromptQualityChecks(qualityChecks)
+      const promptField =
+        requestFrameType === 'first'
+          ? 'first_frame_prompt'
+          : requestFrameType === 'last'
+            ? 'last_frame_prompt'
+            : 'key_frame_prompt'
+      setShotDetail((prev) => (prev ? { ...prev, [promptField]: generatedPrompt } : prev))
+      void StudioShotDetailsService.updateShotDetailApiV1StudioShotDetailsShotIdPatch({
+        shotId: requestShotId,
+        requestBody: { [promptField]: generatedPrompt },
+      }).catch(() => {
+        message.warning('提示词已生成，但保存到镜头详情失败，请手动重新生成一次')
+      })
+      keyframePromptDraft.setBase({ frameType: requestFrameType, prompt: generatedPrompt })
+      await keyframePromptDraft.deriveNow({ base: { frameType: requestFrameType, prompt: generatedPrompt } })
+      message.success('提示词已生成')
+    } catch (error) {
+      const pointsAware = makePointsAwareGetErrorMessage(shotFramePromptQuote.refresh)
+      message.error(pointsAware(error, '生成提示词失败'))
+    } finally {
+      setKeyframePromptActionLoading(false)
+    }
+  }, [keyframeModalFrameType, keyframePromptDraft, shotFramePromptQuote.quoteToken, shotFramePromptQuote.refresh, shotId])
+```
+
+- [ ] **Step 6: 更新 `openKeyframeGenerateModal`，改为 hydrate `keyframePromptDraft`**
+
+找到（约第 1209-1226 行）：
+```tsx
+  const openKeyframeGenerateModal = useCallback(
+    (frameType: ShotFrameType) => {
+      setKeyframeModalFrameType(frameType)
+      const basePrompt =
+        frameType === 'first'
+          ? shotDetail?.first_frame_prompt ?? ''
+          : frameType === 'last'
+            ? shotDetail?.last_frame_prompt ?? ''
+            : shotDetail?.key_frame_prompt ?? ''
+      setKeyframeModalPrompt(basePrompt)
+      setKeyframeModalSelectedFileIds(
+        keyframeReferenceOptions.map((option) => option.file_id).filter((id): id is string => !!id),
+      )
+      setKeyframeModalExtraOptions([])
+      setKeyframeModalOpen(true)
+    },
+    [keyframeReferenceOptions, shotDetail],
+  )
+```
+替换为：
+```tsx
+  const openKeyframeGenerateModal = useCallback(
+    (frameType: ShotFrameType) => {
+      setKeyframeModalFrameType(frameType)
+      const basePrompt =
+        frameType === 'first'
+          ? shotDetail?.first_frame_prompt ?? ''
+          : frameType === 'last'
+            ? shotDetail?.last_frame_prompt ?? ''
+            : shotDetail?.key_frame_prompt ?? ''
+      const refFileIds = keyframeReferenceOptions.map((option) => option.file_id).filter((id): id is string => !!id)
+      keyframePromptDraft.hydrate({
+        base: { frameType, prompt: basePrompt },
+        context: { refFileIds },
+        state: basePrompt.trim() ? 'draft_changed' : 'idle',
+      })
+      setKeyframePromptDebugContext(null)
+      setKeyframePromptQualityChecks(null)
+      setKeyframePromptDebugCollapsed(true)
+      setKeyframeDirectiveCollapsed(true)
+      setKeyframePromptDecisionCollapsed(true)
+      setKeyframeModalExtraOptions([])
+      setKeyframeModalOpen(true)
+      if (basePrompt.trim()) {
+        void keyframePromptDraft.deriveNow({ base: { frameType, prompt: basePrompt }, context: { refFileIds } })
+      }
+    },
+    [keyframePromptDraft, keyframeReferenceOptions, shotDetail],
+  )
+```
+
+- [ ] **Step 7: 更新 `submitKeyframeGeneration`，改为读取/提交 `keyframePromptDraft`**
+
+找到（约第 2168-2227 行）整个 `submitKeyframeGeneration` 定义，替换为：
+```tsx
+  // 提交关键帧生成任务：提示词与参考图顺序都来自 keyframePromptDraft，创建成功后关闭弹窗并异步轮询任务结果。
+  const submitKeyframeGeneration = useCallback(async () => {
+    if (!shotId || !keyframeModalFrameType) return
+    if (!keyframePromptDraft.base.prompt.trim()) return
+    if (!resolvedVideoRatio) {
+      message.warning('请先设置视频比例')
+      return
+    }
+    if (!keyframeImageQuote.quoteToken) {
+      message.warning('请等待积分试算完成后再提交')
+      return
+    }
+    setKeyframeModalSubmitting(true)
+    try {
+      const submitted = await keyframePromptDraft.submitNow()
+      const taskId = submitted?.taskId ?? null
+      if (!taskId) {
+        message.error('生成任务创建失败：缺少任务 ID')
+        return
+      }
+      message.success('已提交生成任务')
+      setKeyframeModalOpen(false)
+      void pollKeyframeTask(taskId, keyframeModalFrameType, shotId)
+    } catch (error) {
+      const pointsAware = makePointsAwareGetErrorMessage(keyframeImageQuote.refresh)
+      message.error(pointsAware(error, '提交生成任务失败'))
+    } finally {
+      setKeyframeModalSubmitting(false)
+    }
+  }, [
+    keyframeImageQuote.quoteToken,
+    keyframeImageQuote.refresh,
+    keyframeModalFrameType,
+    keyframePromptDraft,
+    pollKeyframeTask,
+    resolvedVideoRatio,
+    shotId,
+  ])
+```
+
+- [ ] **Step 8: 重写 `ShotKeyframeGenerateModal.tsx`**
+
+用以下内容整体替换 `front/src/pages/aiStudio/shots/components/ShotKeyframeGenerateModal.tsx`：
+```tsx
+import { useMemo, useState } from 'react'
+import { Button, Image, Input, Modal, Space, Spin, Tag, Tooltip } from 'antd'
+import { ArrowDownOutlined, ArrowUpOutlined } from '@ant-design/icons'
+import type { FrameGuidanceDecisionRead, PointsQuoteResponse, ShotFrameType, ShotFramePromptMappingRead, ShotLinkedAssetItem } from '../../../../services/generated'
+import type { GenerationDraftState } from '../../hooks/useGenerationDraft'
+import { PointsCostButton } from '../../../../components/points/PointsCostButton'
+import { buildFileDownloadUrl } from '../../assets/utils'
+
+export type KeyframeReferenceOption = ShotLinkedAssetItem & { kind: 'scene' | 'actor' | 'prop' | 'costume' }
+
+function reorder<T>(list: T[], startIndex: number, endIndex: number): T[] {
+  const result = list.slice()
+  const [removed] = result.splice(startIndex, 1)
+  result.splice(endIndex, 0, removed)
+  return result
+}
+
+function readContextText(context: Record<string, unknown> | null, key: string): string {
+  if (!context) return ''
+  const value = context[key]
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function stripDirectiveLevelPrefix(item: string): string {
+  const text = item.trim()
+  if (text.startsWith('必须：')) return text.slice(3).trim()
+  if (text.startsWith('优先：')) return text.slice(3).trim()
+  return text
+}
+
+function parseDirectorCommandSummary(summary: string): Array<{ level: 'must' | 'prefer'; text: string }> {
+  return summary
+    .split('；')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      if (item.startsWith('必须：')) return { level: 'must' as const, text: item.slice(3).trim() }
+      if (item.startsWith('优先：')) return { level: 'prefer' as const, text: item.slice(3).trim() }
+      return { level: 'prefer' as const, text: item }
+    })
+}
+
+function buildGuidanceSummary(items: string[]): string[] {
+  const result: string[] = []
+  const seen = new Set<string>()
+  items
+    .flatMap((item) => item.split('；'))
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .forEach((item) => {
+      if (seen.has(item)) return
+      seen.add(item)
+      result.push(item)
+    })
+  return result
+}
+
+function buildGuidanceLevelSummary(
+  parsedDirectorCommands: Array<{ level: 'must' | 'prefer'; text: string }>,
+  guidanceSummary: string[],
+): { must: number; prefer: number; normal: number } {
+  const must = parsedDirectorCommands.filter((item) => item.level === 'must').length
+  const prefer = parsedDirectorCommands.filter((item) => item.level === 'prefer').length
+  const parsedTexts = new Set(parsedDirectorCommands.map((item) => item.text.trim()).filter(Boolean))
+  const normal = guidanceSummary
+    .map((item) => stripDirectiveLevelPrefix(item))
+    .filter((item) => item && !parsedTexts.has(item)).length
+  return { must, prefer, normal }
+}
+
+function buildActionBeatPhaseTags(summary: string): Array<{ text: string; phaseLabel: string }> {
+  return summary
+    .split('；')
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => {
+      const matched = item.match(/^\d+\.\s*(触发|峰值|收束)\s*·\s*(.+)$/)
+      if (!matched) return { phaseLabel: '阶段', text: item }
+      return { phaseLabel: matched[1], text: matched[2].trim() }
+    })
+}
+
+function mapDraftStateToRenderState(state: GenerationDraftState): 'idle' | 'stale' | 'syncing' | 'clean' | 'error' {
+  if (state === 'derived' || state === 'submitted') return 'clean'
+  if (state === 'deriving' || state === 'submitting') return 'syncing'
+  if (state === 'draft_changed' || state === 'context_changed') return 'stale'
+  if (state === 'error') return 'error'
+  return 'idle'
+}
+
+function getRenderStatusMeta(state: GenerationDraftState) {
+  const renderState = mapDraftStateToRenderState(state)
+  if (renderState === 'clean') {
+    return { color: 'green' as const, label: '已同步', description: '当前最终提示词已与基础提示词和参考图顺序保持一致。' }
+  }
+  if (renderState === 'syncing') {
+    return { color: 'blue' as const, label: '同步中', description: '正在根据当前基础提示词和参考图顺序更新最终提示词…' }
+  }
+  if (renderState === 'error') {
+    return { color: 'red' as const, label: '同步失败', description: '自动更新失败，请点击"重新同步"重试。' }
+  }
+  if (renderState === 'idle') {
+    return { color: 'default' as const, label: '待生成', description: '请先输入基础提示词，系统会自动生成最终提示词。' }
+  }
+  return { color: 'gold' as const, label: '待同步', description: '基础提示词或参考图顺序已变化，最终提示词正在等待更新。' }
+}
+
+const KIND_LABEL: Record<KeyframeReferenceOption['kind'], string> = { scene: '场景', actor: '角色', prop: '道具', costume: '服装' }
+
+type ShotKeyframeGenerateModalProps = {
+  open: boolean
+  frameType: ShotFrameType | null
+  frameLabel: string
+  loading: boolean
+  submitting: boolean
+  prompt: string
+  onPromptChange: (value: string) => void
+  imageQuote: PointsQuoteResponse | null
+  imageQuoteLoading: boolean
+  imageQuoteError: string | null
+  referenceOptions: KeyframeReferenceOption[]
+  onAddReferenceFromLibrary: (kind: KeyframeReferenceOption['kind']) => void
+  onReplaceReferenceFromLibrary: (fileId: string) => void
+  selectedFileIds: string[]
+  onChangeSelectedFileIds: (fileIds: string[]) => void
+  onClose: () => void
+  onSubmit: () => void
+  // AI 生成基础提示词
+  basePromptQuote: PointsQuoteResponse | null
+  basePromptQuoteLoading: boolean
+  basePromptQuoteError: string | null
+  aiGenerating: boolean
+  onRegenerateBasePrompt: () => void
+  // 最终提示词渲染
+  renderState: GenerationDraftState
+  renderedPrompt: string
+  onResync: () => void
+  mappings: ShotFramePromptMappingRead[]
+  selectedGuidance: string[]
+  droppedGuidance: string[]
+  selectedGuidanceDetails: FrameGuidanceDecisionRead[]
+  droppedGuidanceDetails: FrameGuidanceDecisionRead[]
+  debugContext: Record<string, unknown> | null
+  qualityChecks: { passed: boolean; issues: string[] } | null
+}
+
+/**
+ * 关键帧生成弹窗：移植自分镜工作室"首帧/关键帧/尾帧图片生成提示词预览"弹窗的完整能力
+ * （参考图有序展示、AI 生成基础提示词、质量校验、guidance 摘要、最终提示词渲染），
+ * 并在此基础上新增分镜工作室原版没有的能力——参考图可自由从项目资产库新增/替换，
+ * 且仅作为本次生成的临时参考图，不写入镜头资产关联关系。
+ */
+export function ShotKeyframeGenerateModal({
+  open,
+  frameType: _frameType,
+  frameLabel,
+  loading,
+  submitting,
+  prompt,
+  onPromptChange,
+  imageQuote,
+  imageQuoteLoading,
+  imageQuoteError,
+  referenceOptions,
+  onAddReferenceFromLibrary,
+  onReplaceReferenceFromLibrary,
+  selectedFileIds,
+  onChangeSelectedFileIds,
+  onClose,
+  onSubmit,
+  basePromptQuote,
+  basePromptQuoteLoading,
+  basePromptQuoteError,
+  aiGenerating,
+  onRegenerateBasePrompt,
+  renderState,
+  renderedPrompt,
+  onResync,
+  mappings,
+  selectedGuidance,
+  droppedGuidance,
+  selectedGuidanceDetails,
+  droppedGuidanceDetails,
+  debugContext,
+  qualityChecks,
+}: ShotKeyframeGenerateModalProps) {
+  const [debugCollapsed, setDebugCollapsed] = useState(true)
+  const [directiveCollapsed, setDirectiveCollapsed] = useState(true)
+  const [decisionCollapsed, setDecisionCollapsed] = useState(true)
+
+  const nameByFileId = useMemo(() => {
+    const map = new Map<string, string>()
+    referenceOptions.forEach((option) => {
+      if (option.file_id) map.set(option.file_id, option.name)
+    })
+    return map
+  }, [referenceOptions])
+
+  const moveFileId = (index: number, direction: -1 | 1) => {
+    const target = index + direction
+    if (target < 0 || target >= selectedFileIds.length) return
+    onChangeSelectedFileIds(reorder(selectedFileIds, index, target))
+  }
+
+  const removeFileId = (fileId: string) => {
+    onChangeSelectedFileIds(selectedFileIds.filter((id) => id !== fileId))
+  }
+
+  const hasBasePrompt = prompt.trim().length > 0
+  const renderStatusMeta = getRenderStatusMeta(renderState)
+  const debugVisualStyle = readContextText(debugContext, 'visual_style')
+  const debugStyle = readContextText(debugContext, 'style')
+  const debugShotDescription = readContextText(debugContext, 'shot_description')
+  const debugDialogSummary = readContextText(debugContext, 'dialog_summary')
+  const debugPreviousShotTitle = readContextText(debugContext, 'previous_shot_title')
+  const debugPreviousShotEndState = readContextText(debugContext, 'previous_shot_end_state')
+  const debugNextShotTitle = readContextText(debugContext, 'next_shot_title')
+  const debugNextShotStartGoal = readContextText(debugContext, 'next_shot_start_goal')
+  const debugContinuityGuidance = readContextText(debugContext, 'continuity_guidance')
+  const debugCompositionAnchor = readContextText(debugContext, 'composition_anchor')
+  const debugScreenDirectionGuidance = readContextText(debugContext, 'screen_direction_guidance')
+  const debugFrameSpecificGuidance = readContextText(debugContext, 'frame_specific_guidance')
+  const debugDirectorCommandSummary = readContextText(debugContext, 'director_command_summary')
+  const debugActionBeatPhases = readContextText(debugContext, 'action_beat_phases')
+  const actionBeatPhaseTags = buildActionBeatPhaseTags(debugActionBeatPhases)
+  const parsedDirectorCommandSummary = parseDirectorCommandSummary(debugDirectorCommandSummary)
+  const guidanceSummary = buildGuidanceSummary([
+    debugDirectorCommandSummary,
+    debugFrameSpecificGuidance,
+    debugContinuityGuidance,
+    debugCompositionAnchor,
+    debugScreenDirectionGuidance,
+  ])
+  const guidanceLevelSummary = buildGuidanceLevelSummary(parsedDirectorCommandSummary, guidanceSummary)
+  const hasDebugContext = Boolean(
+    debugVisualStyle || debugStyle || debugShotDescription || debugDialogSummary ||
+    debugPreviousShotTitle || debugPreviousShotEndState || debugNextShotTitle || debugNextShotStartGoal ||
+    debugContinuityGuidance || debugCompositionAnchor || debugScreenDirectionGuidance || debugFrameSpecificGuidance ||
+    debugDirectorCommandSummary || debugActionBeatPhases,
+  )
+  const hasQualityChecks = qualityChecks !== null
+  const visibleSelectedGuidanceDetails = decisionCollapsed ? selectedGuidanceDetails.slice(0, 2) : selectedGuidanceDetails
+  const visibleDroppedGuidanceDetails = decisionCollapsed ? droppedGuidanceDetails.slice(0, 1) : droppedGuidanceDetails
+
+  return (
+    <Modal
+      title={`生成${frameLabel}`}
+      open={open}
+      onCancel={() => {
+        if (aiGenerating) return
+        onClose()
+      }}
+      footer={(
+        <Space>
+          <Button disabled={aiGenerating} onClick={onClose}>取消</Button>
+          <PointsCostButton
+            type="primary"
+            loading={submitting}
+            disabled={!hasBasePrompt}
+            quote={imageQuote}
+            quoteLoading={imageQuoteLoading}
+            quoteError={imageQuoteError}
+            onClick={onSubmit}
+          >
+            生成
+          </PointsCostButton>
+        </Space>
+      )}
+      width={900}
+      destroyOnClose
+    >
+      {loading ? (
+        <div className="py-10 text-center"><Spin /></div>
+      ) : (
+        <div className="space-y-4">
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium text-slate-900">参考图</div>
+                <div className="mt-1 text-xs text-slate-500">图片顺序决定最终提示词里的图1/图2映射，可拖拽替代的上下移动调整；也可从项目资产库新增或替换。</div>
+              </div>
+              <Tag color="gold">顺序影响图1/图2</Tag>
+            </div>
+            <div className="mb-3 flex flex-wrap gap-2">
+              {(['scene', 'actor', 'prop', 'costume'] as const).map((kind) => (
+                <Button key={kind} size="small" onClick={() => onAddReferenceFromLibrary(kind)}>
+                  {`+ ${KIND_LABEL[kind]}`}
+                </Button>
+              ))}
+            </div>
+            {selectedFileIds.length === 0 ? (
+              <div className="text-xs text-gray-400">暂无参考图，可点击上方按钮从资产库新增</div>
+            ) : (
+              <div className="flex gap-3 overflow-x-auto pb-1">
+                <Image.PreviewGroup>
+                  {selectedFileIds.map((fid, index) => (
+                    <div key={fid} className="w-[104px] shrink-0">
+                      <Tooltip title={nameByFileId.get(fid) ?? fid}>
+                        <Image width={80} height={80} style={{ objectFit: 'cover', borderRadius: 8, border: '1px solid #e2e8f0' }} src={buildFileDownloadUrl(fid)} />
+                      </Tooltip>
+                      <div className="mt-1"><Tag color="blue">{`图${index + 1}`}</Tag></div>
+                      <div className="truncate text-[11px] text-gray-700">{nameByFileId.get(fid) ?? fid}</div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        <Button size="small" disabled={index === 0} onClick={() => moveFileId(index, -1)} icon={<ArrowUpOutlined />} />
+                        <Button size="small" disabled={index === selectedFileIds.length - 1} onClick={() => moveFileId(index, 1)} icon={<ArrowDownOutlined />} />
+                        <Button size="small" onClick={() => onReplaceReferenceFromLibrary(fid)}>替换</Button>
+                        <Button size="small" danger onClick={() => removeFileId(fid)}>移除</Button>
+                      </div>
+                    </div>
+                  ))}
+                </Image.PreviewGroup>
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-white p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium text-slate-900">基础提示词</div>
+                <div className="mt-1 text-xs text-slate-500">描述画面内容本身，不含图片映射说明；AI 生成会继承项目风格并参考已确认的角色/场景/道具/服装设定。</div>
+              </div>
+              <Space size="small">
+                <Tag color={hasBasePrompt ? 'blue' : 'default'}>{hasBasePrompt ? '可编辑' : '未生成'}</Tag>
+                <PointsCostButton
+                  size="small"
+                  type={hasBasePrompt ? 'default' : 'primary'}
+                  loading={aiGenerating}
+                  quote={basePromptQuote}
+                  quoteLoading={basePromptQuoteLoading}
+                  quoteError={basePromptQuoteError}
+                  onClick={onRegenerateBasePrompt}
+                >
+                  AI生成
+                </PointsCostButton>
+              </Space>
+            </div>
+            {!hasBasePrompt ? (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                当前还没有基础提示词。你可以先让 AI 生成一版，再按需修改；也可以直接手动输入。
+              </div>
+            ) : null}
+            {hasQualityChecks ? (
+              <div className={`mb-3 rounded-lg border px-3 py-2 text-xs ${qualityChecks?.passed ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700'}`}>
+                <Tag color={qualityChecks?.passed ? 'green' : 'gold'}>{qualityChecks?.passed ? '质量校验通过' : '已触发自动修正'}</Tag>
+                <span className="ml-2">{qualityChecks?.passed ? '本次 AI 生成已通过基础质量校验。' : '本次 AI 生成触发过自动修正，系统已尽量清理不符合基础提示词要求的内容。'}</span>
+              </div>
+            ) : null}
+            <Input.TextArea
+              rows={5}
+              value={prompt}
+              onChange={(e) => onPromptChange(e.target.value)}
+              placeholder="请输入基础提示词，例如人物动作、场景氛围、镜头视角等…"
+              disabled={aiGenerating}
+            />
+            {guidanceSummary.length > 0 || debugDirectorCommandSummary ? (
+              <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50 px-3 py-3 text-xs text-sky-800">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="font-medium">基础提示词生成依据</div>
+                  <Button size="small" type="text" onClick={() => setDirectiveCollapsed((prev) => !prev)}>
+                    {directiveCollapsed ? '展开细节' : '收起细节'}
+                  </Button>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Tag color="red">{`必须 ${guidanceLevelSummary.must}`}</Tag>
+                  <Tag color="blue">{`优先 ${guidanceLevelSummary.prefer}`}</Tag>
+                  <Tag>{`普通 ${guidanceLevelSummary.normal}`}</Tag>
+                  {actionBeatPhaseTags.length > 0 ? <Tag color="purple">{`动作阶段 ${actionBeatPhaseTags.length}`}</Tag> : null}
+                </div>
+                {!directiveCollapsed ? (
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    {debugDirectorCommandSummary ? (
+                      <div className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-3 text-xs text-indigo-800">
+                        <div className="font-medium">高优先级导演指令</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {parsedDirectorCommandSummary.map((item, index) => (
+                            <Tag key={`${item.level}:${index}`} color={item.level === 'must' ? 'red' : 'blue'}>
+                              {item.level === 'must' ? '必须' : '优先'} · {item.text}
+                            </Tag>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    {actionBeatPhaseTags.length > 0 ? (
+                      <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs text-slate-700">
+                        <div className="font-medium text-slate-800">动作节拍阶段</div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {actionBeatPhaseTags.map((item, index) => (
+                            <Tag key={`${item.phaseLabel}:${index}`} color={item.phaseLabel === '触发' ? 'gold' : item.phaseLabel === '峰值' ? 'blue' : 'green'}>
+                              {item.phaseLabel} · {item.text}
+                            </Tag>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+            {hasDebugContext ? (
+              <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-medium text-slate-700">最近一次 AI 生成上下文</div>
+                  <Button size="small" type="text" onClick={() => setDebugCollapsed((prev) => !prev)}>
+                    {debugCollapsed ? '展开细节' : '收起细节'}
+                  </Button>
+                </div>
+                {!debugCollapsed ? (
+                  <div className="mt-2 grid gap-2 md:grid-cols-2">
+                    {[debugVisualStyle, debugStyle].filter(Boolean).length > 0 ? (
+                      <div><div className="text-slate-500">项目风格</div><div className="mt-1 text-slate-700">{[debugVisualStyle, debugStyle].filter(Boolean).join(' / ')}</div></div>
+                    ) : null}
+                    {debugShotDescription ? <div className="md:col-span-2"><div className="text-slate-500">镜头补充描述</div><div className="mt-1 whitespace-pre-wrap text-slate-700">{debugShotDescription}</div></div> : null}
+                    {debugDialogSummary ? <div className="md:col-span-2"><div className="text-slate-500">对白摘要</div><div className="mt-1 whitespace-pre-wrap text-slate-700">{debugDialogSummary}</div></div> : null}
+                    {debugPreviousShotTitle || debugPreviousShotEndState ? (
+                      <div className="md:col-span-2 rounded-lg border border-slate-200 bg-white px-3 py-3">
+                        <div className="text-slate-500">上一镜头承接</div>
+                        <div className="mt-1 space-y-1 text-slate-700">
+                          {debugPreviousShotTitle ? <div>标题：{debugPreviousShotTitle}</div> : null}
+                          {debugPreviousShotEndState ? <div className="whitespace-pre-wrap">结尾状态：{debugPreviousShotEndState}</div> : null}
+                        </div>
+                      </div>
+                    ) : null}
+                    {debugNextShotTitle || debugNextShotStartGoal ? (
+                      <div className="md:col-span-2 rounded-lg border border-slate-200 bg-white px-3 py-3">
+                        <div className="text-slate-500">下一镜头衔接</div>
+                        <div className="mt-1 space-y-1 text-slate-700">
+                          {debugNextShotTitle ? <div>标题：{debugNextShotTitle}</div> : null}
+                          {debugNextShotStartGoal ? <div className="whitespace-pre-wrap">起始目标：{debugNextShotStartGoal}</div> : null}
+                        </div>
+                      </div>
+                    ) : null}
+                    {debugContinuityGuidance ? <div className="md:col-span-2"><div className="text-slate-500">连续性建议</div><div className="mt-1 whitespace-pre-wrap text-slate-700">{debugContinuityGuidance}</div></div> : null}
+                    {debugCompositionAnchor ? <div className="md:col-span-2"><div className="text-slate-500">构图与空间锚点</div><div className="mt-1 whitespace-pre-wrap text-slate-700">{debugCompositionAnchor}</div></div> : null}
+                    {debugScreenDirectionGuidance ? <div className="md:col-span-2"><div className="text-slate-500">朝向与视线建议</div><div className="mt-1 whitespace-pre-wrap text-slate-700">{debugScreenDirectionGuidance}</div></div> : null}
+                    {debugFrameSpecificGuidance ? <div className="md:col-span-2"><div className="text-slate-500">当前帧专项建议</div><div className="mt-1 whitespace-pre-wrap text-slate-700">{debugFrameSpecificGuidance}</div></div> : null}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <div className="text-sm font-medium text-slate-900">最终生成提示词</div>
+                <div className="mt-1 text-xs text-slate-500">系统根据当前基础提示词和参考图顺序自动生成，提交生成时使用这里的结果。</div>
+              </div>
+              <Space size="small">
+                <Tag>只读</Tag>
+                <Button size="small" onClick={onResync} disabled={!hasBasePrompt}>重新同步</Button>
+                <Button
+                  size="small"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(renderedPrompt || '')
+                    } catch {
+                      // ignore clipboard failure，不阻塞主流程
+                    }
+                  }}
+                  disabled={!renderedPrompt.trim()}
+                >
+                  复制
+                </Button>
+              </Space>
+            </div>
+            <div className={`mb-3 rounded-lg border px-3 py-2 text-sm ${
+              renderStatusMeta.color === 'green' ? 'border-green-200 bg-green-50 text-green-700'
+                : renderStatusMeta.color === 'blue' ? 'border-blue-200 bg-blue-50 text-blue-700'
+                : renderStatusMeta.color === 'red' ? 'border-red-200 bg-red-50 text-red-700'
+                : renderStatusMeta.color === 'gold' ? 'border-amber-200 bg-amber-50 text-amber-700'
+                : 'border-slate-200 bg-white text-slate-600'
+            }`}>
+              <Tag color={renderStatusMeta.color}>{renderStatusMeta.label}</Tag>
+              <span className="ml-2">{renderStatusMeta.description}</span>
+            </div>
+            {mappings.length > 0 ? (
+              <div className="mb-2 flex flex-wrap gap-2">
+                {mappings.map((mapping) => (
+                  <Tag key={`${mapping.token}:${mapping.file_id}`}>{`${mapping.token} = ${mapping.name}`}</Tag>
+                ))}
+              </div>
+            ) : null}
+            {selectedGuidance.length > 0 || droppedGuidance.length > 0 ? (
+              <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-xs text-slate-700">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-medium text-slate-900">最终提示词收敛结果</div>
+                  <Space size="small">
+                    <Tag color="green">{`保留 ${selectedGuidance.length}`}</Tag>
+                    <Tag color="gold">{`压缩 ${droppedGuidance.length}`}</Tag>
+                    <Button size="small" type="text" onClick={() => setDecisionCollapsed((prev) => !prev)}>
+                      {decisionCollapsed ? '查看取舍' : '收起取舍'}
+                    </Button>
+                  </Space>
+                </div>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-3 text-xs text-emerald-800">
+                    <div className="font-medium">实际保留</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {visibleSelectedGuidanceDetails.map((item) => (
+                        <Tooltip key={`selected:${item.text}`} title={item.reason}>
+                          <Tag color="green">{item.text}</Tag>
+                        </Tooltip>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
+                    <div className="font-medium">已压缩</div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {visibleDroppedGuidanceDetails.map((item) => (
+                        <Tooltip key={`dropped:${item.text}`} title={item.reason}>
+                          <Tag>{item.text}</Tag>
+                        </Tooltip>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+    </Modal>
+  )
+}
+```
+
+`PointsCostButton` 要求 `quote`/`quoteLoading`/`quoteError` 传入真实的报价状态（组件内部会用 `!quote` 参与禁用判断、自己渲染积分数字角标），不要把积分数字拼进按钮文案里传——这与文件里已有的 `videoQuote`/`PointsCostButton` 用法（约第 3708-3717 行）保持一致。
+
+- [ ] **Step 9: 更新 `ChapterShotEditPage.tsx` 里 `<ShotKeyframeGenerateModal>` 的渲染 props**
+
+找到（约第 3846-3868 行）现有的 `<ShotKeyframeGenerateModal ... />`，整体替换为：
+```tsx
+      <ShotKeyframeGenerateModal
+        open={keyframeModalOpen}
+        frameType={keyframeModalFrameType}
+        frameLabel={keyframeModalFrameType === 'first' ? '首帧' : keyframeModalFrameType === 'last' ? '尾帧' : '关键帧'}
+        loading={false}
+        submitting={keyframeModalSubmitting}
+        prompt={keyframePromptDraft.base.prompt}
+        onPromptChange={(value) => keyframePromptDraft.setBase((prev) => ({ ...prev, prompt: value }))}
+        imageQuote={keyframeImageQuote.quote}
+        imageQuoteLoading={keyframeImageQuote.loading}
+        imageQuoteError={keyframeImageQuote.error}
+        referenceOptions={allKeyframeReferenceOptions}
+        onAddReferenceFromLibrary={openAssetPickerForKeyframe}
+        onReplaceReferenceFromLibrary={openAssetPickerToReplaceKeyframe}
+        selectedFileIds={keyframePromptDraft.context.refFileIds}
+        onChangeSelectedFileIds={(fileIds) => keyframePromptDraft.setContext({ refFileIds: fileIds })}
+        onClose={() => setKeyframeModalOpen(false)}
+        onSubmit={() => void submitKeyframeGeneration()}
+        basePromptQuote={shotFramePromptQuote.quote}
+        basePromptQuoteLoading={shotFramePromptQuote.loading}
+        basePromptQuoteError={shotFramePromptQuote.error}
+        aiGenerating={keyframePromptActionLoading}
+        onRegenerateBasePrompt={() => void regenerateKeyframeBasePrompt()}
+        renderState={keyframePromptDraft.state}
+        renderedPrompt={keyframePromptDraft.derived?.renderedPrompt ?? ''}
+        onResync={() => void keyframePromptDraft.deriveNow()}
+        mappings={keyframePromptDraft.derived?.mappings ?? []}
+        selectedGuidance={keyframePromptDraft.derived?.selectedGuidance ?? []}
+        droppedGuidance={keyframePromptDraft.derived?.droppedGuidance ?? []}
+        selectedGuidanceDetails={keyframePromptDraft.derived?.selectedGuidanceDetails ?? []}
+        droppedGuidanceDetails={keyframePromptDraft.derived?.droppedGuidanceDetails ?? []}
+        debugContext={keyframePromptDebugContext}
+        qualityChecks={keyframePromptQualityChecks}
+      />
+```
+
+- [ ] **Step 10: 类型检查**
+
+Run: `cd front && pnpm exec tsc --noEmit`
+Expected: 无类型错误。
+
+- [ ] **Step 11: 手动验证**
+
+1. 打开一个已关联场景/角色资产的镜头，进入"生成视频"步骤，点击某个帧类型卡片的"生成"按钮。
+2. 确认弹窗顶部"参考图"区域按顺序展示已关联资产缩略图，带"图1/图2"标签；点击"替换"能打开资产库抽屉选新图片并原地替换；点击"+ 场景"等按钮能新增一张临时参考图；点击"移除"能去掉某张参考图；关闭弹窗重新打开后，临时新增的参考图不应保留（因为只是本次生成的临时选择）。
+3. 点击"AI生成"按钮，确认能看到积分消耗文案、生成中 loading，几秒后基础提示词文本框被自动填入内容，且下方出现"质量校验"和"基础提示词生成依据"信息块。
+4. 编辑基础提示词文本，等待约 0.5 秒，确认"最终生成提示词"区域状态从"待同步"变为"同步中"再变为"已同步"，且展示了参考图 token 映射。
+5. 点击"生成"提交，确认弹窗关闭、任务开始轮询，成功后关键帧卡片出现新候选图。
+6. 重新打开镜头详情页同一个镜头的同一个帧类型弹窗，确认基础提示词已经是上次 AI 生成的内容（验证已持久化到 `shotDetail`）。
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add front/src/pages/aiStudio/shots/ChapterShotEditPage.tsx front/src/pages/aiStudio/shots/components/ShotKeyframeGenerateModal.tsx docs/superpowers/plans/2026-07-04-shot-detail-step2-keyframe-ux.md
+git commit -m "feat: 关键帧生成弹窗接入分镜工作室 AI 生成提示词全套能力"
+```
+
+---
+
 ## 全部任务完成后的收尾检查
 
 - [ ] 再次运行 `cd front && pnpm exec tsc --noEmit`，确认全部改动累计无类型错误
