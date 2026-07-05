@@ -401,15 +401,15 @@ async def render_character_image_prompt(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[RenderedPromptResponse]:
-    base = await _build_character_image_base_draft_service(
+    """预览必须复用与提交生成相同的 submission 构建逻辑，原因同 render_actor_image_prompt。"""
+    submission = await _build_character_image_submission_payload_service(
         db,
-        user_id=current_user.id,
         character_id=character_id,
         image_id=body.image_id,
+        prompt=body.prompt or "",
+        images=body.images,
     )
-    context = _build_asset_image_context_service(base=base)
-    derived = _derive_asset_image_preview_service(base=base, context=context)
-    return success_response(RenderedPromptResponse(prompt=derived.prompt, images=derived.images))
+    return success_response(RenderedPromptResponse(prompt=submission.prompt, images=submission.images))
 
 
 @router.post(
