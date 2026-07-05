@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Badge, Button, Card, Checkbox, Divider, Dropdown, Empty, Form, Image, Input, Layout, List, Modal, Popconfirm, Segmented, Spin, Tabs, Tag, Tooltip, Typography, message } from 'antd'
 import type { MenuProps } from 'antd'
-import { ArrowLeftOutlined, CloseCircleOutlined, DeleteOutlined, DownloadOutlined, MoreOutlined, PlusOutlined, ReloadOutlined, StopOutlined, ThunderboltOutlined, ToolOutlined, UndoOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, ClockCircleOutlined, CloseCircleOutlined, DeleteOutlined, DownloadOutlined, MoreOutlined, PlayCircleOutlined, PlusOutlined, ReloadOutlined, StopOutlined, ThunderboltOutlined, ToolOutlined, UndoOutlined } from '@ant-design/icons'
 import type {
   EntityNameExistenceItem,
+  FrameGuidanceDecisionRead,
   ModelRead,
   ProviderRead,
   ShotAssetOverviewItem,
@@ -14,6 +15,7 @@ import type {
   ShotExtractionSummaryRead,
   ShotExtractedDialogueCandidateRead,
   ShotFrameImageRead,
+  ShotFramePromptMappingRead,
   ShotFrameType,
   ShotLinkedAssetItem,
   ShotPreparationStateRead,
@@ -58,6 +60,7 @@ import { useTaskPageContext } from '../components/taskPageContext'
 import { createTaskSettledReloader } from '../components/taskResultHelpers'
 import { TASK_COPY } from '../components/taskCopy'
 import { usePointsQuote } from '../../../hooks/usePointsQuote'
+import { useGenerationDraft } from '../hooks/useGenerationDraft'
 import { PointsCostButton } from '../../../components/points/PointsCostButton'
 import { makePointsAwareGetErrorMessage } from '../../../components/points/pointsTaskError'
 import { ExtractionConfirmModal } from './components/ExtractionConfirmModal'
@@ -96,6 +99,26 @@ type AssetVM = NamedDraft & {
 }
 type ShotListFilter = 'all' | 'not_extracted' | 'pending'
 type VideoRatio = NonNullable<VideoPromptPreviewRequest['ratio']>
+
+// 关键帧"AI 生成基础提示词"任务结果里附带的调试上下文（项目风格/连续性/动作节拍等），
+// 结构由后端 task result 的 debug_context 字段决定，前端仅展示不做强类型校验。
+type ShotFramePromptDebugContext = Record<string, unknown>
+
+// 关键帧"AI 生成基础提示词"任务结果里附带的质量校验结果：是否通过、触发了哪些问题。
+type ShotFramePromptQualityChecks = { passed: boolean; issues: string[] } | null
+
+// 关键帧提示词渲染（render-prompt 接口）产出的派生结果：基础提示词回显、最终提示词、
+// guidance 取舍明细与 token 映射，供 useGenerationDraft 的 derived 使用。
+type FramePromptDerived = {
+  basePrompt: string
+  renderedPrompt: string
+  selectedGuidance: string[]
+  droppedGuidance: string[]
+  selectedGuidanceDetails: FrameGuidanceDecisionRead[]
+  droppedGuidanceDetails: FrameGuidanceDecisionRead[]
+  images: string[]
+  mappings: ShotFramePromptMappingRead[]
+}
 
 type ShotAssetCreatedAndLinkedMessage = {
   type: 'studio-shot-asset-created-and-linked'
@@ -277,7 +300,6 @@ export function ChapterShotEditPage() {
   const [scriptExcerpt, setScriptExcerpt] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [semanticSaving, setSemanticSaving] = useState(false)
   const [preparationState, setPreparationState] = useState<ShotPreparationStateRead | null>(null)
   const [shotDetail, setShotDetail] = useState<ShotDetailRead | null>(null)
   const [shotAssetsOverview, setShotAssetsOverview] = useState<ShotAssetsOverviewRead | null>(null)
@@ -376,12 +398,14 @@ export function ChapterShotEditPage() {
     key: [],
   })
   const [keyframeApplyingFileId, setKeyframeApplyingFileId] = useState<string | null>(null)
-  // 关键帧生成弹窗状态：打开的帧类型、编辑中的提示词、已选参考图 file_id 顺序列表、提交中标记。
+  // 关键帧生成弹窗状态：打开的帧类型、提交中标记。提示词与参考图顺序改由 keyframePromptDraft 承载。
   const [keyframeModalOpen, setKeyframeModalOpen] = useState(false)
   const [keyframeModalFrameType, setKeyframeModalFrameType] = useState<ShotFrameType | null>(null)
-  const [keyframeModalPrompt, setKeyframeModalPrompt] = useState('')
-  const [keyframeModalSelectedFileIds, setKeyframeModalSelectedFileIds] = useState<string[]>([])
   const [keyframeModalSubmitting, setKeyframeModalSubmitting] = useState(false)
+  // AI 生成基础提示词的结果附带信息：质量校验、调试上下文（项目风格/连续性/动作节拍等），仅用于展示。
+  const [keyframePromptDebugContext, setKeyframePromptDebugContext] = useState<ShotFramePromptDebugContext | null>(null)
+  const [keyframePromptQualityChecks, setKeyframePromptQualityChecks] = useState<ShotFramePromptQualityChecks>(null)
+  const [keyframePromptActionLoading, setKeyframePromptActionLoading] = useState(false)
   // 关键帧生成弹窗里从项目资产库临时挑选的参考图（不写入镜头资产关联关系，仅本次生成使用）。
   const [keyframeModalExtraOptions, setKeyframeModalExtraOptions] = useState<KeyframeReferenceOption[]>([])
   const [assetPickerOpen, setAssetPickerOpen] = useState(false)
@@ -395,6 +419,13 @@ export function ChapterShotEditPage() {
     category: 'image',
     modelId: null,
     resolutionProfile: 'standard',
+    enabled: keyframeModalOpen,
+  })
+  // 关键帧"AI 生成基础提示词"走文本 LLM，属文本类计费业务，与图片生成的 keyframeImageQuote 分开试算。
+  const shotFramePromptQuote = usePointsQuote({
+    businessType: 'shot_frame_prompt',
+    category: 'text',
+    modelId: null,
     enabled: keyframeModalOpen,
   })
   const [videoModels, setVideoModels] = useState<VideoModelOption[]>([])
@@ -540,6 +571,130 @@ export function ChapterShotEditPage() {
     })
     return options
   }, [unionAssets])
+
+  // 关键帧参考图的完整候选集合：第 2 步已关联资产 + 本次弹窗里从资产库临时新增的资产。
+  // deriveKeyframePromptPreview/submit 都要在这个合并集合里按 file_id 反查资产信息，
+  // 否则用户临时新增的参考图会在渲染/提交时被当成"未知资产"处理。
+  const allKeyframeReferenceOptions = useMemo<KeyframeReferenceOption[]>(
+    () => [...keyframeReferenceOptions, ...keyframeModalExtraOptions],
+    [keyframeReferenceOptions, keyframeModalExtraOptions],
+  )
+
+  // 把基础提示词 + 有序参考图渲染为最终提示词：调用 render-prompt 接口拿到 token 映射与
+  // guidance 取舍结果。这一步不消耗积分（只读渲染），真正计费点在"AI 生成基础提示词"与
+  // "提交关键帧图片生成"两处。
+  const deriveKeyframePromptPreview = useCallback(
+    async ({
+      base,
+      context,
+    }: {
+      base: { frameType: ShotFrameType; prompt: string }
+      context: { refFileIds: string[] }
+    }): Promise<FramePromptDerived> => {
+      if (!shotId) throw new Error('shot is required')
+      const basePrompt = (base.prompt || '').trim()
+      const refFileIds = (context.refFileIds || []).filter(Boolean)
+      if (!basePrompt) {
+        return {
+          basePrompt: '',
+          renderedPrompt: '',
+          selectedGuidance: [],
+          droppedGuidance: [],
+          selectedGuidanceDetails: [],
+          droppedGuidanceDetails: [],
+          images: [],
+          mappings: [],
+        }
+      }
+      const imagesPayload: ShotLinkedAssetItem[] = refFileIds
+        .map((fid) => allKeyframeReferenceOptions.find((option) => option.file_id === fid))
+        .filter((option): option is KeyframeReferenceOption => !!option)
+        .map((option) => ({ type: option.type, id: option.id, name: option.name, file_id: option.file_id }))
+
+      const rendered = await StudioImageTasksService.renderShotFramePromptApiV1StudioImageTasksShotShotIdFrameRenderPromptPost({
+        shotId,
+        requestBody: {
+          frame_type: base.frameType,
+          prompt: basePrompt,
+          images: imagesPayload,
+        },
+      })
+      const d = rendered.data
+      return {
+        basePrompt: d?.base_prompt ?? basePrompt,
+        renderedPrompt: d?.rendered_prompt ?? '',
+        selectedGuidance: d?.selected_guidance ?? [],
+        droppedGuidance: d?.dropped_guidance ?? [],
+        selectedGuidanceDetails: d?.selected_guidance_details ?? [],
+        droppedGuidanceDetails: d?.dropped_guidance_details ?? [],
+        images: d?.images ?? [],
+        mappings: d?.mappings ?? [],
+      }
+    },
+    [allKeyframeReferenceOptions, shotId],
+  )
+
+  // 关键帧提示词草稿：base=帧类型+基础提示词，context=有序参考图 file_id 列表，
+  // derived=渲染后的最终提示词与 guidance 取舍。submit 直接创建关键帧图片生成任务。
+  const keyframePromptDraft = useGenerationDraft<
+    { frameType: ShotFrameType; prompt: string },
+    { refFileIds: string[] },
+    FramePromptDerived,
+    { taskId: string | null }
+  >({
+    initialBase: { frameType: 'key', prompt: '' },
+    initialContext: { refFileIds: [] },
+    derive: deriveKeyframePromptPreview,
+    submit: async ({ base, context }) => {
+      if (!shotId) throw new Error('shot is required')
+      const ratio = resolvedVideoRatio
+      if (!ratio) throw new Error('video ratio is required')
+      if (!keyframeImageQuote.quoteToken) throw new Error('quote token is required')
+      const images: ShotLinkedAssetItem[] = context.refFileIds
+        .map((fid) => allKeyframeReferenceOptions.find((option) => option.file_id === fid))
+        .filter((option): option is KeyframeReferenceOption => !!option)
+        .map((option) => ({ type: option.type, id: option.id, name: option.name, file_id: option.file_id }))
+      const created = await StudioImageTasksService.createShotFrameImageGenerationTaskApiV1StudioImageTasksShotShotIdFrameImageTasksPost({
+        shotId,
+        requestBody: {
+          frame_type: base.frameType,
+          model_id: null,
+          prompt: base.prompt.trim(),
+          images,
+          target_ratio: ratio,
+          resolution_profile: 'standard',
+          quote_token: keyframeImageQuote.quoteToken,
+        },
+      })
+      return { taskId: created.data?.task_id ?? null }
+    },
+  })
+
+  // 基础提示词或参考图顺序变化后，防抖 400ms 自动重新渲染最终提示词（对应文本类渲染较便宜、
+  // 可以更激进地自动触发）。手动点击"重新同步"按钮时走 deriveNow 立即执行，不受防抖影响。
+  //
+  // 依赖数组特意只列 state/base/context/deriveNow 这几个粒度更细的字段，不直接依赖
+  // `keyframePromptDraft` 整个对象——因为 useGenerationDraft 每次渲染都会返回一个新的
+  // 对象字面量，若把整个对象放进依赖数组，这个 effect 会在页面任何一次无关重渲染时都
+  // 重新执行并重置 400ms 计时器，导致只要页面渲染频率高于 400ms 就永远等不到真正触发。
+  // base/context 只有在 setBase/setContext 真正被调用时才会换成新引用，deriveNow 只有
+  // 在 base/context/derive 变化时才会换成新引用，这样才能让防抖真正生效。
+  useEffect(() => {
+    if (!keyframeModalOpen) return
+    if (keyframePromptDraft.state !== 'draft_changed' && keyframePromptDraft.state !== 'context_changed') return
+    const basePrompt = keyframePromptDraft.base.prompt.trim()
+    if (!basePrompt) return
+    const timer = window.setTimeout(() => {
+      void keyframePromptDraft.deriveNow()
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [
+    keyframeModalOpen,
+    keyframePromptDraft.state,
+    keyframePromptDraft.base,
+    keyframePromptDraft.context,
+    keyframePromptDraft.deriveNow,
+  ])
 
   const [expandedKinds, setExpandedKinds] = useState<Record<AssetKind, boolean>>({
     scene: false,
@@ -1215,14 +1370,21 @@ export function ChapterShotEditPage() {
           : frameType === 'last'
             ? shotDetail?.last_frame_prompt ?? ''
             : shotDetail?.key_frame_prompt ?? ''
-      setKeyframeModalPrompt(basePrompt)
-      setKeyframeModalSelectedFileIds(
-        keyframeReferenceOptions.map((option) => option.file_id).filter((id): id is string => !!id),
-      )
+      const refFileIds = keyframeReferenceOptions.map((option) => option.file_id).filter((id): id is string => !!id)
+      keyframePromptDraft.hydrate({
+        base: { frameType, prompt: basePrompt },
+        context: { refFileIds },
+        state: basePrompt.trim() ? 'draft_changed' : 'idle',
+      })
+      setKeyframePromptDebugContext(null)
+      setKeyframePromptQualityChecks(null)
       setKeyframeModalExtraOptions([])
       setKeyframeModalOpen(true)
+      if (basePrompt.trim()) {
+        void keyframePromptDraft.deriveNow({ base: { frameType, prompt: basePrompt }, context: { refFileIds } })
+      }
     },
-    [keyframeReferenceOptions, shotDetail],
+    [keyframePromptDraft, keyframeReferenceOptions, shotDetail],
   )
 
   // 打开资产选择抽屉以"新增"一个临时参考图（不区分具体替换目标）。
@@ -1278,11 +1440,13 @@ export function ChapterShotEditPage() {
           return [...withoutDuplicate, newOption]
         })
         if (assetPickerReplaceFileId) {
-          setKeyframeModalSelectedFileIds((prev) =>
-            prev.map((id) => (id === assetPickerReplaceFileId ? fileId : id)),
-          )
+          keyframePromptDraft.setContext((prev) => ({
+            refFileIds: prev.refFileIds.map((id) => (id === assetPickerReplaceFileId ? fileId : id)),
+          }))
         } else {
-          setKeyframeModalSelectedFileIds((prev) => (prev.includes(fileId) ? prev : [...prev, fileId]))
+          keyframePromptDraft.setContext((prev) => ({
+            refFileIds: prev.refFileIds.includes(fileId) ? prev.refFileIds : [...prev.refFileIds, fileId],
+          }))
         }
         setAssetPickerOpen(false)
       } catch {
@@ -1291,7 +1455,7 @@ export function ChapterShotEditPage() {
         setAssetPickerLoading(false)
       }
     },
-    [assetPickerKind, assetPickerReplaceFileId, keyframeReferenceOptions],
+    [assetPickerKind, assetPickerReplaceFileId, keyframePromptDraft, keyframeReferenceOptions],
   )
 
   useEffect(() => {
@@ -1347,7 +1511,6 @@ export function ChapterShotEditPage() {
       return
     }
     setSaving(true)
-    setSemanticSaving(true)
     try {
       const [shotRes, detailRes] = await Promise.all([
         StudioShotsService.updateShotApiV1StudioShotsShotIdPatch({
@@ -1385,7 +1548,6 @@ export function ChapterShotEditPage() {
       message.error('保存失败')
     } finally {
       setSaving(false)
-      setSemanticSaving(false)
     }
   }, [scriptExcerpt, shot, shotDetail, title])
 
@@ -2123,6 +2285,104 @@ export function ChapterShotEditPage() {
   )
 
   /**
+   * AI 生成关键帧基础提示词：创建 shot-frame-prompt 异步任务并轮询，成功后：
+   * 1) 把生成结果写入 keyframePromptDraft 的基础提示词（供用户继续编辑）；
+   * 2) 持久化到 shotDetail 对应帧类型的 prompt 字段，下次打开弹窗默认带出这次结果；
+   * 3) 保存 debug_context/quality_checks 供下方 UI 展示；
+   * 4) 立即触发一次渲染，避免用户还要再等一次 400ms 防抖。
+   * requestShotId/requestFrameType 用于防止轮询期间镜头或帧类型已经切换（弹窗关闭前提交按钮/取消
+   * 按钮在 loading 期间都会被禁用，但仍保留这层校验作为兜底，与文件里其它异步流程的约定一致）。
+   */
+  const regenerateKeyframeBasePrompt = useCallback(async () => {
+    if (!shotId || !keyframeModalFrameType) return
+    if (!shotFramePromptQuote.quoteToken) {
+      message.warning('积分试算未就绪，请稍后再试')
+      return
+    }
+    const requestShotId = shotId
+    const requestFrameType = keyframeModalFrameType
+    setKeyframePromptActionLoading(true)
+    try {
+      const created = await FilmService.createShotFramePromptTaskApiV1FilmTasksShotFramePromptsPost({
+        requestBody: {
+          shot_id: requestShotId,
+          frame_type: requestFrameType,
+          quote_token: shotFramePromptQuote.quoteToken,
+        },
+      })
+      const taskId = created.data?.task_id
+      if (!taskId) {
+        message.error('生成任务创建失败：缺少任务 ID')
+        return
+      }
+      let finalStatus = 'pending'
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000))
+        if (currentShotIdRef.current !== requestShotId) return
+        const statusRes = await FilmService.getTaskStatusApiV1FilmTasksTaskIdStatusGet({ taskId })
+        const status = statusRes.data?.status
+        if (!status) continue
+        finalStatus = status
+        if (status === 'succeeded' || status === 'failed' || status === 'cancelled') break
+      }
+      if (currentShotIdRef.current !== requestShotId) return
+      if (finalStatus !== 'succeeded') {
+        if (finalStatus !== 'failed' && finalStatus !== 'cancelled') {
+          message.warning('生成任务仍在执行，请稍后重试')
+        } else {
+          message.error('生成提示词失败')
+        }
+        return
+      }
+      const resultRes = await FilmService.getTaskResultApiV1FilmTasksTaskIdResultGet({ taskId })
+      const result = (resultRes.data?.result ?? null) as Record<string, unknown> | null
+      const generatedPrompt = typeof result?.prompt === 'string' ? result.prompt : ''
+      if (!generatedPrompt.trim()) {
+        message.warning('生成完成，但未返回提示词')
+        return
+      }
+      if (currentShotIdRef.current !== requestShotId || keyframeModalFrameType !== requestFrameType) return
+      const debugContext =
+        result?.debug_context && typeof result.debug_context === 'object'
+          ? (result.debug_context as ShotFramePromptDebugContext)
+          : null
+      const rawQualityChecks = result?.quality_checks as Record<string, unknown> | undefined
+      const qualityChecks =
+        rawQualityChecks && typeof rawQualityChecks.passed === 'boolean'
+          ? {
+              passed: Boolean(rawQualityChecks.passed),
+              issues: Array.isArray(rawQualityChecks.issues)
+                ? rawQualityChecks.issues.map((item) => String(item ?? '').trim()).filter(Boolean)
+                : [],
+            }
+          : null
+      setKeyframePromptDebugContext(debugContext)
+      setKeyframePromptQualityChecks(qualityChecks)
+      const promptField =
+        requestFrameType === 'first'
+          ? 'first_frame_prompt'
+          : requestFrameType === 'last'
+            ? 'last_frame_prompt'
+            : 'key_frame_prompt'
+      setShotDetail((prev) => (prev ? { ...prev, [promptField]: generatedPrompt } : prev))
+      void StudioShotDetailsService.updateShotDetailApiV1StudioShotDetailsShotIdPatch({
+        shotId: requestShotId,
+        requestBody: { [promptField]: generatedPrompt },
+      }).catch(() => {
+        message.warning('提示词已生成，但保存到镜头详情失败，请手动重新生成一次')
+      })
+      keyframePromptDraft.setBase({ frameType: requestFrameType, prompt: generatedPrompt })
+      await keyframePromptDraft.deriveNow({ base: { frameType: requestFrameType, prompt: generatedPrompt } })
+      message.success('提示词已生成')
+    } catch (error) {
+      const pointsAware = makePointsAwareGetErrorMessage(shotFramePromptQuote.refresh)
+      message.error(pointsAware(error, '生成提示词失败'))
+    } finally {
+      setKeyframePromptActionLoading(false)
+    }
+  }, [keyframeModalFrameType, keyframePromptDraft, shotFramePromptQuote.quoteToken, shotFramePromptQuote.refresh, shotId])
+
+  /**
    * 轮询关键帧生成任务：间隔 2 秒，最多 30 次。成功后刷新槽位与候选缩略图；
    * frameSlotIdByTypeRef 由前面 useMemo/useRef 组合维护，总是反映最新的槽位 id
    * （不管这是该帧类型第一次生成、还是往已有槽位补充新候选图，都能拿到正确的 slotId）。
@@ -2163,14 +2423,11 @@ export function ChapterShotEditPage() {
     [refreshFrameImages, refreshKeyframeCandidates],
   )
 
-  // 提交关键帧生成任务：将弹窗内已选参考图（按顺序）转为 ShotLinkedAssetItem 传给后端，
-  // 成功后关闭弹窗并异步轮询任务结果。
+  // 提交关键帧生成任务：提示词与参考图顺序都来自 keyframePromptDraft，创建成功后关闭弹窗并异步轮询任务结果。
   const submitKeyframeGeneration = useCallback(async () => {
     if (!shotId || !keyframeModalFrameType) return
-    const prompt = keyframeModalPrompt.trim()
-    if (!prompt) return
-    const ratio = resolvedVideoRatio
-    if (!ratio) {
+    if (!keyframePromptDraft.base.prompt.trim()) return
+    if (!resolvedVideoRatio) {
       message.warning('请先设置视频比例')
       return
     }
@@ -2180,33 +2437,15 @@ export function ChapterShotEditPage() {
     }
     setKeyframeModalSubmitting(true)
     try {
-      // 参考图候选可能来自第 2 步已关联资产（keyframeReferenceOptions），也可能是本次弹窗里
-      // 从资产库临时新增/替换的（keyframeModalExtraOptions）——两者都要参与查找，否则用户在
-      // 弹窗里新增的参考图会在提交时被静默丢弃，白选了却什么都没生效。
-      const allReferenceOptions = [...keyframeReferenceOptions, ...keyframeModalExtraOptions]
-      const images: ShotLinkedAssetItem[] = keyframeModalSelectedFileIds
-        .map((fileId) => allReferenceOptions.find((option) => option.file_id === fileId))
-        .filter((option): option is KeyframeReferenceOption => !!option)
-        .map((option) => ({ type: option.type, id: option.id, name: option.name, file_id: option.file_id }))
-
-      const created = await StudioImageTasksService.createShotFrameImageGenerationTaskApiV1StudioImageTasksShotShotIdFrameImageTasksPost({
-        shotId,
-        requestBody: {
-          frame_type: keyframeModalFrameType,
-          model_id: null,
-          prompt,
-          images,
-          target_ratio: ratio,
-          resolution_profile: 'standard',
-          quote_token: keyframeImageQuote.quoteToken,
-        },
-      })
-      const taskId = created.data?.task_id ?? null
+      const submitted = await keyframePromptDraft.submitNow()
+      const taskId = submitted?.taskId ?? null
+      if (!taskId) {
+        message.error('生成任务创建失败：缺少任务 ID')
+        return
+      }
       message.success('已提交生成任务')
       setKeyframeModalOpen(false)
-      if (taskId) {
-        void pollKeyframeTask(taskId, keyframeModalFrameType, shotId)
-      }
+      void pollKeyframeTask(taskId, keyframeModalFrameType, shotId)
     } catch (error) {
       const pointsAware = makePointsAwareGetErrorMessage(keyframeImageQuote.refresh)
       message.error(pointsAware(error, '提交生成任务失败'))
@@ -2216,11 +2455,8 @@ export function ChapterShotEditPage() {
   }, [
     keyframeImageQuote.quoteToken,
     keyframeImageQuote.refresh,
-    keyframeModalExtraOptions,
     keyframeModalFrameType,
-    keyframeModalPrompt,
-    keyframeModalSelectedFileIds,
-    keyframeReferenceOptions,
+    keyframePromptDraft,
     pollKeyframeTask,
     resolvedVideoRatio,
     shotId,
@@ -2993,7 +3229,6 @@ export function ChapterShotEditPage() {
           title={title}
           scriptExcerpt={scriptExcerpt}
           saving={saving}
-          semanticSaving={semanticSaving}
           semantic={{
             camera_shot: shotDetail?.camera_shot ?? undefined,
             angle: shotDetail?.angle ?? undefined,
@@ -3401,7 +3636,8 @@ export function ChapterShotEditPage() {
                           style={{
                             cursor: 'pointer',
                             borderRadius: 10,
-                            padding: '8px 10px',
+                            padding: '10px 12px',
+                            marginBottom: 6,
                             background: active
                               ? itemCompleted
                                 ? 'rgba(34,197,94,0.12)'
@@ -3472,7 +3708,27 @@ export function ChapterShotEditPage() {
                               </span>
                             </div>
                           </div>
-                          <div className="text-xs text-gray-500 truncate">{item.script_excerpt ?? ''}</div>
+                          {item.script_excerpt || item.duration || item.generated_video_file_id ? (
+                            <div className="mt-1.5 flex items-center gap-2 text-xs">
+                              <span className="min-w-0 flex-1 truncate text-gray-500">{item.script_excerpt ?? ''}</span>
+                              {item.duration || item.generated_video_file_id ? (
+                                <span className="flex shrink-0 items-center gap-2 text-gray-400">
+                                  {item.duration ? (
+                                    <span className="inline-flex items-center gap-1">
+                                      <ClockCircleOutlined />
+                                      {item.duration}s
+                                    </span>
+                                  ) : null}
+                                  {item.generated_video_file_id ? (
+                                    <span className="inline-flex items-center gap-1 text-emerald-600">
+                                      <PlayCircleOutlined />
+                                      已生成视频
+                                    </span>
+                                  ) : null}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
                             </div>
                           </div>
                         </List.Item>
@@ -3511,6 +3767,7 @@ export function ChapterShotEditPage() {
                   activeKey={editorTabKey}
                   onChange={handleEditorTabChange}
                   items={editorTabItems as any}
+                  tabBarStyle={{ position: 'sticky', top: -12, zIndex: 10, background: '#fff', marginTop: -12, paddingTop: 12 }}
                 />
               </Card>
             </div>
@@ -3815,22 +4072,33 @@ export function ChapterShotEditPage() {
         frameLabel={keyframeModalFrameType === 'first' ? '首帧' : keyframeModalFrameType === 'last' ? '尾帧' : '关键帧'}
         loading={false}
         submitting={keyframeModalSubmitting}
-        prompt={keyframeModalPrompt}
-        onPromptChange={setKeyframeModalPrompt}
-        quoteText={
-          keyframeImageQuote.quote
-            ? `预计消耗 ${keyframeImageQuote.quote.required_points} 积分`
-            : keyframeImageQuote.loading
-              ? '积分试算中…'
-              : null
-        }
-        referenceOptions={[...keyframeReferenceOptions, ...keyframeModalExtraOptions]}
+        prompt={keyframePromptDraft.base.prompt}
+        onPromptChange={(value) => keyframePromptDraft.setBase((prev) => ({ ...prev, prompt: value }))}
+        imageQuote={keyframeImageQuote.quote}
+        imageQuoteLoading={keyframeImageQuote.loading}
+        imageQuoteError={keyframeImageQuote.error}
+        referenceOptions={allKeyframeReferenceOptions}
         onAddReferenceFromLibrary={openAssetPickerForKeyframe}
         onReplaceReferenceFromLibrary={openAssetPickerToReplaceKeyframe}
-        selectedFileIds={keyframeModalSelectedFileIds}
-        onChangeSelectedFileIds={setKeyframeModalSelectedFileIds}
+        selectedFileIds={keyframePromptDraft.context.refFileIds}
+        onChangeSelectedFileIds={(fileIds) => keyframePromptDraft.setContext({ refFileIds: fileIds })}
         onClose={() => setKeyframeModalOpen(false)}
         onSubmit={() => void submitKeyframeGeneration()}
+        basePromptQuote={shotFramePromptQuote.quote}
+        basePromptQuoteLoading={shotFramePromptQuote.loading}
+        basePromptQuoteError={shotFramePromptQuote.error}
+        aiGenerating={keyframePromptActionLoading}
+        onRegenerateBasePrompt={() => void regenerateKeyframeBasePrompt()}
+        renderState={keyframePromptDraft.state}
+        renderedPrompt={keyframePromptDraft.derived?.renderedPrompt ?? ''}
+        onResync={() => void keyframePromptDraft.deriveNow()}
+        mappings={keyframePromptDraft.derived?.mappings ?? []}
+        selectedGuidance={keyframePromptDraft.derived?.selectedGuidance ?? []}
+        droppedGuidance={keyframePromptDraft.derived?.droppedGuidance ?? []}
+        selectedGuidanceDetails={keyframePromptDraft.derived?.selectedGuidanceDetails ?? []}
+        droppedGuidanceDetails={keyframePromptDraft.derived?.droppedGuidanceDetails ?? []}
+        debugContext={keyframePromptDebugContext}
+        qualityChecks={keyframePromptQualityChecks}
       />
 
       <ExtractionConfirmModal
