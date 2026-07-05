@@ -66,31 +66,25 @@ def test_create_actor_image_task_requires_prompt(client: TestClient) -> None:
 def test_render_actor_image_prompt_returns_success_envelope(client: TestClient, monkeypatch) -> None:
     db = _DummyDB()
 
-    class _Base:
-        prompt = "基础演员提示词"
-        default_images = ["file-1", "file-2"]
-        entity_type = "actor"
-        entity_id = "actor-1"
-        relation_type = "actor_image"
-        relation_entity_id = "1"
-
-    class _Derived:
-        prompt = "渲染后的演员提示词"
+    class _Submission:
+        prompt = "陆远站在温室里，最终提示词"
         images = ["file-1", "file-2"]
 
-    async def _fake_build_base(*_args, **_kwargs):
-        return _Base()
+    captured: dict[str, object] = {}
 
-    def _fake_derive(*_args, **_kwargs):
-        return _Derived()
+    async def _fake_build_submission(_db, *, actor_id, image_id, prompt, images):
+        captured["actor_id"] = actor_id
+        captured["image_id"] = image_id
+        captured["prompt"] = prompt
+        captured["images"] = images
+        return _Submission()
 
-    monkeypatch.setattr(route, "_build_actor_image_base_draft_service", _fake_build_base)
-    monkeypatch.setattr(route, "_derive_asset_image_preview_service", _fake_derive)
+    monkeypatch.setattr(route, "_build_actor_image_submission_payload_service", _fake_build_submission)
     app.dependency_overrides[get_db] = _override_db(db)
     try:
         response = client.post(
             "/api/v1/studio/image-tasks/actors/actor-1/render-prompt",
-            json={"image_id": 1, "images": []},
+            json={"image_id": 1, "prompt": "陆远站在温室里", "images": ["file-1", "file-2"]},
         )
     finally:
         app.dependency_overrides.clear()
@@ -99,8 +93,12 @@ def test_render_actor_image_prompt_returns_success_envelope(client: TestClient, 
     body = response.json()
     assert body["code"] == 200
     assert body["message"] == "success"
-    assert body["data"]["prompt"] == "渲染后的演员提示词"
+    assert body["data"]["prompt"] == "陆远站在温室里，最终提示词"
     assert body["data"]["images"] == ["file-1", "file-2"]
+    assert captured["actor_id"] == "actor-1"
+    assert captured["image_id"] == 1
+    assert captured["prompt"] == "陆远站在温室里"
+    assert captured["images"] == ["file-1", "file-2"]
 
 
 def test_create_shot_frame_image_task_requires_prompt(client: TestClient) -> None:
