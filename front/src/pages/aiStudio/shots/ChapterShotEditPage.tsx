@@ -67,7 +67,7 @@ import {
   useCancelableRelationTask,
 } from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { StudioEntitiesApi } from '../../../services/studioEntities'
-import { buildFileDownloadUrl, resolveAssetUrl } from '../assets/utils'
+import { buildFileDownloadUrl, resolveAssetUrl, tryExtractFileIdFromUrl } from '../assets/utils'
 import { generateUUID } from '../../../utils'
 import type { ShotKeyframeCandidate } from './components/ShotKeyframeCard'
 import { ShotKeyframeGenerateModal, type KeyframeReferenceOption } from './components/ShotKeyframeGenerateModal'
@@ -382,6 +382,12 @@ export function ChapterShotEditPage() {
   const [keyframeModalPrompt, setKeyframeModalPrompt] = useState('')
   const [keyframeModalSelectedFileIds, setKeyframeModalSelectedFileIds] = useState<string[]>([])
   const [keyframeModalSubmitting, setKeyframeModalSubmitting] = useState(false)
+  // 关键帧生成弹窗里从项目资产库临时挑选的参考图（不写入镜头资产关联关系，仅本次生成使用）。
+  const [keyframeModalExtraOptions, setKeyframeModalExtraOptions] = useState<KeyframeReferenceOption[]>([])
+  const [assetPickerOpen, setAssetPickerOpen] = useState(false)
+  const [assetPickerKind, setAssetPickerKind] = useState<AssetKind>('scene')
+  const [assetPickerReplaceFileId, setAssetPickerReplaceFileId] = useState<string | null>(null)
+  const [assetPickerLoading, setAssetPickerLoading] = useState(false)
   // 关键帧生成的积分试算：独立于资产图片生成的 imageQuote 实例，因为需要额外传 resolutionProfile
   // 才能让 quote_token 的 params_hash 与创建任务时提交的 resolution_profile 对齐。
   const keyframeImageQuote = usePointsQuote({
@@ -1213,9 +1219,74 @@ export function ChapterShotEditPage() {
       setKeyframeModalSelectedFileIds(
         keyframeReferenceOptions.map((option) => option.file_id).filter((id): id is string => !!id),
       )
+      setKeyframeModalExtraOptions([])
       setKeyframeModalOpen(true)
     },
     [keyframeReferenceOptions, shotDetail],
+  )
+
+  // 打开资产选择抽屉以"新增"一个临时参考图（不区分具体替换目标）。
+  const openAssetPickerForKeyframe = useCallback((kind: AssetKind) => {
+    setAssetPickerKind(kind)
+    setAssetPickerReplaceFileId(null)
+    setAssetPickerOpen(true)
+  }, [])
+
+  // 打开资产选择抽屉以"替换"已选参考图列表里的某一项：按 fileId 反查其所属资产类别，
+  // 抽屉内选中新资产后会把该 fileId 原地替换掉（顺序位置不变）。
+  const openAssetPickerToReplaceKeyframe = useCallback(
+    (fileId: string) => {
+      const matched = [...keyframeReferenceOptions, ...keyframeModalExtraOptions].find((option) => option.file_id === fileId)
+      setAssetPickerKind(matched?.kind ?? 'scene')
+      setAssetPickerReplaceFileId(fileId)
+      setAssetPickerOpen(true)
+    },
+    [keyframeReferenceOptions, keyframeModalExtraOptions],
+  )
+
+  /**
+   * 资产选择抽屉确认回调：只把选中的资产临时加入本次关键帧生成的参考图候选，
+   * 不调用任何镜头关联接口——用户明确要求这里只是"这次生成用一下"，不落库到镜头资产关联关系。
+   */
+  const handleKeyframeAssetPicked = useCallback(
+    async (entityId: string, entityName: string) => {
+      setAssetPickerLoading(true)
+      try {
+        const entityType = assetPickerKind === 'actor' ? 'character' : assetPickerKind
+        const res = await StudioEntitiesApi.get(entityType as any, entityId)
+        const data: any = res.data
+        const rawThumb = data?.thumbnail ?? data?.images?.[0]?.thumbnail ?? ''
+        const fileId = tryExtractFileIdFromUrl(rawThumb) ?? (rawThumb && !rawThumb.includes('/') && !rawThumb.includes(':') ? rawThumb : null)
+        if (!fileId) {
+          message.warning('该资产暂无可用图片，无法作为参考图')
+          return
+        }
+        const newOption: KeyframeReferenceOption = {
+          kind: assetPickerKind,
+          type: entityType as ShotLinkedAssetItem['type'],
+          id: entityId,
+          name: entityName,
+          file_id: fileId,
+        }
+        setKeyframeModalExtraOptions((prev) => {
+          const withoutDuplicate = prev.filter((option) => option.file_id !== fileId)
+          return [...withoutDuplicate, newOption]
+        })
+        if (assetPickerReplaceFileId) {
+          setKeyframeModalSelectedFileIds((prev) =>
+            prev.map((id) => (id === assetPickerReplaceFileId ? fileId : id)),
+          )
+        } else {
+          setKeyframeModalSelectedFileIds((prev) => (prev.includes(fileId) ? prev : [...prev, fileId]))
+        }
+        setAssetPickerOpen(false)
+      } catch {
+        message.error('获取资产信息失败')
+      } finally {
+        setAssetPickerLoading(false)
+      }
+    },
+    [assetPickerKind, assetPickerReplaceFileId],
   )
 
   useEffect(() => {
@@ -3506,6 +3577,18 @@ export function ChapterShotEditPage() {
         onClose={() => setAddDrawerOpen(false)}
       />
 
+      {/* 关键帧生成弹窗专用：从资产库临时选取参考图，不写入镜头资产关联关系 */}
+      <AssetPickerDrawer
+        mode="add"
+        open={assetPickerOpen}
+        kind={assetPickerKind}
+        currentEntityId={null}
+        projectId={projectId}
+        loading={assetPickerLoading}
+        onSelect={(entityId, entityName) => void handleKeyframeAssetPicked(entityId, entityName)}
+        onClose={() => setAssetPickerOpen(false)}
+      />
+
       <Modal
         title="新增分镜"
         open={createOpen}
@@ -3731,7 +3814,9 @@ export function ChapterShotEditPage() {
               ? '积分试算中…'
               : null
         }
-        referenceOptions={keyframeReferenceOptions}
+        referenceOptions={[...keyframeReferenceOptions, ...keyframeModalExtraOptions]}
+        onAddReferenceFromLibrary={openAssetPickerForKeyframe}
+        onReplaceReferenceFromLibrary={openAssetPickerToReplaceKeyframe}
         selectedFileIds={keyframeModalSelectedFileIds}
         onChangeSelectedFileIds={setKeyframeModalSelectedFileIds}
         onClose={() => setKeyframeModalOpen(false)}

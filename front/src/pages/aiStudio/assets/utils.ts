@@ -1,6 +1,6 @@
 import { OpenAPI } from '../../../services/generated'
 
-function tryExtractFileIdFromUrl(value: string): string | null {
+export function tryExtractFileIdFromUrl(value: string): string | null {
   try {
     const url = new URL(value)
     const m = url.pathname.match(/\/api\/v1\/studio\/files\/([^/]+)\/download\/?$/)

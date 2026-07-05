@@ -15,6 +15,8 @@ type ShotKeyframeGenerateModalProps = {
   onPromptChange: (value: string) => void
   quoteText: string | null
   referenceOptions: KeyframeReferenceOption[]
+  onAddReferenceFromLibrary: (kind: 'scene' | 'actor' | 'prop' | 'costume') => void
+  onReplaceReferenceFromLibrary: (fileId: string) => void
   selectedFileIds: string[]
   onChangeSelectedFileIds: (fileIds: string[]) => void
   onClose: () => void
@@ -36,6 +38,8 @@ export function ShotKeyframeGenerateModal({
   onPromptChange,
   quoteText,
   referenceOptions,
+  onAddReferenceFromLibrary,
+  onReplaceReferenceFromLibrary,
   selectedFileIds,
   onChangeSelectedFileIds,
   onClose,
@@ -92,11 +96,16 @@ export function ShotKeyframeGenerateModal({
           </div>
 
           <div className="space-y-2">
-            <div className="text-xs text-slate-500">参考图（默认取当前镜头已关联资产，可取消勾选或调整顺序）</div>
-            {(['scene', 'actor', 'prop', 'costume'] as const).map((kind) =>
-              optionsByKind[kind].length > 0 ? (
-                <div key={kind} className="space-y-1">
+            <div className="text-xs text-slate-500">参考图（默认取当前镜头已关联资产，可取消勾选、调整顺序，或从项目资产库新增/替换）</div>
+            {(['scene', 'actor', 'prop', 'costume'] as const).map((kind) => (
+              <div key={kind} className="space-y-1">
+                <div className="flex items-center justify-between">
                   <div className="text-[11px] font-medium text-slate-600">{kindLabel[kind]}</div>
+                  <Button size="small" type="link" className="!px-0 !h-auto !text-[11px]" onClick={() => onAddReferenceFromLibrary(kind)}>
+                    + 从资产库新增
+                  </Button>
+                </div>
+                {optionsByKind[kind].length > 0 ? (
                   <div className="flex flex-wrap gap-2">
                     {optionsByKind[kind].map((option) => (
                       <Checkbox
@@ -109,9 +118,9 @@ export function ShotKeyframeGenerateModal({
                       </Checkbox>
                     ))}
                   </div>
-                </div>
-              ) : null,
-            )}
+                ) : null}
+              </div>
+            ))}
           </div>
 
           {selectedFileIds.length > 0 ? (
@@ -124,6 +133,9 @@ export function ShotKeyframeGenerateModal({
                     <div key={fileId} className="flex items-center justify-between gap-2 rounded-md bg-slate-50 px-2 py-1 text-xs">
                       <span>{matched?.name ?? fileId}</span>
                       <div className="flex items-center gap-1">
+                        <Button size="small" type="text" onClick={() => onReplaceReferenceFromLibrary(fileId)}>
+                          替换
+                        </Button>
                         <Button
                           size="small"
                           type="text"
