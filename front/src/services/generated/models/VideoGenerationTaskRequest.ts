@@ -29,7 +29,7 @@ export type VideoGenerationTaskRequest = {
      */
     prompt?: (string | null);
     /**
-     * 参考图 file_id 列表，数量需与 reference_mode 严格匹配
+     * 参考图 file_id 列表；帧模式需与 reference_mode 数量匹配，text_only 可携带默认资产参考图
      */
     images?: Array<string>;
     /**

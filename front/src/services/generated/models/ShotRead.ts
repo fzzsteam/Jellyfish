@@ -49,5 +49,9 @@ export type ShotRead = {
      * 镜头提取状态摘要
      */
     extraction: ShotExtractionSummaryRead;
+    /**
+     * 镜头预期时长（秒，来自 ShotDetail）；0 表示未设置
+     */
+    duration?: number;
 };
 

@@ -1,11 +1,12 @@
-import type { ReactNode } from 'react'
-import { Button, Card, Descriptions, Segmented, Select, Space, Tag, Tooltip, Typography } from 'antd'
-import { SettingOutlined, ToolOutlined, VideoCameraAddOutlined } from '@ant-design/icons'
-import type { ShotDetailRead, ShotFrameType, ShotPreparationStateRead, ShotRead } from '../../../../services/generated'
+import { Button, Card, Segmented, Select, Tag, Tooltip, Typography } from 'antd'
+import { QuestionCircleOutlined, ToolOutlined, VideoCameraAddOutlined } from '@ant-design/icons'
+import type { PointsQuoteResponse, ShotDetailRead, ShotFrameType, ShotPreparationStateRead, ShotRead } from '../../../../services/generated'
+import { PointsCostButton } from '../../../../components/points/PointsCostButton'
 import { ShotKeyframeCard, type ShotKeyframeCandidate } from './ShotKeyframeCard'
 
 /** 视频生成参考模式：决定需要哪些帧类型（首帧/尾帧/关键帧）参与生成。 */
 type ReferenceMode = 'first' | 'last' | 'key' | 'first_last' | 'first_last_key' | 'text_only'
+type ReferenceModeSelection = ReferenceMode | null
 
 const REFERENCE_MODE_OPTIONS: Array<{ value: ReferenceMode; label: string }> = [
   { value: 'text_only', label: '纯文字（不用参考帧）' },
@@ -34,16 +35,20 @@ type ShotVideoGenerationTabProps = {
   videoModelsLoading: boolean
   videoResolution: '720p' | '1080p'
   videoRatio: string | null
+  videoRatioOptions: Array<{ value: string; label: string }>
   videoReadinessReady: boolean | null
   videoReadinessLoading: boolean
-  referenceMode: ReferenceMode
-  onReferenceModeChange: (mode: ReferenceMode) => void
+  referenceMode: ReferenceModeSelection
+  onReferenceModeChange: (mode: ReferenceModeSelection) => void
+  onVideoRatioChange: (ratio: string | null) => void
   keyframeCandidatesByType: Record<ShotFrameType, ShotKeyframeCandidate[]>
   keyframeCurrentFileIdByType: Record<ShotFrameType, string | null>
   keyframeApplyingFileId: string | null
   onGenerateKeyframe: (frameType: ShotFrameType) => void
   onApplyKeyframe: (frameType: ShotFrameType, fileId: string) => void
-  quoteNode: ReactNode
+  videoQuote: PointsQuoteResponse | null
+  videoQuoteLoading: boolean
+  videoQuoteError: string | null
   onModelChange: (modelId: string) => void
   onResolutionChange: (resolution: '720p' | '1080p') => void
   onOpenDiagnostics: () => void
@@ -60,7 +65,6 @@ function getGenerateDisabledReason(
   preparationState: ShotPreparationStateRead | null,
   selectedVideoModelId: string | null,
   videoRatio: string | null,
-  videoReadinessReady: boolean | null,
   videoReadinessLoading: boolean,
 ): string | null {
   if (!shot) return '未选择镜头'
@@ -69,7 +73,6 @@ function getGenerateDisabledReason(
   if (!videoRatio) return '请先设置视频比例'
   if (!selectedVideoModelId) return '未选择视频模型'
   if (videoReadinessLoading) return '检查生成条件中'
-  if (videoReadinessReady !== true) return '当前参考模式所需条件未就绪，请查看诊断'
   return null
 }
 
@@ -86,82 +89,138 @@ export function ShotVideoGenerationTab({
   videoModelsLoading,
   videoResolution,
   videoRatio,
+  videoRatioOptions,
   videoReadinessReady,
   videoReadinessLoading,
   referenceMode,
   onReferenceModeChange,
+  onVideoRatioChange,
   keyframeCandidatesByType,
   keyframeCurrentFileIdByType,
   keyframeApplyingFileId,
   onGenerateKeyframe,
   onApplyKeyframe,
-  quoteNode,
+  videoQuote,
+  videoQuoteLoading,
+  videoQuoteError,
   onModelChange,
   onResolutionChange,
   onOpenDiagnostics,
   onOpenPromptPreview,
 }: ShotVideoGenerationTabProps) {
+  const requiredFrameTypes = referenceMode ? REQUIRED_FRAME_TYPES_BY_MODE[referenceMode] : []
   const disabledReason = getGenerateDisabledReason(
     shot,
     shotDetail,
     preparationState,
     selectedVideoModelId,
     videoRatio,
-    videoReadinessReady,
     videoReadinessLoading,
   )
   const readyForGeneration = !disabledReason
+  const videoReadinessLabel = videoReadinessLoading
+    ? '检查中'
+    : videoReadinessReady === false
+      ? '有风险'
+      : videoReadinessReady === true
+        ? '通过'
+        : '未检查'
 
   return (
-    <div className="space-y-4">
-      <Card
-        title={
-          <Space>
-            <SettingOutlined />
-            <span>生成配置</span>
-          </Space>
-        }
-      >
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <Typography.Text strong>{shot ? `镜头 #${shot.index} · ${shot.title || '未命名镜头'}` : '未选择镜头'}</Typography.Text>
-              <div className="mt-1 text-xs text-slate-500">
-                按下方选择的参考模式检查生成条件；提示词预览确认后再提交视频生成任务。
-              </div>
-            </div>
-            <Tag color={readyForGeneration ? 'green' : 'gold'}>
-              {readyForGeneration ? '可生成' : '待补齐'}
-            </Tag>
-          </div>
+    <Card
+      className="flex h-full flex-col"
+      bodyStyle={{ padding: 16, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <Typography.Text className="text-base font-semibold text-slate-900">
+            {shot ? `镜头 #${shot.index} · ${shot.title || '未命名镜头'}` : '未选择镜头'}
+          </Typography.Text>
+          <Tag color={readyForGeneration ? 'green' : 'gold'} className="!m-0">
+            {readyForGeneration ? '可生成' : '待补齐'}
+          </Tag>
+        </div>
+        <Button size="small" icon={<ToolOutlined />} onClick={onOpenDiagnostics}>
+          诊断
+        </Button>
+      </div>
 
-          <Descriptions size="small" column={{ xs: 1, sm: 2, md: 3 }} bordered>
-            <Descriptions.Item label="镜头时长">
-              {shotDetail?.duration ? `${shotDetail.duration}s` : '未设置'}
-            </Descriptions.Item>
-            <Descriptions.Item label="视频比例">
-              {videoRatio ?? '未设置'}
-            </Descriptions.Item>
-            <Descriptions.Item label="准备状态">
-              {preparationState?.ready_for_generation ? '准备完成' : '待继续准备'}
-            </Descriptions.Item>
-          </Descriptions>
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+        <span>时长 <span className="font-medium text-slate-900">{shotDetail?.duration ? `${shotDetail.duration}s` : '未设置'}</span></span>
+        <span>比例 <span className="font-medium text-slate-900">{videoRatio ?? '未设置'}</span></span>
+        <span>准备 <span className="font-medium text-slate-900">{preparationState?.ready_for_generation ? '完成' : '待继续'}</span></span>
+        <span>诊断 <span className="font-medium text-slate-900">{videoReadinessLabel}</span></span>
+      </div>
 
-          <div className="space-y-1">
-            <Typography.Text className="text-xs text-slate-500">参考模式</Typography.Text>
+      <div className="mt-3 min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
+        <div className="grid grid-cols-1 gap-3">
+          <label className="block min-w-0 space-y-1">
+            <span className="text-xs font-medium text-slate-500">视频比例</span>
+            <Select
+              allowClear
+              className="w-full"
+              placeholder={videoRatio ?? '请选择视频比例'}
+              value={shotDetail?.override_video_ratio ?? undefined}
+              onChange={(value) => onVideoRatioChange(value ?? null)}
+              options={videoRatioOptions}
+            />
+          </label>
+          <label className="block min-w-0 space-y-1">
+            <span className="text-xs font-medium text-slate-500">视频模型</span>
             <Select
               className="w-full"
-              value={referenceMode}
-              onChange={onReferenceModeChange}
+              placeholder="请选择视频模型"
+              loading={videoModelsLoading}
+              value={selectedVideoModelId ?? undefined}
+              onChange={onModelChange}
+              options={videoModels.map((model) => ({
+                value: model.id,
+                label: model.provider_name ? `${model.name} · ${model.provider_name}` : model.name,
+              }))}
+            />
+          </label>
+          <label className="block min-w-0 space-y-1">
+            <span className="text-xs font-medium text-slate-500">清晰度</span>
+            <Segmented
+              block
+              value={videoResolution}
+              onChange={(value) => onResolutionChange(value as '720p' | '1080p')}
+              options={[
+                { label: '720p', value: '720p' },
+                { label: '1080p', value: '1080p' },
+              ]}
+            />
+          </label>
+          <label className="block min-w-0 space-y-1">
+            <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-500">
+              参考模式
+              <Tooltip title="参考模式可不选；不选时默认使用第二步已确认资产图片。">
+                <QuestionCircleOutlined className="cursor-help text-slate-400" />
+              </Tooltip>
+            </span>
+            <Select
+              allowClear
+              className="w-full"
+              placeholder="不选择则使用已确认资产图片"
+              value={referenceMode ?? undefined}
+              onChange={(value) => onReferenceModeChange(value ?? null)}
               options={REFERENCE_MODE_OPTIONS}
             />
-          </div>
+          </label>
+        </div>
 
-          {REQUIRED_FRAME_TYPES_BY_MODE[referenceMode].length > 0 ? (
-            <div className="space-y-2">
-              <Typography.Text className="text-xs text-slate-500">关键帧与参考图</Typography.Text>
-              <div className="grid gap-2 md:grid-cols-2">
-                {REQUIRED_FRAME_TYPES_BY_MODE[referenceMode].map((frameType) => (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-xs font-medium text-slate-500">参考帧</span>
+            {requiredFrameTypes.length > 0 ? (
+              <Tag className="!m-0">{`${requiredFrameTypes.length} 个帧位`}</Tag>
+            ) : (
+              <Tag className="!m-0">不使用参考帧</Tag>
+            )}
+          </div>
+          {requiredFrameTypes.length > 0 ? (
+            <div className="flex w-full flex-col gap-2">
+                {requiredFrameTypes.map((frameType) => (
                   <ShotKeyframeCard
                     key={frameType}
                     frameType={frameType}
@@ -172,62 +231,35 @@ export function ShotVideoGenerationTab({
                     onApply={onApplyKeyframe}
                   />
                 ))}
-              </div>
+            </div>
+          ) : referenceMode === 'text_only' ? (
+            <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">
+              当前为纯文字生成，不使用首帧、尾帧、关键帧或资产参考图。
             </div>
           ) : null}
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="space-y-1">
-              <Typography.Text className="text-xs text-slate-500">视频模型</Typography.Text>
-              <Select
-                className="w-full"
-                placeholder="请选择视频模型"
-                loading={videoModelsLoading}
-                value={selectedVideoModelId ?? undefined}
-                onChange={onModelChange}
-                options={videoModels.map((model) => ({
-                  value: model.id,
-                  label: model.provider_name ? `${model.name} · ${model.provider_name}` : model.name,
-                }))}
-              />
-            </div>
-            <div className="space-y-1">
-              <Typography.Text className="text-xs text-slate-500">清晰度</Typography.Text>
-              <Segmented
-                block
-                value={videoResolution}
-                onChange={(value) => onResolutionChange(value as '720p' | '1080p')}
-                options={[
-                  { label: '720p', value: '720p' },
-                  { label: '1080p', value: '1080p' },
-                ]}
-              />
-            </div>
-          </div>
-
-          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-            {quoteNode}
-          </div>
-
-          <Space wrap>
-            <Tooltip title={disabledReason || '预览提示词并确认积分'}>
-              <span>
-                <Button
-                  type="primary"
-                  icon={<VideoCameraAddOutlined />}
-                  disabled={!!disabledReason}
-                  onClick={onOpenPromptPreview}
-                >
-                  生成视频
-                </Button>
-              </span>
-            </Tooltip>
-            <Button icon={<ToolOutlined />} onClick={onOpenDiagnostics}>
-              诊断
-            </Button>
-          </Space>
         </div>
-      </Card>
-    </div>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-3">
+        <Tooltip title={disabledReason || '预览提示词并确认积分'}>
+          <span>
+            <PointsCostButton
+              type="primary"
+              icon={<VideoCameraAddOutlined />}
+              disabled={!!disabledReason}
+              quote={videoQuote}
+              quoteLoading={videoQuoteLoading}
+              quoteError={videoQuoteError}
+              onClick={onOpenPromptPreview}
+            >
+              生成视频
+            </PointsCostButton>
+          </span>
+        </Tooltip>
+        {videoQuoteError ? (
+          <Typography.Text type="danger" className="text-xs">{videoQuoteError}</Typography.Text>
+        ) : null}
+      </div>
+    </Card>
   )
 }

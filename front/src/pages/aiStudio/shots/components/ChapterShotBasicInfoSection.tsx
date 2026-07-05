@@ -47,7 +47,6 @@ type ChapterShotBasicInfoSectionProps = {
   title: string
   scriptExcerpt: string
   saving: boolean
-  semanticSaving: boolean
   semantic: ShotSemanticDraft
   actionBeatPhases?: Array<ActionBeatPhaseRead>
   onTitleChange: (value: string) => void
@@ -60,7 +59,6 @@ export function ChapterShotBasicInfoSection({
   title,
   scriptExcerpt,
   saving,
-  semanticSaving,
   semantic,
   actionBeatPhases,
   onTitleChange,
@@ -94,18 +92,7 @@ export function ChapterShotBasicInfoSection({
         </div>
 
         <div>
-          <div className="flex items-center justify-between gap-2 mb-1">
-            <div className="text-xs text-gray-600">内容 / 剧本摘录</div>
-            <Button
-              type="primary"
-              size="small"
-              icon={<SaveOutlined />}
-              loading={saving}
-              onClick={onSave}
-            >
-              保存
-            </Button>
-          </div>
+          <div className="text-xs text-gray-600 mb-1">内容 / 剧本摘录</div>
           <Input.TextArea
             value={scriptExcerpt}
             onChange={(e) => onScriptExcerptChange(e.target.value)}
@@ -115,14 +102,9 @@ export function ChapterShotBasicInfoSection({
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-xs font-medium text-slate-800">镜头语言默认值</div>
-              <div className="mt-1 text-[11px] text-slate-500">这里确认的是镜头语义真值，后续工作室可以微调，但仍然写回同一份分镜详情。</div>
-            </div>
-            <Button type="primary" size="small" loading={semanticSaving} onClick={onSave}>
-              保存
-            </Button>
+          <div>
+            <div className="text-xs font-medium text-slate-800">镜头语言默认值</div>
+            <div className="mt-1 text-[11px] text-slate-500">这里确认的是镜头语义真值，后续工作室可以微调，但仍然写回同一份分镜详情。</div>
           </div>
 
           <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -224,6 +206,12 @@ export function ChapterShotBasicInfoSection({
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="flex justify-end pt-1">
+        <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={onSave}>
+          保存基础信息
+        </Button>
       </div>
     </div>
   )

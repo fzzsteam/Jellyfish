@@ -19,17 +19,13 @@
 - 在「基础信息」Tab 内容整体底部新增一个单一的「保存基础信息」主按钮，点击后仍调用现有 `onSave` → `saveShot()`，保存范围和现在完全一致（标题/剧本摘录 + camera_shot/angle/movement/duration/action_beats 一次性提交）。
 - 组件现有的 `saving`、`semanticSaving` 两个 loading 状态本来就由 `saveShot()` 同步置位/复位，按钮合并后不再需要区分，合并为一个 `saving` 状态，`ChapterShotEditPage.tsx` 中对应精简。
 
-### 二、动作拍点阶段支持手动指定
+### 二、动作拍点阶段支持手动指定（已撤销，不实施）
 
-现状：阶段值完全是运行时计算结果，没有任何存储位置——无论是页面展示还是关键帧生成时挑选主拍点，都是各自独立调用 `infer_action_beat_sequence` 现算一遍、用完即弃。因此"手动改一下阶段"如果不新增存储字段，下次读取或下次生成时会被自动推断重新覆盖，等于没有生效。
+最初方案是给 `ShotDetail` 新增 `action_beat_phase_overrides` 字段持久化手动选择的阶段。实现过程中发现：
+- 该字段需要新增数据库列（即使是纯新增、不影响存量数据的 `ALTER TABLE`），涉及模型/schema/迁移 SQL/多处服务调用点的改动。
+- 用户在评审时明确表示不希望新增字段/改动数据库结构；在确认现有自动推断已经带有「关键词命中优先、无命中则按位置兜底（首条 trigger、总数≥3 时末条 aftermath、其余 peak）」的完整兜底逻辑、不会出现空标签后，决定维持现状，不做手动覆盖能力。
 
-- 后端 `ShotDetail` 新增字段 `action_beat_phase_overrides`：JSON 字典，`{ "<index>": "trigger" | "peak" | "aftermath" }`，key 为该条拍点在 `action_beats` 列表中的下标（字符串形式）。未出现在字典里的下标视为「自动推断」。纯新增列，不改动、不迁移现有 `action_beats` 数据。
-- `app/services/studio/action_beats.py`：`infer_action_beat_sequence` / `pick_action_beat_for_frame` 增加可选 `overrides: dict[str, ActionBeatPhase] | None` 参数——某条下标有手动值就直接采用，否则维持原有关键词推断兜底逻辑不变。
-- `backend/app/services/film/shot_frame_prompt_tasks.py` 中调用上述函数的地方，把 `shot_detail.action_beat_phase_overrides` 一并传入，让手动指定真正影响关键帧生成提示词。
-- Schema 层：`app/schemas/studio/shots.py` 的 `ShotDetailRead` / `ShotDetailUpdate`（以及相关 Create/内部 DTO）补充该字段；`ActionBeatPhaseRead` 等只读展示模型不变。
-- 前端 `ChapterShotBasicInfoSection.tsx`：每条动作拍点原先的只读 `Tag`（触发/峰值/收束）替换为一个小 `Select`，选项为「触发 / 峰值 / 收束 / 自动推断」；选中「自动推断」等价于清除该下标的手动覆盖。当前显示值 = 有手动覆盖时显示手动值，否则显示后端推断值（`actionBeatPhases` 按下标而非文本匹配，比现有文本匹配方式更稳健）。
-- 手动选择结果作为 `semantic.action_beats` 的兄弟字段随一起合并后的「保存基础信息」按钮一次性提交，不新增额外的保存入口。
-- 新增拍点时不特殊处理，默认沿用现有自动推断逻辑（不在本次改动范围内）。
+结论：本次不改动 `action_beats.py` 的推断逻辑，也不新增任何存储字段；`触发/峰值/收束` 标签继续保持只读、实时推断。
 
 ### 三、Tab 导航条吸顶悬浮
 
@@ -39,14 +35,12 @@
 
 ## 影响范围 / 收尾检查
 
-- 后端 API 有变更（新增 `action_beat_phase_overrides` 字段）：需要运行 `pnpm run openapi:update` 同步前端生成客户端。
-- 新增/改动的函数、类按仓库规范补充「做什么 + 为什么存在」的注释（尤其是 overrides 参数的引入原因）。
-- 影响当前系统行为（动作拍点阶段现在可手动持久化），需要更新 `site/content/docs/architecture/` 中相关描述。
-- 前端改动需通过 `pnpm exec tsc --noEmit`；后端改动需通过相关测试或至少语法/导入校验。
+- 本次不涉及后端 API 变更，无需运行 `pnpm run openapi:update`。
+- 前端改动需通过 `pnpm exec tsc --noEmit`。
 - 不涉及 `shot.status` / video-readiness 语义，不改动分镜工作室（`ChapterStudio.tsx`）。
 
 ## 不在本次范围内
 
+- 动作拍点阶段手动覆盖（评审后撤销，见上）。
 - 「自动推断」关键词规则本身的准确性优化。
-- 新增拍点时的阶段初始化逻辑（沿用现状）。
 - 关键帧生成弹窗、视频提示词预览弹窗的其余交互改动。

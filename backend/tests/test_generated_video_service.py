@@ -91,6 +91,37 @@ async def test_file_id_to_access_url_uses_external_signed_url(monkeypatch: pytes
     await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_file_id_to_access_url_falls_back_to_data_url_for_localhost(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Local RustFS/MinIO presigned URLs are not provider-fetchable, so video references fall back to data URLs."""
+    db, engine = await _build_session()
+    async with db:
+        db.add(FileItem(id="file-1", type=FileType.image, name="asset.png", storage_key="assets/asset.png", user_id="test-user"))
+        await db.commit()
+
+        async def _fake_signed_external_download_url(*, key: str, expires: int = 3600) -> str:
+            return f"http://localhost:9000/jellyfish-assets/{key}?expires={expires}"
+
+        async def _fake_download_file(*, key: str) -> bytes:
+            return b"fake-image-data"
+
+        async def _fake_get_file_info(*, key: str):
+            class _Info:
+                content_type = "image/png"
+
+            return _Info()
+
+        monkeypatch.setattr(
+            "app.services.film.generated_video.storage.signed_external_download_url",
+            _fake_signed_external_download_url,
+        )
+        monkeypatch.setattr("app.services.film.generated_video.storage.download_file", _fake_download_file)
+        monkeypatch.setattr("app.services.film.generated_video.storage.get_file_info", _fake_get_file_info)
+
+        assert await file_id_to_access_url(db, file_id="file-1") == "data:image/png;base64,ZmFrZS1pbWFnZS1kYXRh"
+    await engine.dispose()
+
+
 async def _seed_shot_graph(db: AsyncSession) -> None:
     db.add(User(id="test-user", username="test-user", hashed_password="x"))
     project = Project(
@@ -145,6 +176,11 @@ async def test_validate_images_count_rejects_wrong_count() -> None:
 
     assert exc_info.value.status_code == 400
     assert "requires exactly 2 images" in exc_info.value.detail
+
+
+def test_validate_images_count_allows_default_asset_images_for_text_only() -> None:
+    """未手动选择参考模式时，text_only 承载第二步已确认资产图片作为默认参考素材。"""
+    validate_images_count("text_only", ["asset-file-1", "asset-file-2"])
 
 
 def test_resolve_provider_key_from_name_supports_known_aliases() -> None:

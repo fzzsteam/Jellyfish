@@ -21,3 +21,4 @@ export type ApiResponse_ProjectCharacterLinkRead_ = {
      */
     meta?: (Record<string, any> | null);
 };
+

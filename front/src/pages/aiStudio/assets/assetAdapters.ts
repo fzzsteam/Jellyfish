@@ -81,6 +81,21 @@ export const assetAdapters = {
       })
       return res.data?.task_id ?? null
     },
+    renderPromptPreview: async (id: string, imageId: number, payload) => {
+      const res = await StudioImageTasksService.renderCharacterImagePromptApiV1StudioImageTasksCharactersCharacterIdRenderPromptPost({
+        characterId: id,
+        requestBody: {
+          image_id: imageId,
+          prompt: payload.prompt,
+          images: payload.images,
+        },
+      })
+      if (!res.data) return null
+      return {
+        prompt: res.data.prompt ?? '',
+        images: res.data.images ?? [],
+      }
+    },
   } satisfies AdapterConfig<any, any>,
   actor: {
     missingAssetIdText: '缺少 actor_id',
@@ -131,6 +146,21 @@ export const assetAdapters = {
         },
       })
       return res.data?.task_id ?? null
+    },
+    renderPromptPreview: async (id: string, imageId: number, payload) => {
+      const res = await StudioImageTasksService.renderActorImagePromptApiV1StudioImageTasksActorsActorIdRenderPromptPost({
+        actorId: id,
+        requestBody: {
+          image_id: imageId,
+          prompt: payload.prompt,
+          images: payload.images,
+        },
+      })
+      if (!res.data) return null
+      return {
+        prompt: res.data.prompt ?? '',
+        images: res.data.images ?? [],
+      }
     },
   } satisfies AdapterConfig<any, any>,
   scene: {
@@ -184,6 +214,22 @@ export const assetAdapters = {
       })
       return res.data?.task_id ?? null
     },
+    renderPromptPreview: async (id: string, imageId: number, payload) => {
+      const res = await StudioImageTasksService.renderAssetImagePromptApiV1StudioImageTasksAssetsAssetTypeAssetIdRenderPromptPost({
+        assetType: 'scene',
+        assetId: id,
+        requestBody: {
+          image_id: imageId,
+          prompt: payload.prompt,
+          images: payload.images,
+        },
+      })
+      if (!res.data) return null
+      return {
+        prompt: res.data.prompt ?? '',
+        images: res.data.images ?? [],
+      }
+    },
   } satisfies AdapterConfig<any, any>,
   prop: {
     missingAssetIdText: '缺少 prop_id',
@@ -236,6 +282,22 @@ export const assetAdapters = {
       })
       return res.data?.task_id ?? null
     },
+    renderPromptPreview: async (id: string, imageId: number, payload) => {
+      const res = await StudioImageTasksService.renderAssetImagePromptApiV1StudioImageTasksAssetsAssetTypeAssetIdRenderPromptPost({
+        assetType: 'prop',
+        assetId: id,
+        requestBody: {
+          image_id: imageId,
+          prompt: payload.prompt,
+          images: payload.images,
+        },
+      })
+      if (!res.data) return null
+      return {
+        prompt: res.data.prompt ?? '',
+        images: res.data.images ?? [],
+      }
+    },
   } satisfies AdapterConfig<any, any>,
   costume: {
     missingAssetIdText: '缺少 costume_id',
@@ -287,6 +349,22 @@ export const assetAdapters = {
         },
       })
       return res.data?.task_id ?? null
+    },
+    renderPromptPreview: async (id: string, imageId: number, payload) => {
+      const res = await StudioImageTasksService.renderAssetImagePromptApiV1StudioImageTasksAssetsAssetTypeAssetIdRenderPromptPost({
+        assetType: 'costume',
+        assetId: id,
+        requestBody: {
+          image_id: imageId,
+          prompt: payload.prompt,
+          images: payload.images,
+        },
+      })
+      if (!res.data) return null
+      return {
+        prompt: res.data.prompt ?? '',
+        images: res.data.images ?? [],
+      }
     },
   } satisfies AdapterConfig<any, any>,
 }

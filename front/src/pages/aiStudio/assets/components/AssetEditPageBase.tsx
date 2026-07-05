@@ -17,12 +17,10 @@ import {
   message,
 } from 'antd'
 import { ArrowLeftOutlined, CheckOutlined, CloseCircleOutlined, EditOutlined, ReloadOutlined, UploadOutlined } from '@ant-design/icons'
-import { FilmService, LlmService, ScriptProcessingService, StudioEntitiesService, StudioFilesService } from '../../../../services/generated'
+import { FilmService, LlmService, ScriptProcessingService, StudioFilesService } from '../../../../services/generated'
 import type { AssetImageCandidateRead, ModelRead, ProviderRead, TaskStatus } from '../../../../services/generated'
 import { buildFileDownloadUrl } from '../utils'
 import { AssetImageCandidateGallery } from './AssetImageCandidateGallery'
-import { MentionEditor } from './MentionEditor'
-import type { MentionAssetKind, MentionImageOption } from './MentionEditor'
 import { DisplayImageCard } from './DisplayImageCard'
 import { defaultTaskActionErrorMessage, executeAsyncTaskCreate, executeTaskCancel, notifyExistingTask } from '../../components/taskActionHelpers'
 import { handleTaskResultSafely } from '../../components/taskResultHelpers'
@@ -96,6 +94,11 @@ type ImageGenerationPayload = {
 
 type AssetImageResolutionProfile = 'standard' | 'high'
 
+type RenderedPromptPreview = {
+  prompt: string
+  images: string[]
+}
+
 const ASSET_IMAGE_RESOLUTION_OPTIONS: Array<{ value: AssetImageResolutionProfile; label: string }> = [
   { value: 'standard', label: '1K' },
   { value: 'high', label: '2K' },
@@ -133,6 +136,7 @@ export type AssetEditPageBaseProps<TAsset extends BaseAsset, TImage extends Base
   adoptImageCandidate: (assetId: string, imageId: number, candidateId: number) => Promise<void>
   deleteImageCandidate: (assetId: string, imageId: number, candidateId: number) => Promise<void>
   createGenerationTask: (assetId: string, imageId: number, payload: ImageGenerationPayload) => Promise<string | null>
+  renderPromptPreview: (assetId: string, imageId: number, payload: { prompt: string; images: string[] }) => Promise<RenderedPromptPreview | null>
   attachImageCandidates?: (assetId: string, imageId: number, fileIds: string[]) => Promise<void>
   onNavigate: (to: string, replace?: boolean) => void
 }

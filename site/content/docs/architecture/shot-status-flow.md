@@ -90,18 +90,21 @@ shot_extracted_dialogue_candidates
 
 当前分镜准备页只把角色、场景、道具作为需要用户确认的资产候选。`costume` 候选仍可保留在提取明细中，但不再计入 `asset_candidate_total` / `pending_asset_count`，也不会阻塞 `shot.status = ready`。
 
-## `video-readiness` 与生成按钮
+## `video-readiness` 与生成入口
 
-视频生成按钮必须由 `video-readiness` 结果控制，而不是由 `shot.status` 直接控制。
+`video-readiness` 是视频生成准备度诊断，不再作为单镜头“生成视频”按钮的唯一硬拦截。
+前端应将它展示为风险提示、补齐建议和诊断入口；用户仍可在看到未通过项后继续进入提示词预览并尝试生成。
 
-建议遵守以下前端规则：
+当前前端规则：
 
 - `shot.status = pending`
   - 直接提示继续做提取确认。
+- `shot.status = ready` 且基础必填项缺失
+  - 继续硬拦截，例如镜头时长、视频比例、视频模型、积分试算凭证等。
 - `shot.status = ready` 且 `video-readiness` 仍有缺口
-  - 允许展示“准备完成”，但按钮保持禁用或引导先补关键帧 / 参考图 / 参数。
+  - 展示未通过诊断项，并在用户点击生成入口时提示风险，但允许继续进入提示词预览。
 - `shot.status = ready` 且 `video-readiness` 通过
-  - 才展示为可发起视频生成。
+  - 展示为准备度通过，可直接进入提示词预览。
 
 诊断项展示时：
 

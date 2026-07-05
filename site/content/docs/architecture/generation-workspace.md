@@ -69,6 +69,8 @@ backend/app/services/studio/generation/
 - `build_submission`
 
 当前 `preview-prompt` 与 `create video task` 已共享同一份 `reference_mode + images` 上下文。
+镜头详情“生成视频”步骤中，参考模式为空表示未手动选择首帧 / 尾帧 / 关键帧模式；前端会以 `text_only` 作为后端契约值，并把第二步“资产与对白确认”中已确认资产的图片 file_id 放入 `images`，供提示词预览与视频生成任务共用。
+视频任务提交给外部供应商时，若对象存储签出的“外部 URL”仍指向 `localhost`、回环地址或私网地址，后端会回退为 data URL，避免把供应商无法访问的本地 RustFS / MinIO 地址传给模型。
 其中工作室当前使用的 `film/tasks/video/preview-prompt` 也会返回完整 `pack`：
 
 - `previous_shot_summary`
@@ -218,6 +220,10 @@ front/src/pages/aiStudio/hooks/useGenerationDraft.ts
 
 - 关键帧提示词预览
 - 视频提示词预览
+
+当前单镜头 `video-readiness` 的职责是诊断和风险提示：它说明关键帧、参考图、参数或模型配置是否完整。
+诊断未通过时，前端会提示用户存在风险并保留“诊断”入口，但不再把该结果作为进入视频提示词预览的唯一硬拦截。
+硬拦截仍保留在基础必填项上，例如镜头时长、视频比例、视频模型和积分试算凭证。
 
 接入 `useGenerationDraft`，逐步统一为：
 

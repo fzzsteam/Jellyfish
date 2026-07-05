@@ -14,7 +14,7 @@ export function getChapterShotEditPath(projectId: string, chapterId: string, sho
   return `/projects/${projectId}/chapters/${chapterId}/shots/${shotId}/edit`
 }
 
-export type ShotDetailTabKey = 'basic' | 'confirm' | 'generate' | 'results'
+export type ShotDetailTabKey = 'basic' | 'confirm' | 'generate'
 
 /**
  * 生成分镜详情页地址，用于在不同业务入口间稳定跳转到指定详情标签。

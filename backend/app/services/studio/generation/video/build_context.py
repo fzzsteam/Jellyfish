@@ -22,6 +22,12 @@ def required_image_count(reference_mode: str) -> int:
 
 
 def validate_images_count(reference_mode: str, images: list[str]) -> None:
+    """校验显式帧参考图数量。
+
+    `text_only` 是无手动帧模式：允许携带第二步已确认资产图片，供 r2v 模型作为默认参考素材。
+    """
+    if reference_mode == "text_only":
+        return
     expected = required_image_count(reference_mode)
     actual = len(images or [])
     if actual != expected:

@@ -19,7 +19,7 @@ export type VideoPromptPreviewRequest = {
      */
     prompt?: (string | null);
     /**
-     * 参考图 file_id 列表
+     * 参考图 file_id 列表；未手动选择帧模式时可携带已确认资产图
      */
     images?: Array<string>;
     /**

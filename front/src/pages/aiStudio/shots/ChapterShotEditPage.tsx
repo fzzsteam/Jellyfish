@@ -46,6 +46,7 @@ import {
   getChapterShotsPath,
   type ShotDetailTabKey,
 } from '../project/ProjectWorkbench/routes'
+import { useProjectStyleOptions } from '../project/useProjectStyleOptions'
 import { DisplayImageCard } from '../assets/components/DisplayImageCard'
 import { AssetPickerDrawer } from './components/AssetPickerDrawer'
 import { ChapterShotAssetConfirmation } from './components/ChapterShotAssetConfirmation'
@@ -82,6 +83,7 @@ const chapterDivisionTaskCopy = TASK_COPY.chapterDivision
 const extractTaskCopy = TASK_COPY.scriptExtract
 
 type AssetKind = 'scene' | 'actor' | 'prop' | 'costume'
+type AssetPickerKind = AssetKind | 'all'
 type VideoModelOption = ModelRead & {
   provider_name: string
 }
@@ -129,7 +131,7 @@ type ShotAssetCreatedAndLinkedMessage = {
   assetName?: string
 }
 
-const SHOT_DETAIL_TAB_KEYS: readonly ShotDetailTabKey[] = ['basic', 'confirm', 'generate', 'results']
+const SHOT_DETAIL_TAB_KEYS: readonly ShotDetailTabKey[] = ['basic', 'confirm', 'generate']
 const VIDEO_GENERATION_RELATION_TYPE = 'video'
 const SUPPORTED_VIDEO_RATIOS = new Set<VideoRatio>(['16:9', '4:3', '1:1', '3:4', '9:16', '21:9'])
 
@@ -225,16 +227,44 @@ function getExtractionStateMeta(
 // 视频提示词预览弹窗展示参考模式时用的文案，需与 ShotVideoGenerationTab.tsx 里
 // REFERENCE_MODE_OPTIONS 的 label 保持一致（两处各自维护，避免为了一个只读展示字符串
 // 而在组件间建立额外的类型/常量导出耦合）。
-const VIDEO_REFERENCE_MODE_LABEL: Record<
-  'first' | 'last' | 'key' | 'first_last' | 'first_last_key' | 'text_only',
-  string
-> = {
+type VideoReferenceMode = 'first' | 'last' | 'key' | 'first_last' | 'first_last_key' | 'text_only'
+type VideoReferenceModeSelection = VideoReferenceMode | null
+
+const VIDEO_REFERENCE_MODE_LABEL: Record<VideoReferenceMode, string> = {
   text_only: '纯文字（不用参考帧）',
   first: '首帧参考',
   last: '尾帧参考',
   key: '关键帧参考',
   first_last: '首尾帧',
   first_last_key: '首尾 + 关键帧',
+}
+
+/**
+ * 把第三步空参考模式转换为后端稳定契约。
+ * 空值表示未手动选择帧模式：后端仍使用 text_only，但请求携带第二步已确认资产图片。
+ */
+function buildVideoReferencePayload(
+  selection: VideoReferenceModeSelection,
+  defaultAssetFileIds: string[],
+): { referenceMode: VideoReferenceMode; images: string[] } {
+  if (selection) return { referenceMode: selection, images: [] }
+  return { referenceMode: 'text_only', images: defaultAssetFileIds }
+}
+
+/**
+ * 生成预览弹窗里展示的参考模式文案，避免 null 直接索引枚举文案表。
+ */
+function getVideoReferenceModeLabel(selection: VideoReferenceModeSelection): string {
+  return selection ? VIDEO_REFERENCE_MODE_LABEL[selection] : '默认资产图片（第二步已确认）'
+}
+
+/**
+ * 判断当前视频准备度失败是否来自参考帧缺失。
+ * 单镜头生成允许用户带风险继续，但旧视频任务接口会按 reference_mode 强制解析帧图；
+ * 因此只有参考帧缺失时需要把本次预览/提交降级为 text_only，其他诊断项仍保持原模式。
+ */
+function hasMissingVideoReferenceFrames(readiness: ShotVideoReadinessRead | null): boolean {
+  return (readiness?.checks ?? []).some((check) => check.key === 'reference_frames_ready' && !check.ok)
 }
 
 function getShotExtractionSummary(shot: ShotRead | null | undefined): ShotExtractionSummaryRead {
@@ -294,6 +324,7 @@ export function ChapterShotEditPage() {
   const [projectVisualStyle, setProjectVisualStyle] = useState<string>('现实')
   const [projectStyle, setProjectStyle] = useState<string>('真人都市')
   const [projectDefaultVideoRatio, setProjectDefaultVideoRatio] = useState<string>('')
+  const { videoRatioOptions, defaultVideoRatio: capabilityDefaultVideoRatio } = useProjectStyleOptions()
   const [shots, setShots] = useState<ShotRead[]>([])
   const [shot, setShot] = useState<ShotRead | null>(null)
   const [title, setTitle] = useState('')
@@ -319,6 +350,8 @@ export function ChapterShotEditPage() {
   const [insertForm] = Form.useForm<{ title: string; script_excerpt?: string }>()
   const extractInFlightRef = useRef(false)
   const [selectedShotIds, setSelectedShotIds] = useState<string[]>([])
+  // 镜头 ID -> 用户在“视频结果”里选中的文件 ID，跨 tab 切换、跨镜头保留，供顶部批量下载复用。
+  const [selectedVideosByShot, setSelectedVideosByShot] = useState<Record<string, string>>({})
   const pendingExternalAssetCreateRef = useRef(false)
   const hasHydratedPageRef = useRef(false)
 
@@ -387,8 +420,8 @@ export function ChapterShotEditPage() {
   }> | undefined>(undefined)
   const [firstFrameReadiness, setFirstFrameReadiness] = useState<ShotVideoReadinessRead | null>(null)
   const [firstFrameReadinessLoading, setFirstFrameReadinessLoading] = useState(false)
-  // 参考模式：决定生成视频时需要哪些帧类型（首帧/尾帧/关键帧）参与，骨架阶段先本地维护、不联动生成请求体。
-  const [videoReferenceMode, setVideoReferenceMode] = useState<'first' | 'last' | 'key' | 'first_last' | 'first_last_key' | 'text_only'>('first')
+  // 参考模式：null 表示不手动选择帧模式，生成视频时复用第二步已确认资产图片。
+  const [videoReferenceMode, setVideoReferenceMode] = useState<VideoReferenceModeSelection>(null)
   // 当前镜头细节下的分镜帧图片槽位（首帧/尾帧/关键帧各一条，含当前使用中的 file_id）。
   const [frameImages, setFrameImages] = useState<ShotFrameImageRead[]>([])
   // 各帧类型的历史候选缩略图（来自任务关联记录），供关键帧卡片展示与切换使用。
@@ -409,7 +442,7 @@ export function ChapterShotEditPage() {
   // 关键帧生成弹窗里从项目资产库临时挑选的参考图（不写入镜头资产关联关系，仅本次生成使用）。
   const [keyframeModalExtraOptions, setKeyframeModalExtraOptions] = useState<KeyframeReferenceOption[]>([])
   const [assetPickerOpen, setAssetPickerOpen] = useState(false)
-  const [assetPickerKind, setAssetPickerKind] = useState<AssetKind>('scene')
+  const [assetPickerKind, setAssetPickerKind] = useState<AssetPickerKind>('all')
   const [assetPickerReplaceFileId, setAssetPickerReplaceFileId] = useState<string | null>(null)
   const [assetPickerLoading, setAssetPickerLoading] = useState(false)
   // 关键帧生成的积分试算：独立于资产图片生成的 imageQuote 实例，因为需要额外传 resolutionProfile
@@ -579,6 +612,18 @@ export function ChapterShotEditPage() {
     () => [...keyframeReferenceOptions, ...keyframeModalExtraOptions],
     [keyframeReferenceOptions, keyframeModalExtraOptions],
   )
+  // 第三步未选择参考模式时，默认沿用第二步已确认资产图片作为视频参考素材。
+  const defaultVideoReferenceImageIds = useMemo(() => {
+    const seen = new Set<string>()
+    const ids: string[] = []
+    keyframeReferenceOptions.forEach((option) => {
+      const fileId = (option.file_id || '').trim()
+      if (!fileId || seen.has(fileId)) return
+      seen.add(fileId)
+      ids.push(fileId)
+    })
+    return ids
+  }, [keyframeReferenceOptions])
 
   // 把基础提示词 + 有序参考图渲染为最终提示词：调用 render-prompt 接口拿到 token 映射与
   // guidance 取舍结果。这一步不消耗积分（只读渲染），真正计费点在"AI 生成基础提示词"与
@@ -1232,13 +1277,14 @@ export function ChapterShotEditPage() {
     }
     const requestShotId = shotId
     const requestSeq = ++firstFrameReadinessRequestSeqRef.current
+    const referencePayload = buildVideoReferencePayload(videoReferenceMode, defaultVideoReferenceImageIds)
     setFirstFrameReadinessLoading(true)
     setFirstFrameReadiness(null)
     void (async () => {
       try {
         const res = await StudioShotsService.getShotVideoReadinessApiApiV1StudioShotsShotIdVideoReadinessGet({
           shotId: requestShotId,
-          referenceMode: videoReferenceMode,
+          referenceMode: referencePayload.referenceMode,
         })
         if (requestSeq !== firstFrameReadinessRequestSeqRef.current || currentShotIdRef.current !== requestShotId) return
         setFirstFrameReadiness(res.data ?? null)
@@ -1251,7 +1297,7 @@ export function ChapterShotEditPage() {
         }
       }
     })()
-  }, [preparationState?.ready_for_generation, shotId, videoReferenceMode])
+  }, [defaultVideoReferenceImageIds, preparationState?.ready_for_generation, shotId, videoReferenceMode])
 
   // 拉取当前镜头细节下的分镜帧图片槽位（首帧/尾帧/关键帧），用于展示"当前使用中"图片与定位候选查询所需的槽位 id。
   // 沿用文件里其它镜头维度请求的约定：响应返回前对比 currentShotIdRef，丢弃已经切换镜头后的过期响应。
@@ -1387,23 +1433,22 @@ export function ChapterShotEditPage() {
     [keyframePromptDraft, keyframeReferenceOptions, shotDetail],
   )
 
-  // 打开资产选择抽屉以"新增"一个临时参考图（不区分具体替换目标）。
-  const openAssetPickerForKeyframe = useCallback((kind: AssetKind) => {
-    setAssetPickerKind(kind)
+  // 打开资产选择抽屉以"新增"一个临时参考图：抽屉内可切换角色/场景/道具/服装。
+  const openAssetPickerForKeyframe = useCallback(() => {
+    setAssetPickerKind('all')
     setAssetPickerReplaceFileId(null)
     setAssetPickerOpen(true)
   }, [])
 
   // 打开资产选择抽屉以"替换"已选参考图列表里的某一项：按 fileId 反查其所属资产类别，
-  // 抽屉内选中新资产后会把该 fileId 原地替换掉（顺序位置不变）。
+  // 抽屉内可切换资产类型；选中新资产后会把该 fileId 原地替换掉（顺序位置不变）。
   const openAssetPickerToReplaceKeyframe = useCallback(
     (fileId: string) => {
-      const matched = [...keyframeReferenceOptions, ...keyframeModalExtraOptions].find((option) => option.file_id === fileId)
-      setAssetPickerKind(matched?.kind ?? 'scene')
+      setAssetPickerKind('all')
       setAssetPickerReplaceFileId(fileId)
       setAssetPickerOpen(true)
     },
-    [keyframeReferenceOptions, keyframeModalExtraOptions],
+    [],
   )
 
   /**
@@ -1411,10 +1456,11 @@ export function ChapterShotEditPage() {
    * 不调用任何镜头关联接口——用户明确要求这里只是"这次生成用一下"，不落库到镜头资产关联关系。
    */
   const handleKeyframeAssetPicked = useCallback(
-    async (entityId: string, entityName: string) => {
+    async (entityId: string, entityName: string, pickedKind?: AssetKind) => {
       setAssetPickerLoading(true)
       try {
-        const entityType = assetPickerKind === 'actor' ? 'character' : assetPickerKind
+        const effectiveKind = pickedKind ?? (assetPickerKind === 'all' ? 'scene' : assetPickerKind)
+        const entityType = effectiveKind === 'actor' ? 'character' : effectiveKind
         const res = await StudioEntitiesApi.get(entityType as any, entityId)
         const data: any = res.data
         const rawThumb = data?.thumbnail ?? data?.images?.[0]?.thumbnail ?? ''
@@ -1424,7 +1470,7 @@ export function ChapterShotEditPage() {
           return
         }
         const newOption: KeyframeReferenceOption = {
-          kind: assetPickerKind,
+          kind: effectiveKind,
           type: entityType as ShotLinkedAssetItem['type'],
           id: entityId,
           name: entityName,
@@ -1772,7 +1818,7 @@ export function ChapterShotEditPage() {
     onCancel: videoGenerationRelation ? () => void cancelVideoGeneration() : null,
     onNavigate:
       projectId && chapterId && shotId
-        ? () => navigate(getChapterShotDetailPath(projectId, chapterId, shotId, 'results'))
+        ? () => navigate(getChapterShotDetailPath(projectId, chapterId, shotId, 'generate'))
         : null,
   })
 
@@ -2279,9 +2325,39 @@ export function ChapterShotEditPage() {
     [applyPreparationState, loadPreparationState, shotId],
   )
 
+  const effectiveProjectDefaultVideoRatio = projectDefaultVideoRatio || capabilityDefaultVideoRatio
   const resolvedVideoRatio = useMemo(
-    () => resolveVideoRatio(shotDetail, projectDefaultVideoRatio),
-    [projectDefaultVideoRatio, shotDetail],
+    () => resolveVideoRatio(shotDetail, effectiveProjectDefaultVideoRatio),
+    [effectiveProjectDefaultVideoRatio, shotDetail],
+  )
+
+  /**
+   * 更新当前镜头的视频比例覆盖值。
+   * 生成视频与关键帧生成都依赖 resolvedVideoRatio，因此这里采用乐观更新并立即落库。
+   */
+  const updateShotVideoRatio = useCallback(
+    async (ratio: string | null) => {
+      if (!shotId) return
+      const nextRatio = toSupportedVideoRatio(ratio)
+      if (ratio && !nextRatio) {
+        message.warning('不支持的视频比例')
+        return
+      }
+      const previousRatio = shotDetail?.override_video_ratio ?? null
+      setShotDetail((prev) => (prev ? { ...prev, override_video_ratio: nextRatio } : prev))
+      try {
+        const res = await StudioShotDetailsService.updateShotDetailApiV1StudioShotDetailsShotIdPatch({
+          shotId,
+          requestBody: { override_video_ratio: nextRatio },
+        })
+        if (res.data) setShotDetail(res.data)
+        message.success(nextRatio ? `已设置视频比例 ${nextRatio}` : '已恢复项目默认视频比例')
+      } catch {
+        setShotDetail((prev) => (prev ? { ...prev, override_video_ratio: previousRatio } : prev))
+        message.error('视频比例保存失败')
+      }
+    },
+    [shotDetail?.override_video_ratio, shotId],
   )
 
   /**
@@ -2464,7 +2540,7 @@ export function ChapterShotEditPage() {
 
   /**
    * 打开单镜头视频提示词预览。
-   * 使用用户在"参考模式"里选择的 videoReferenceMode；提交前先让用户确认提示词和积分消耗。
+   * 参考模式为空时携带第二步已确认资产图片；提交前先让用户确认提示词和积分消耗。
    */
   const openVideoPromptPreview = useCallback(async () => {
     if (!shotId) {
@@ -2495,12 +2571,20 @@ export function ChapterShotEditPage() {
       // 不同参考模式的缺口可能是参考帧、模型、时长等任意一项；直接取后端返回的第一条未通过检查项文案，
       // 避免固定提示"参考帧未就绪"——比如 text_only 模式本就不需要参考帧，卡在别的原因时这句话会指向不存在的入口。
       const failingCheck = firstFrameReadiness?.checks?.find((check) => !check.ok)
-      message.warning(failingCheck?.message || '当前镜头暂不满足生成条件，请查看诊断')
-      return
+      const missingReferenceFrames = hasMissingVideoReferenceFrames(firstFrameReadiness)
+      message.warning(
+        missingReferenceFrames
+          ? `${failingCheck?.message || '当前参考模式缺少参考帧'}，将按纯文字继续预览`
+          : failingCheck?.message || '当前镜头有未通过的诊断项，仍可继续预览并尝试生成',
+      )
     }
 
     const requestShotId = shotId
     const requestSeq = ++videoPromptPreviewRequestSeqRef.current
+    const referencePayload = buildVideoReferencePayload(videoReferenceMode, defaultVideoReferenceImageIds)
+    const effectiveReferencePayload = hasMissingVideoReferenceFrames(firstFrameReadiness)
+      ? { referenceMode: 'text_only' as VideoReferenceMode, images: [] }
+      : referencePayload
     setVideoPromptPreviewDraft('')
     setVideoPromptPreviewPack(null)
     setVideoPromptPreviewImages([])
@@ -2512,9 +2596,9 @@ export function ChapterShotEditPage() {
       const res = await FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost({
         requestBody: {
           shot_id: requestShotId,
-          reference_mode: videoReferenceMode,
+          reference_mode: effectiveReferencePayload.referenceMode,
           prompt: null,
-          images: [],
+          images: effectiveReferencePayload.images,
           ratio: resolvedVideoRatio,
         },
       })
@@ -2535,6 +2619,8 @@ export function ChapterShotEditPage() {
       }
     }
   }, [
+    defaultVideoReferenceImageIds,
+    firstFrameReadiness?.checks,
     firstFrameReadiness?.ready,
     firstFrameReadinessLoading,
     preparationState?.ready_for_generation,
@@ -2578,13 +2664,17 @@ export function ChapterShotEditPage() {
 
     setVideoPromptPreviewSubmitting(true)
     try {
+      const referencePayload = buildVideoReferencePayload(videoReferenceMode, defaultVideoReferenceImageIds)
+      const effectiveReferencePayload = hasMissingVideoReferenceFrames(firstFrameReadiness)
+        ? { referenceMode: 'text_only' as VideoReferenceMode, images: [] }
+        : referencePayload
       const created = await FilmService.createVideoGenerationTaskApiV1FilmTasksVideoPost({
         requestBody: {
           shot_id: shotId,
           model_id: selectedVideoModelId,
-          reference_mode: videoReferenceMode,
+          reference_mode: effectiveReferencePayload.referenceMode,
           prompt,
-          images: [],
+          images: effectiveReferencePayload.images,
           ratio: resolvedVideoRatio,
           resolution: videoResolution,
           quote_token: videoQuote.quoteToken,
@@ -2613,6 +2703,8 @@ export function ChapterShotEditPage() {
       setVideoPromptPreviewSubmitting(false)
     }
   }, [
+    defaultVideoReferenceImageIds,
+    firstFrameReadiness,
     resolvedVideoRatio,
     selectedVideoModelId,
     setTrackedVideoGeneration,
@@ -2640,9 +2732,10 @@ export function ChapterShotEditPage() {
     setVideoDiagnosticsReadiness(null)
     setVideoDiagnosticsBatchItems(undefined)
     try {
+      const referencePayload = buildVideoReferencePayload(videoReferenceMode, defaultVideoReferenceImageIds)
       const res = await StudioShotsService.getShotVideoReadinessApiApiV1StudioShotsShotIdVideoReadinessGet({
         shotId: requestShotId,
-        referenceMode: videoReferenceMode,
+        referenceMode: referencePayload.referenceMode,
       })
       if (requestSeq !== videoDiagnosticsRequestSeqRef.current || currentShotIdRef.current !== requestShotId) return
       setVideoDiagnosticsReadiness(res.data ?? null)
@@ -2655,7 +2748,7 @@ export function ChapterShotEditPage() {
         setVideoDiagnosticsLoading(false)
       }
     }
-  }, [shotId, videoReferenceMode])
+  }, [defaultVideoReferenceImageIds, shotId, videoReferenceMode])
 
   /**
    * 对任意镜头集合执行生成诊断。
@@ -2840,8 +2933,8 @@ export function ChapterShotEditPage() {
           message.success('视频生成任务已提交')
           void loadPage()
         } else {
-          message.success('视频生成任务已提交，已切到该镜头结果页')
-          goShotToTab(target.id, 'results')
+          message.success('视频生成任务已提交，已切到该镜头生成页')
+          goShotToTab(target.id, 'generate')
         }
         return
       }
@@ -2859,12 +2952,15 @@ export function ChapterShotEditPage() {
   /**
    * 下载目标镜头的已生成视频。
    * 批量模式下逐个触发浏览器下载，不再引入旧工作室的本地目录选择流程。
+   * 优先下载用户在“视频结果”tab 里选中的视频，未选择过的镜头兜底用 generated_video_file_id。
    */
   const downloadVideosForShots = useCallback(async (targetShots: ShotRead[]) => {
     const downloadable = targetShots
       .map((target) => ({
         shot: target,
-        url: buildFileDownloadUrl(target.generated_video_file_id?.trim()),
+        url: buildFileDownloadUrl(
+          (selectedVideosByShot[target.id] || target.generated_video_file_id?.trim()) ?? undefined,
+        ),
       }))
       .filter((item): item is { shot: ShotRead; url: string } => Boolean(item.url))
 
@@ -2888,6 +2984,28 @@ export function ChapterShotEditPage() {
       message.success(downloadable.length === 1 ? '已开始下载视频' : `已开始下载 ${downloadable.length} 条视频`)
     } finally {
       setBatchDownloading(false)
+    }
+  }, [selectedVideosByShot])
+
+  /**
+   * 在“视频结果”网格里选中某个视频：既记录到批量下载使用的本地选中态，
+   * 也写回 generated_video_file_id，让“当前使用”标签与实际选中项保持一致。
+   */
+  const selectVideoResult = useCallback(async (targetShot: ShotRead, fileId: string) => {
+    setSelectedVideosByShot((prev) => ({ ...prev, [targetShot.id]: fileId }))
+    if (targetShot.generated_video_file_id?.trim() === fileId) return
+    try {
+      const res = await StudioShotsService.updateShotApiV1StudioShotsShotIdPatch({
+        shotId: targetShot.id,
+        requestBody: { generated_video_file_id: fileId },
+      })
+      const next = res.data
+      if (next) {
+        setShots((prev) => prev.map((item) => (item.id === next.id ? next : item)))
+        setShot((prev) => (prev && prev.id === next.id ? next : prev))
+      }
+    } catch {
+      message.error('设为当前使用失败')
     }
   }, [])
 
@@ -3210,8 +3328,6 @@ export function ChapterShotEditPage() {
     },
     [setSearchParams, shotId],
   )
-  const goToGenerateTab = () => handleEditorTabChange('generate')
-
   const editorTabItems = [
     {
       key: 'basic',
@@ -3397,70 +3513,57 @@ export function ChapterShotEditPage() {
         </div>
       ),
       children: (
-        <ShotVideoGenerationTab
-          shot={shot}
-          shotDetail={shotDetail}
-          preparationState={preparationState}
-          videoModels={videoModels}
-          selectedVideoModelId={selectedVideoModelId}
-          videoModelsLoading={videoModelsLoading}
-          videoResolution={videoResolution}
-          videoRatio={resolvedVideoRatio}
-          videoReadinessReady={firstFrameReadiness?.ready ?? null}
-          videoReadinessLoading={firstFrameReadinessLoading}
-          referenceMode={videoReferenceMode}
-          onReferenceModeChange={setVideoReferenceMode}
-          keyframeCandidatesByType={keyframeCandidatesByType}
-          keyframeCurrentFileIdByType={{
-            first: frameImages.find((x) => x.frame_type === 'first')?.file_id ?? null,
-            last: frameImages.find((x) => x.frame_type === 'last')?.file_id ?? null,
-            key: frameImages.find((x) => x.frame_type === 'key')?.file_id ?? null,
-          }}
-          keyframeApplyingFileId={keyframeApplyingFileId}
-          onGenerateKeyframe={(frameType) => openKeyframeGenerateModal(frameType)}
-          onApplyKeyframe={(frameType, fileId) => void applyKeyframeCandidate(frameType, fileId)}
-          quoteNode={
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <Typography.Text strong>积分报价</Typography.Text>
-                <div className="mt-1 text-xs text-slate-500">
-                  报价随模型、镜头时长和清晰度变化，提交前会使用当前 quote token 校验。
-                </div>
-              </div>
-              <div className="text-sm">
-                {videoQuote.loading ? (
-                  <Typography.Text type="secondary">试算中...</Typography.Text>
-                ) : videoQuote.error ? (
-                  <Typography.Text type="danger">{videoQuote.error}</Typography.Text>
-                ) : videoQuote.quote ? (
-                  <Typography.Text>
-                    预计消耗 <Typography.Text strong>{videoQuote.quote.required_points.toLocaleString()}</Typography.Text> 积分
-                  </Typography.Text>
-                ) : (
-                  <Typography.Text type="secondary">选择模型并设置时长后显示</Typography.Text>
-                )}
-              </div>
-            </div>
-          }
-          onModelChange={setSelectedVideoModelId}
-          onResolutionChange={setVideoResolution}
-          onOpenDiagnostics={() => void openVideoDiagnostics()}
-          onOpenPromptPreview={() => void openVideoPromptPreview()}
-        />
-      ),
-    },
-    {
-      key: 'results',
-      label: (
-        <div className="flex items-center gap-2">
-          <span
-            className="inline-block h-2 w-2 rounded-full"
-            style={{ background: shot?.generated_video_file_id ? '#22c55e' : '#cbd5e1' }}
-          />
-          <span>4 视频结果</span>
+        <div className="grid min-h-0 items-stretch gap-4 lg:h-[640px] lg:grid-cols-[minmax(0,1fr)_420px]">
+          <div className="min-h-0 min-w-0 overflow-hidden lg:h-full">
+            <ShotVideoResultsTab
+              shot={shot}
+              selectedFileId={shot ? selectedVideosByShot[shot.id] ?? null : null}
+              onSelectVideo={(fileId) => {
+                if (!shot) return
+                void selectVideoResult(shot, fileId)
+              }}
+              onDefaultSelectVideo={(fileId) => {
+                if (!shot) return
+                setSelectedVideosByShot((prev) => (prev[shot.id] ? prev : { ...prev, [shot.id]: fileId }))
+              }}
+            />
+          </div>
+          <div className="min-h-0 min-w-0 overflow-hidden lg:h-full">
+            <ShotVideoGenerationTab
+              shot={shot}
+              shotDetail={shotDetail}
+              preparationState={preparationState}
+              videoModels={videoModels}
+              selectedVideoModelId={selectedVideoModelId}
+              videoModelsLoading={videoModelsLoading}
+              videoResolution={videoResolution}
+              videoRatio={resolvedVideoRatio}
+              videoRatioOptions={videoRatioOptions}
+              videoReadinessReady={firstFrameReadiness?.ready ?? null}
+              videoReadinessLoading={firstFrameReadinessLoading}
+              referenceMode={videoReferenceMode}
+              onReferenceModeChange={setVideoReferenceMode}
+              onVideoRatioChange={(ratio) => void updateShotVideoRatio(ratio)}
+              keyframeCandidatesByType={keyframeCandidatesByType}
+              keyframeCurrentFileIdByType={{
+                first: frameImages.find((x) => x.frame_type === 'first')?.file_id ?? null,
+                last: frameImages.find((x) => x.frame_type === 'last')?.file_id ?? null,
+                key: frameImages.find((x) => x.frame_type === 'key')?.file_id ?? null,
+              }}
+              keyframeApplyingFileId={keyframeApplyingFileId}
+              onGenerateKeyframe={(frameType) => openKeyframeGenerateModal(frameType)}
+              onApplyKeyframe={(frameType, fileId) => void applyKeyframeCandidate(frameType, fileId)}
+              videoQuote={videoQuote.quote}
+              videoQuoteLoading={videoQuote.loading}
+              videoQuoteError={videoQuote.error}
+              onModelChange={setSelectedVideoModelId}
+              onResolutionChange={setVideoResolution}
+              onOpenDiagnostics={() => void openVideoDiagnostics()}
+              onOpenPromptPreview={() => void openVideoPromptPreview()}
+            />
+          </div>
         </div>
       ),
-      children: <ShotVideoResultsTab shot={shot} />,
     },
   ] as const
 
@@ -3748,7 +3851,6 @@ export function ChapterShotEditPage() {
                       checklistItems={checklistItems}
                       nextStepTitle={nextStepTitle}
                       nextStepDescription={nextStepDescription}
-                      onGoToGenerate={goToGenerateTab}
                     />
                   </div>
                 }
@@ -3961,7 +4063,7 @@ export function ChapterShotEditPage() {
         ) : (
           <div className="space-y-3">
             <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-              <div>参考模式：{VIDEO_REFERENCE_MODE_LABEL[videoReferenceMode]}</div>
+              <div>参考模式：{getVideoReferenceModeLabel(videoReferenceMode)}</div>
               <div>视频比例：{resolvedVideoRatio ?? '未设置'}</div>
               <div>清晰度：{videoResolution}</div>
             </div>

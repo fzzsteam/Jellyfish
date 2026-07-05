@@ -1,6 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Button, Image, Input, Modal, Space, Spin, Tag, Tooltip } from 'antd'
-import { ArrowDownOutlined, ArrowUpOutlined } from '@ant-design/icons'
+import { HolderOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
+import { DragDropContext, Draggable, Droppable, type DroppableProps, type DropResult } from 'react-beautiful-dnd'
 import type { FrameGuidanceDecisionRead, PointsQuoteResponse, ShotFrameType, ShotFramePromptMappingRead, ShotLinkedAssetItem } from '../../../../services/generated'
 import type { GenerationDraftState } from '../../hooks/useGenerationDraft'
 import { PointsCostButton } from '../../../../components/points/PointsCostButton'
@@ -107,6 +108,25 @@ function getRenderStatusMeta(state: GenerationDraftState) {
 
 const KIND_LABEL: Record<KeyframeReferenceOption['kind'], string> = { scene: '场景', actor: '角色', prop: '道具', costume: '服装' }
 
+/**
+ * react-beautiful-dnd 在 React 18 StrictMode 开发态会因为重复挂载导致 Droppable 注册失效。
+ * 延迟一帧渲染 Droppable，可保持入口 StrictMode 不变，同时让拖拽区域正常注册。
+ */
+function StrictModeDroppable({ children, ...props }: DroppableProps) {
+  const [enabled, setEnabled] = useState(false)
+
+  useEffect(() => {
+    const animation = requestAnimationFrame(() => setEnabled(true))
+    return () => {
+      cancelAnimationFrame(animation)
+      setEnabled(false)
+    }
+  }, [])
+
+  if (!enabled) return null
+  return <Droppable {...props}>{children}</Droppable>
+}
+
 type ShotKeyframeGenerateModalProps = {
   open: boolean
   frameType: ShotFrameType | null
@@ -119,7 +139,7 @@ type ShotKeyframeGenerateModalProps = {
   imageQuoteLoading: boolean
   imageQuoteError: string | null
   referenceOptions: KeyframeReferenceOption[]
-  onAddReferenceFromLibrary: (kind: KeyframeReferenceOption['kind']) => void
+  onAddReferenceFromLibrary: () => void
   onReplaceReferenceFromLibrary: (fileId: string) => void
   selectedFileIds: string[]
   onChangeSelectedFileIds: (fileIds: string[]) => void
@@ -187,6 +207,7 @@ export function ShotKeyframeGenerateModal({
   const [debugCollapsed, setDebugCollapsed] = useState(true)
   const [directiveCollapsed, setDirectiveCollapsed] = useState(true)
   const [decisionCollapsed, setDecisionCollapsed] = useState(true)
+  const [previewFileId, setPreviewFileId] = useState<string | null>(null)
 
   const nameByFileId = useMemo(() => {
     const map = new Map<string, string>()
@@ -196,14 +217,15 @@ export function ShotKeyframeGenerateModal({
     return map
   }, [referenceOptions])
 
-  const moveFileId = (index: number, direction: -1 | 1) => {
-    const target = index + direction
-    if (target < 0 || target >= selectedFileIds.length) return
-    onChangeSelectedFileIds(reorder(selectedFileIds, index, target))
-  }
-
   const removeFileId = (fileId: string) => {
     onChangeSelectedFileIds(selectedFileIds.filter((id) => id !== fileId))
+  }
+
+  // 拖拽结束后只更新参考图顺序；图1/图2映射由后续 render-prompt 自动同步。
+  const handleReferenceDragEnd = (result: DropResult) => {
+    if (!result.destination) return
+    if (result.destination.index === result.source.index) return
+    onChangeSelectedFileIds(reorder(selectedFileIds, result.source.index, result.destination.index))
   }
 
   const hasBasePrompt = prompt.trim().length > 0
@@ -277,40 +299,102 @@ export function ShotKeyframeGenerateModal({
             <div className="mb-2 flex items-center justify-between">
               <div>
                 <div className="text-sm font-medium text-slate-900">参考图</div>
-                <div className="mt-1 text-xs text-slate-500">图片顺序决定最终提示词里的图1/图2映射，可拖拽替代的上下移动调整；也可从项目资产库新增或替换。</div>
+                <div className="mt-1 text-xs text-slate-500">图片顺序决定最终提示词里的图序映射；拖拽图片主体可调整顺序，也可从项目资产库添加或替换。</div>
               </div>
-              <Tag color="gold">顺序影响图1/图2</Tag>
-            </div>
-            <div className="mb-3 flex flex-wrap gap-2">
-              {(['scene', 'actor', 'prop', 'costume'] as const).map((kind) => (
-                <Button key={kind} size="small" onClick={() => onAddReferenceFromLibrary(kind)}>
-                  {`+ ${KIND_LABEL[kind]}`}
+              <Space size="small">
+                <Tag color="gold">顺序影响图序</Tag>
+                <Button size="small" icon={<PlusOutlined />} onClick={onAddReferenceFromLibrary}>
+                  添加资产
                 </Button>
-              ))}
+              </Space>
             </div>
             {selectedFileIds.length === 0 ? (
-              <div className="text-xs text-gray-400">暂无参考图，可点击上方按钮从资产库新增</div>
+              <div className="text-xs text-gray-400">暂无参考图，可点击“添加资产”从资产库新增</div>
             ) : (
-              <div className="flex gap-3 overflow-x-auto pb-1">
-                <Image.PreviewGroup>
-                  {selectedFileIds.map((fid, index) => (
-                    <div key={fid} className="w-[104px] shrink-0">
-                      <Tooltip title={nameByFileId.get(fid) ?? fid}>
-                        <Image width={80} height={80} style={{ objectFit: 'cover', borderRadius: 8, border: '1px solid #e2e8f0' }} src={buildFileDownloadUrl(fid)} />
-                      </Tooltip>
-                      <div className="mt-1"><Tag color="blue">{`图${index + 1}`}</Tag></div>
-                      <div className="truncate text-[11px] text-gray-700">{nameByFileId.get(fid) ?? fid}</div>
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        <Button size="small" disabled={index === 0} onClick={() => moveFileId(index, -1)} icon={<ArrowUpOutlined />} />
-                        <Button size="small" disabled={index === selectedFileIds.length - 1} onClick={() => moveFileId(index, 1)} icon={<ArrowDownOutlined />} />
-                        <Button size="small" onClick={() => onReplaceReferenceFromLibrary(fid)}>替换</Button>
-                        <Button size="small" danger onClick={() => removeFileId(fid)}>移除</Button>
-                      </div>
+              <DragDropContext onDragEnd={handleReferenceDragEnd}>
+                <StrictModeDroppable droppableId="keyframe-reference-files" direction="horizontal">
+                  {(provided) => (
+                    <div
+                      ref={provided.innerRef}
+                      {...provided.droppableProps}
+                      className="flex gap-3 overflow-x-auto pb-2"
+                    >
+                      {selectedFileIds.map((fid, index) => {
+                        const option = referenceOptions.find((item) => item.file_id === fid)
+                        return (
+                          <Draggable key={fid} draggableId={fid} index={index}>
+                            {(dragProvided, snapshot) => (
+                              <div
+                                ref={dragProvided.innerRef}
+                                {...dragProvided.draggableProps}
+                                className={[
+                                  'w-[132px] shrink-0 rounded-lg border bg-white p-2 shadow-sm transition-shadow',
+                                  snapshot.isDragging ? 'border-blue-400 shadow-md' : 'border-slate-200',
+                                ].join(' ')}
+                              >
+                                <div className="mb-1 flex items-center justify-between gap-1">
+                                  <Tag color="blue" className="!m-0">{`图${index + 1}`}</Tag>
+                                  <span
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded text-slate-400"
+                                    aria-hidden="true"
+                                  >
+                                    <HolderOutlined />
+                                  </span>
+                                </div>
+                                <Tooltip title="按住图片拖拽调整顺序">
+                                  <div
+                                    {...dragProvided.dragHandleProps}
+                                    className="group relative h-[78px] w-[116px] cursor-grab overflow-hidden rounded-lg border border-slate-200 bg-slate-100 active:cursor-grabbing"
+                                  >
+                                    <img
+                                      src={buildFileDownloadUrl(fid)}
+                                      alt={nameByFileId.get(fid) ?? `参考图${index + 1}`}
+                                      className="h-full w-full select-none object-cover"
+                                      draggable={false}
+                                    />
+                                    <button
+                                      type="button"
+                                      className="absolute right-1 top-1 inline-flex h-6 w-6 items-center justify-center rounded bg-white/90 text-slate-600 shadow-sm transition hover:bg-white hover:text-blue-600"
+                                      aria-label="预览参考图"
+                                      onClick={(event) => {
+                                        event.stopPropagation()
+                                        setPreviewFileId(fid)
+                                      }}
+                                    >
+                                      <SearchOutlined className="text-xs" />
+                                    </button>
+                                  </div>
+                                </Tooltip>
+                                <div className="mt-2 flex items-center gap-1">
+                                  {option?.kind ? <Tag className="!m-0" color="default">{KIND_LABEL[option.kind]}</Tag> : null}
+                                  <div className="min-w-0 flex-1 truncate text-[11px] text-gray-700">{nameByFileId.get(fid) ?? fid}</div>
+                                </div>
+                                <div className="mt-2 flex gap-1">
+                                  <Button size="small" className="flex-1" onClick={() => onReplaceReferenceFromLibrary(fid)}>替换</Button>
+                                  <Button size="small" danger onClick={() => removeFileId(fid)}>移除</Button>
+                                </div>
+                              </div>
+                            )}
+                          </Draggable>
+                        )
+                      })}
+                      {provided.placeholder}
                     </div>
-                  ))}
-                </Image.PreviewGroup>
-              </div>
+                  )}
+                </StrictModeDroppable>
+              </DragDropContext>
             )}
+            <Image
+              src={previewFileId ? buildFileDownloadUrl(previewFileId) : undefined}
+              style={{ display: 'none' }}
+              preview={{
+                visible: !!previewFileId,
+                src: previewFileId ? buildFileDownloadUrl(previewFileId) : undefined,
+                onVisibleChange: (visible) => {
+                  if (!visible) setPreviewFileId(null)
+                },
+              }}
+            />
           </div>
 
           <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -498,7 +582,7 @@ export function ShotKeyframeGenerateModal({
                     <div className="mt-2 flex flex-wrap gap-2">
                       {visibleSelectedGuidanceDetails.map((item) => (
                         <Tooltip key={`selected:${item.text}`} title={item.reason}>
-                          <Tag color="green">{item.text}</Tag>
+                          <Tag color="green" className="max-w-full whitespace-normal break-words leading-5">{item.text}</Tag>
                         </Tooltip>
                       ))}
                     </div>
@@ -508,7 +592,7 @@ export function ShotKeyframeGenerateModal({
                     <div className="mt-2 flex flex-wrap gap-2">
                       {visibleDroppedGuidanceDetails.map((item) => (
                         <Tooltip key={`dropped:${item.text}`} title={item.reason}>
-                          <Tag>{item.text}</Tag>
+                          <Tag className="max-w-full whitespace-normal break-words leading-5">{item.text}</Tag>
                         </Tooltip>
                       ))}
                     </div>

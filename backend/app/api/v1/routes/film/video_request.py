@@ -32,7 +32,7 @@ class VideoGenerationTaskRequest(BaseModel):
     )
     images: list[str] = Field(
         default_factory=list,
-        description="参考图 file_id 列表，数量需与 reference_mode 严格匹配",
+        description="参考图 file_id 列表；帧模式需与 reference_mode 数量匹配，text_only 可携带默认资产参考图",
     )
     ratio: VideoRatio = Field(..., description="视频画幅比例，如 16:9 / 9:16")
     # seconds 由 ShotDetail.duration 自动确定；请求体不再接收覆盖值。

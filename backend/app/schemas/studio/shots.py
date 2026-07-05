@@ -71,6 +71,7 @@ class ShotUpdate(BaseModel):
 class ShotRead(ShotBase):
     last_extracted_at: datetime | None = Field(None, description="最近一次完成信息提取的时间")
     extraction: ShotExtractionSummaryRead = Field(..., description="镜头提取状态摘要")
+    duration: int = Field(0, description="镜头预期时长（秒，来自 ShotDetail）；0 表示未设置")
     model_config = ConfigDict(from_attributes=True)
 
 

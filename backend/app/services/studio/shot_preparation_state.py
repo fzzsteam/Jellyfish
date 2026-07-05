@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.studio import Character, ShotCharacterLink
+from app.models.studio import Character, ShotCharacterLink, ShotStatus
 from app.schemas.studio.cast import ShotCharacterLinkCreate
 from app.schemas.studio.shots import ProjectAssetLinkCreate
 from app.schemas.studio.shots import (
@@ -48,10 +48,22 @@ async def build_shot_preparation_state(
         ShotDialogLineRead.model_validate(row)
         for row in await list_saved_dialog_lines_by_shot(db, shot_id=shot_id)
     ]
+    pending_dialogue_count = len([
+        row for row in dialogue_candidates
+        if getattr(row.candidate_status, "value", row.candidate_status) == "pending"
+    ])
     pending_confirm_count = (
         int(assets_overview.summary.pending_count or 0)
-        + int(shot_read.extraction.pending_dialogue_count or 0)
+        + pending_dialogue_count
     )
+    if shot.status != ShotStatus.ready and pending_confirm_count == 0:
+        shot.status = ShotStatus.ready
+        await db.flush()
+        shot_read = await build_shot_read(db, shot=shot)
+    elif shot.status != ShotStatus.pending and pending_confirm_count > 0 and not shot.skip_extraction:
+        shot.status = ShotStatus.pending
+        await db.flush()
+        shot_read = await build_shot_read(db, shot=shot)
     basic_info_ready = bool((shot_read.title or "").strip()) and bool((shot_read.script_excerpt or "").strip())
     semantic_defaults_ready = bool(detail.camera_shot) and bool(detail.angle) and bool(detail.movement) and int(detail.duration or 0) > 0
     action_beats_count = len([item for item in (detail.action_beats or []) if (item or "").strip()])
@@ -61,7 +73,7 @@ async def build_shot_preparation_state(
         for item in infer_action_beat_sequence(detail.action_beats)
     ]
     ready_for_generation = (
-        shot_read.status.value == "ready"
+        pending_confirm_count == 0
         and basic_info_ready
         and semantic_defaults_ready
         and action_beats_ready

@@ -8,11 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider
 from app.models.studio import (
     Shot,
-    ShotCandidateStatus,
-    ShotCandidateType,
     ShotDialogueCandidateStatus,
     ShotDetail,
-    ShotExtractedCandidate,
     ShotExtractedDialogueCandidate,
     ShotFrameType,
     ShotFrameImage,
@@ -26,6 +23,7 @@ from app.services.studio.generation.video import (
     build_video_context,
     derive_video_preview,
 )
+from app.services.studio.shot_assets_overview import get_shot_assets_overview
 
 
 REQUIRED_FRAMES_BY_MODE: dict[str, tuple[ShotFrameType, ...]] = {
@@ -49,18 +47,13 @@ def _check(key: str, ok: bool, message: str) -> ShotVideoReadinessCheck:
 
 
 async def _count_pending_candidates(db: AsyncSession, *, shot_id: str) -> tuple[int, int]:
-    asset_stmt = (
-        select(func.count(ShotExtractedCandidate.id))
-        .where(ShotExtractedCandidate.shot_id == shot_id)
-        .where(ShotExtractedCandidate.candidate_type != ShotCandidateType.costume)
-        .where(ShotExtractedCandidate.candidate_status == ShotCandidateStatus.pending)
-    )
     dialogue_stmt = (
         select(func.count(ShotExtractedDialogueCandidate.id))
         .where(ShotExtractedDialogueCandidate.shot_id == shot_id)
         .where(ShotExtractedDialogueCandidate.candidate_status == ShotDialogueCandidateStatus.pending)
     )
-    return int(await db.scalar(asset_stmt) or 0), int(await db.scalar(dialogue_stmt) or 0)
+    assets_overview = await get_shot_assets_overview(db, shot_id=shot_id)
+    return int(assets_overview.summary.pending_count or 0), int(await db.scalar(dialogue_stmt) or 0)
 
 
 async def _has_active_video_task(db: AsyncSession, *, shot_id: str) -> bool:

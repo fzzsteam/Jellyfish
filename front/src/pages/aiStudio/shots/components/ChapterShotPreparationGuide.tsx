@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Button, Tag, Tooltip } from 'antd'
+import { Button, Tag } from 'antd'
 import { DownOutlined, UpOutlined } from '@ant-design/icons'
 
 type ChecklistItem = {
@@ -14,19 +14,17 @@ type ChapterShotPreparationGuideProps = {
   checklistItems: readonly ChecklistItem[]
   nextStepTitle: string
   nextStepDescription: string
-  onGoToGenerate: () => void
 }
 
 /**
- * 汇总当前镜头准备清单，并提供进入生成视频标签的主入口。
- * 它只表达准备进度，不承载具体生成配置。
+ * 汇总当前镜头准备清单。
+ * 它只表达准备进度，不承载具体生成配置；进入生成请直接切换到“生成视频”标签。
  */
 export function ChapterShotPreparationGuide({
   statusReady,
   checklistItems,
   nextStepTitle,
   nextStepDescription,
-  onGoToGenerate,
 }: ChapterShotPreparationGuideProps) {
   const [expanded, setExpanded] = useState(false)
 
@@ -57,25 +55,14 @@ export function ChapterShotPreparationGuide({
           </div>
           <div className="text-[11px] text-slate-500 mt-0.5">{summaryText}</div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            size="small"
-            type="text"
-            icon={expanded ? <UpOutlined /> : <DownOutlined />}
-            onClick={() => setExpanded((value) => !value)}
-          >
-            {expanded ? '收起' : '详情'}
-          </Button>
-          <Tooltip title={statusReady ? '继续配置关键帧、参考图和视频生成。' : '可以先查看生成配置与诊断；如需真正继续生成，建议先完成当前准备项。'}>
-            <Button
-              type={statusReady ? 'primary' : 'default'}
-              size="small"
-              onClick={onGoToGenerate}
-            >
-              生成视频
-            </Button>
-          </Tooltip>
-        </div>
+        <Button
+          size="small"
+          type="text"
+          icon={expanded ? <UpOutlined /> : <DownOutlined />}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          {expanded ? '收起' : '详情'}
+        </Button>
       </div>
 
       {expanded ? (

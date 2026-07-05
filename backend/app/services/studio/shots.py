@@ -35,6 +35,7 @@ from app.services.common import (
     patch_model,
     require_entity,
 )
+from app.services.studio.shot_assets_overview import get_shot_assets_overview
 
 
 def _build_extraction_state(
@@ -109,6 +110,12 @@ async def _fetch_extraction_counts_map(
         counts_map[str(shot_id)]["asset_candidate_total"] = int(total or 0)
         counts_map[str(shot_id)]["pending_asset_count"] = int(pending or 0)
 
+    for shot_id in normalized_ids:
+        # 与资产确认面板保持同一口径：真实已关联的同名/同实体资产不再计入待确认。
+        # 直接数 pending candidate 会让右侧分镜列表在自动关联后仍显示“待关联”。
+        overview = await get_shot_assets_overview(db, shot_id=shot_id)
+        counts_map[shot_id]["pending_asset_count"] = int(overview.summary.pending_count or 0)
+
     for shot_id, total, pending in (await db.execute(dialogue_stmt)).all():
         counts_map[str(shot_id)]["dialogue_candidate_total"] = int(total or 0)
         counts_map[str(shot_id)]["pending_dialogue_count"] = int(pending or 0)
@@ -116,10 +123,24 @@ async def _fetch_extraction_counts_map(
     return counts_map
 
 
+async def _fetch_duration_map(
+    db: AsyncSession,
+    *,
+    shot_ids: Iterable[str],
+) -> dict[str, int]:
+    normalized_ids = [str(shot_id).strip() for shot_id in shot_ids if str(shot_id).strip()]
+    if not normalized_ids:
+        return {}
+
+    stmt = select(ShotDetail.id, ShotDetail.duration).where(ShotDetail.id.in_(normalized_ids))
+    return {str(shot_id): int(duration or 0) for shot_id, duration in (await db.execute(stmt)).all()}
+
+
 def _build_shot_read(
     shot: Shot,
     *,
     extraction_counts: dict[str, int] | None = None,
+    duration: int = 0,
 ) -> ShotRead:
     counts = extraction_counts or {}
     asset_candidate_total = int(counts.get("asset_candidate_total", 0))
@@ -137,6 +158,7 @@ def _build_shot_read(
         script_excerpt=shot.script_excerpt or "",
         generated_video_file_id=shot.generated_video_file_id,
         last_extracted_at=shot.last_extracted_at,
+        duration=duration,
         extraction=ShotExtractionSummaryRead(
             state=_build_extraction_state(
                 shot=shot,
@@ -161,7 +183,12 @@ async def build_shot_read(
     shot: Shot,
 ) -> ShotRead:
     counts_map = await _fetch_extraction_counts_map(db, shot_ids=[shot.id])
-    return _build_shot_read(shot, extraction_counts=counts_map.get(shot.id))
+    duration_map = await _fetch_duration_map(db, shot_ids=[shot.id])
+    return _build_shot_read(
+        shot,
+        extraction_counts=counts_map.get(shot.id),
+        duration=duration_map.get(shot.id, 0),
+    )
 
 
 async def build_shot_reads(
@@ -169,8 +196,17 @@ async def build_shot_reads(
     *,
     shots: list[Shot],
 ) -> list[ShotRead]:
-    counts_map = await _fetch_extraction_counts_map(db, shot_ids=[shot.id for shot in shots])
-    return [_build_shot_read(shot, extraction_counts=counts_map.get(shot.id)) for shot in shots]
+    shot_ids = [shot.id for shot in shots]
+    counts_map = await _fetch_extraction_counts_map(db, shot_ids=shot_ids)
+    duration_map = await _fetch_duration_map(db, shot_ids=shot_ids)
+    return [
+        _build_shot_read(
+            shot,
+            extraction_counts=counts_map.get(shot.id),
+            duration=duration_map.get(shot.id, 0),
+        )
+        for shot in shots
+    ]
 
 
 async def list_paginated(

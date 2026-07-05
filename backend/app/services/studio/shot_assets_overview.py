@@ -136,6 +136,18 @@ def _enum_or_str_value(value: Any) -> str | None:
     return str(raw)
 
 
+def _overview_candidate_status(candidate_status: str | None, *, is_linked: bool) -> str | None:
+    """归一化总览展示状态，避免真实关联仍被 pending 候选卡住。
+
+    资产新建页可能先建立真实镜头关联，再通过刷新回到准备页；此时同名或同实体
+    的提取候选仍可能保持 pending。总览应以真实关联为准，否则 UI 会同时显示
+    “已关联图片”和“仍需确认”的矛盾状态。
+    """
+    if is_linked and candidate_status == ShotCandidateStatus.pending.value:
+        return ShotCandidateStatus.linked.value
+    return candidate_status
+
+
 async def get_shot_assets_overview(
     db: AsyncSession,
     *,
@@ -200,7 +212,7 @@ async def get_shot_assets_overview(
                 "file_id": file_id or existing.file_id,
                 "source": "both",
                 "candidate_id": candidate.id,
-                "candidate_status": candidate_status,
+                "candidate_status": _overview_candidate_status(candidate_status, is_linked=True),
                 "linked_entity_id": existing.linked_entity_id or candidate.linked_entity_id,
                 "is_linked": True,
             }
@@ -245,7 +257,7 @@ async def get_shot_assets_overview(
                 "name": _alt.name,
                 "key": f"{_primary.type}:{_normalize_name(_alt.name)}",
                 "candidate_id": _alt.candidate_id,
-                "candidate_status": _alt.candidate_status,
+                "candidate_status": _overview_candidate_status(_alt.candidate_status, is_linked=_primary.is_linked),
             })
         else:
             _merged = _primary

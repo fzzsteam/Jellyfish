@@ -408,6 +408,41 @@ async def test_replace_candidates_preserves_existing_linked_status_by_same_name(
 
 
 @pytest.mark.asyncio
+async def test_assets_overview_does_not_require_confirmation_when_same_name_asset_is_linked() -> None:
+    db, engine = await _build_session()
+    async with db:
+        shot = await _seed_graph(db)
+        db.add(
+            Prop(
+                id="prop-1",
+                name="玉佩",
+                description="",
+                style=ProjectStyle.real_people_city,
+                view_count=1,
+                tags=[],
+                user_id="test-user",
+                visual_style=ProjectVisualStyle.live_action,
+            )
+        )
+        await db.flush()
+        db.add(ProjectPropLink(project_id="project-1", chapter_id="chapter-1", shot_id=shot.id, prop_id="prop-1"))
+        await replace_shot_extracted_candidates(
+            db,
+            shot_id=shot.id,
+            candidates=[{"candidate_type": "prop", "candidate_name": "玉佩"}],
+        )
+
+        overview = await get_shot_assets_overview(db, shot_id=shot.id)
+
+        assert overview.summary.linked_count == 1
+        assert overview.summary.pending_count == 0
+        assert len(overview.items) == 1
+        assert overview.items[0].is_linked is True
+        assert overview.items[0].candidate_status != ShotCandidateStatus.pending
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_sync_from_extraction_draft_marks_empty_extraction_as_ready() -> None:
     db, engine = await _build_session()
     async with db:

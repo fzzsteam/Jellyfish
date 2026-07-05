@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import base64
+import ipaddress
 import mimetypes
+from urllib.parse import urlsplit
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -94,9 +96,28 @@ async def file_id_to_access_url(db: AsyncSession, *, file_id: str) -> str:
     if file_obj is None or not file_obj.storage_key:
         raise HTTPException(status_code=400, detail=f"Invalid image file_id: {file_id}")
     try:
-        return await storage.signed_external_download_url(key=file_obj.storage_key, expires=3600)
+        url = await storage.signed_external_download_url(key=file_obj.storage_key, expires=3600)
     except Exception:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=f"Unable to sign image file_id: {file_id}") from None
+    if _is_local_or_private_url(url):
+        return await file_id_to_data_url(db, file_id=file_id)
+    return url
+
+
+def _is_local_or_private_url(value: str) -> bool:
+    """Return whether a provider-facing URL points at a host external providers cannot fetch."""
+
+    parsed = urlsplit((value or "").strip())
+    hostname = (parsed.hostname or "").strip().lower()
+    if not hostname:
+        return False
+    if hostname in {"localhost", "127.0.0.1", "::1"} or hostname.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback or ip.is_link_local
 
 
 def _provider_prefers_media_urls(provider_key: str | None) -> bool:
@@ -287,11 +308,16 @@ async def build_run_args(
 
     required_frames = tuple(ShotFrameType(item) for item in REQUIRED_FRAMES_BY_MODE[reference_mode])
     file_id_to_video_input = file_id_to_access_url if _provider_prefers_media_urls(provider_cfg.provider) else file_id_to_data_url
-    frame_data_urls = [await file_id_to_video_input(db, file_id=file_id) for file_id in submission.images]
+    frame_image_ids = submission.images[:len(required_frames)]
+    frame_data_urls = [await file_id_to_video_input(db, file_id=file_id) for file_id in frame_image_ids]
     frame_map = {ft: frame_data_urls[i] for i, ft in enumerate(required_frames)}
     asset_reference_data_urls: list[str] = []
     if is_reference_to_video_model(model.name):
-        asset_reference_file_ids = await resolve_r2v_asset_reference_file_ids(db, shot_id=shot_id)
+        asset_reference_file_ids = (
+            submission.images
+            if reference_mode == "text_only" and submission.images
+            else await resolve_r2v_asset_reference_file_ids(db, shot_id=shot_id)
+        )
         asset_reference_data_urls = [
             await file_id_to_video_input(db, file_id=file_id)
             for file_id in asset_reference_file_ids

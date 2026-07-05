@@ -33,7 +33,7 @@ class VideoPromptPreviewRequest(BaseModel):
         description="参考模式：first | last | key | first_last | first_last_key | text_only",
     )
     prompt: str | None = Field(None, description="视频提示词（text_only 必填；非文本模式可作为补充描述）")
-    images: list[str] = Field(default_factory=list, description="参考图 file_id 列表")
+    images: list[str] = Field(default_factory=list, description="参考图 file_id 列表；未手动选择帧模式时可携带已确认资产图")
     ratio: VideoRatio | None = Field(None, description="视频画幅比例，如 16:9 / 4:3 / 1:1 / 3:4 / 9:16")
 
 router = APIRouter()
