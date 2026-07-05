@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, Card, Empty, Tooltip, message } from 'antd'
-import { DownloadOutlined, FullscreenOutlined, VideoCameraOutlined } from '@ant-design/icons'
+import { DownloadOutlined, FullscreenOutlined, PauseCircleOutlined, PlayCircleOutlined, VideoCameraOutlined } from '@ant-design/icons'
 import type { ShotRead } from '../../../../services/generated'
 import { buildFileDownloadUrl } from '../../assets/utils'
 import { listTaskLinksNormalized } from '../../../../services/filmTaskLinks'
@@ -17,14 +17,15 @@ type ShotVideoResultsTabProps = {
   onDefaultSelectVideo?: (fileId: string) => void
 }
 
-/** 切换单个结果卡片内的视频播放状态，方便在网格中直接预览。 */
-function toggleVideoPlayback(video: HTMLVideoElement | null): void {
-  if (!video) return
+/** 切换单个结果卡片内的视频播放状态，并返回切换后的播放状态。 */
+function toggleVideoPlayback(video: HTMLVideoElement | null): boolean {
+  if (!video) return false
   if (video.paused) {
     void video.play().catch(() => undefined)
-    return
+    return true
   }
   video.pause()
+  return false
 }
 
 type FullscreenCapableVideo = HTMLVideoElement & {
@@ -55,6 +56,7 @@ function requestVideoFullscreen(video: HTMLVideoElement | null): void {
 export function ShotVideoResultsTab({ shot, selectedFileId, onSelectVideo, onDefaultSelectVideo }: ShotVideoResultsTabProps) {
   const [videos, setVideos] = useState<GeneratedVideoItem[]>([])
   const [loading, setLoading] = useState(false)
+  const [playingFileIds, setPlayingFileIds] = useState<Record<string, boolean>>({})
   const videoRefs = useRef<Record<string, HTMLVideoElement | null>>({})
 
   const shotId = shot?.id ?? null
@@ -133,7 +135,7 @@ export function ShotVideoResultsTab({ shot, selectedFileId, onSelectVideo, onDef
         <div className="grid grid-cols-2 xl:grid-cols-3 gap-4">
           {videos.map((item, idx) => {
             const isCurrent = currentFileId === item.fileId
-            const isSelected = selectedFileId === item.fileId
+            const isPlaying = !!playingFileIds[item.fileId]
             return (
               <div
                 key={`${item.linkId}-${item.fileId}`}
@@ -141,7 +143,7 @@ export function ShotVideoResultsTab({ shot, selectedFileId, onSelectVideo, onDef
                 tabIndex={0}
                 onClick={() => onSelectVideo?.(item.fileId)}
                 className={`relative cursor-pointer rounded-xl border p-3 bg-white transition hover:border-blue-300 hover:shadow-lg ${
-                  isSelected ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-gray-200'
+                  isCurrent ? 'border-emerald-400 ring-2 ring-emerald-200' : 'border-gray-200'
                 }`}
               >
                 {isCurrent ? (
@@ -155,14 +157,13 @@ export function ShotVideoResultsTab({ shot, selectedFileId, onSelectVideo, onDef
                       videoRefs.current[item.fileId] = node
                     }}
                     src={item.url}
-                    className="h-full w-full cursor-pointer object-contain"
+                    className="h-full w-full object-contain"
                     preload="metadata"
                     muted
                     playsInline
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      toggleVideoPlayback(event.currentTarget)
-                    }}
+                    onPlay={() => setPlayingFileIds((prev) => ({ ...prev, [item.fileId]: true }))}
+                    onPause={() => setPlayingFileIds((prev) => ({ ...prev, [item.fileId]: false }))}
+                    onEnded={() => setPlayingFileIds((prev) => ({ ...prev, [item.fileId]: false }))}
                   />
                 </div>
                 <div className="mt-2 flex items-center justify-between gap-2">
@@ -171,6 +172,16 @@ export function ShotVideoResultsTab({ shot, selectedFileId, onSelectVideo, onDef
                     <div className="truncate text-xs text-gray-400">{item.fileId}</div>
                   </div>
                   <div className="flex shrink-0 items-center gap-1" onClick={(event) => event.stopPropagation()}>
+                    <Tooltip title={isPlaying ? '暂停' : '播放'}>
+                      <Button
+                        size="small"
+                        icon={isPlaying ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
+                        onClick={() => {
+                          const nextPlaying = toggleVideoPlayback(videoRefs.current[item.fileId] ?? null)
+                          setPlayingFileIds((prev) => ({ ...prev, [item.fileId]: nextPlaying }))
+                        }}
+                      />
+                    </Tooltip>
                     <Tooltip title="全屏播放">
                       <Button
                         size="small"

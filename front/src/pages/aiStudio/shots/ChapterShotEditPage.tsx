@@ -3513,7 +3513,7 @@ export function ChapterShotEditPage() {
         </div>
       ),
       children: (
-        <div className="grid min-h-0 items-stretch gap-4 lg:h-[640px] lg:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="grid min-h-0 items-stretch gap-4 lg:max-h-[calc(100vh-220px)] lg:grid-cols-[minmax(0,1fr)_420px]">
           <div className="min-h-0 min-w-0 overflow-hidden lg:h-full">
             <ShotVideoResultsTab
               shot={shot}

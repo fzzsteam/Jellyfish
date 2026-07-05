@@ -236,6 +236,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyCandidates, setHistoryCandidates] = useState<AssetImageCandidateRead[]>([])
   const [editingSlotImage, setEditingSlotImage] = useState<TImage | null>(null)
+  const [candidatePanelImage, setCandidatePanelImage] = useState<TImage | null>(null)
   const [adoptingImageId, setAdoptingImageId] = useState<number | null>(null)
   const [deletingCandidateId, setDeletingCandidateId] = useState<number | null>(null)
   const [uploadingCandidates, setUploadingCandidates] = useState(false)
@@ -487,6 +488,41 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
       }
     })
   }, [asset?.view_count, images])
+
+  useEffect(() => {
+    if (!candidatePanelImage && slotItems[0]?.image) {
+      setCandidatePanelImage(slotItems[0].image)
+    }
+  }, [candidatePanelImage, slotItems])
+
+  /**
+   * 刷新某个视角图片的候选池。
+   * 生成任务成功、上传候选、采用/删除候选后都复用这里，保证底部候选区与弹窗一致。
+   */
+  const refreshImageCandidates = useCallback(
+    async (targetImage: TImage, options?: { showLoading?: boolean }) => {
+      if (!assetId) return []
+      if (options?.showLoading) setHistoryLoading(true)
+      try {
+        const candidates = await listImageCandidates(assetId, targetImage.id)
+        setHistoryCandidates(candidates)
+        setCandidatePanelImage(targetImage)
+        return candidates
+      } catch {
+        message.error('加载候选图片失败')
+        setHistoryCandidates([])
+        return []
+      } finally {
+        if (options?.showLoading) setHistoryLoading(false)
+      }
+    },
+    [assetId, listImageCandidates],
+  )
+
+  useEffect(() => {
+    if (!candidatePanelImage) return
+    void refreshImageCandidates(candidatePanelImage, { showLoading: true })
+  }, [candidatePanelImage?.id, refreshImageCandidates])
 
   // Builds the asset update payload from the current form so generation can use unsaved edits.
   const buildBasePayload = useCallback((): AssetUpdate | null => {
@@ -751,6 +787,7 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
 
       if (finalStatus === 'succeeded') {
         await loadData()
+        await refreshImageCandidates(image)
       } else if (finalStatus !== 'failed' && finalStatus !== 'cancelled') {
         message.warning('生成任务仍在执行，请稍后刷新')
       }
@@ -772,30 +809,23 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   const openHistoryModal = async (targetImage: TImage) => {
     if (!assetId) return
     setEditingSlotImage(targetImage)
+    setCandidatePanelImage(targetImage)
     setHistoryOpen(true)
-    setHistoryLoading(true)
-
-    try {
-      const candidates = await listImageCandidates(assetId, targetImage.id)
-      setHistoryCandidates(candidates)
-    } catch {
-      message.error('加载候选图片失败')
-      setHistoryCandidates([])
-    } finally {
-      setHistoryLoading(false)
-    }
+    await refreshImageCandidates(targetImage, { showLoading: true })
   }
 
   const handleAdoptHistoryImage = async (candidate: AssetImageCandidateRead) => {
-    if (!assetId || !editingSlotImage || !candidate.file_id) return
+    const targetImage = editingSlotImage ?? candidatePanelImage
+    if (!assetId || !targetImage || !candidate.file_id) return
 
     setAdoptingImageId(candidate.id)
     try {
-      await adoptImageCandidate(assetId, editingSlotImage.id, candidate.id)
+      await adoptImageCandidate(assetId, targetImage.id, candidate.id)
       message.success('角度图片已更新')
       setHistoryOpen(false)
       setEditingSlotImage(null)
       await loadData()
+      await refreshImageCandidates(targetImage)
     } catch {
       message.error('更新角度图片失败')
     } finally {
@@ -804,14 +834,14 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   }
 
   const handleDeleteCandidate = async (candidate: AssetImageCandidateRead) => {
-    if (!assetId || !editingSlotImage) return
+    const targetImage = editingSlotImage ?? candidatePanelImage
+    if (!assetId || !targetImage) return
 
     setDeletingCandidateId(candidate.id)
     try {
-      await deleteImageCandidate(assetId, editingSlotImage.id, candidate.id)
+      await deleteImageCandidate(assetId, targetImage.id, candidate.id)
       message.success('候选图片已移除')
-      const candidates = await listImageCandidates(assetId, editingSlotImage.id)
-      setHistoryCandidates(candidates)
+      await refreshImageCandidates(targetImage)
     } catch {
       message.error('移除候选图片失败')
     } finally {
@@ -820,7 +850,8 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
   }
 
   const handleCandidateUpload = async (files: File[]) => {
-    if (!assetId || !editingSlotImage || files.length === 0 || !attachImageCandidates) return
+    const targetImage = editingSlotImage ?? candidatePanelImage
+    if (!assetId || !targetImage || files.length === 0 || !attachImageCandidates) return
     setUploadingCandidates(true)
     try {
       const fileIds: string[] = []
@@ -833,9 +864,8 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
         if (fileId) fileIds.push(String(fileId))
       }
       if (fileIds.length > 0) {
-        await attachImageCandidates(assetId, editingSlotImage.id, fileIds)
-        const candidates = await listImageCandidates(assetId, editingSlotImage.id)
-        setHistoryCandidates(candidates)
+        await attachImageCandidates(assetId, targetImage.id, fileIds)
+        await refreshImageCandidates(targetImage)
         message.success(`已上传 ${fileIds.length} 张图片到候选池`)
       }
     } catch {
@@ -1044,46 +1074,90 @@ export function AssetEditPageBase<TAsset extends BaseAsset, TImage extends BaseA
             key: 'views',
             label: '图片',
             children: (
-              <Row gutter={[16, 16]}>
-                {slotItems.map((slot) => (
-                  <Col xs={24} sm={12} lg={8} xl={6} key={slot.angle}>
-                    <DisplayImageCard
-                      title={null}
-                      imageUrl={slot.imageUrl}
-                      imageAlt={slot.angle}
-                      placeholder="暂无图片"
-                      hoverable={false}
-                      imageHeightClassName="h-44"
-                      footer={
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2">
-                            <PointsCostButton
-                              type="primary"
-                              size="small"
-                              disabled={!slot.image}
-                              loading={Boolean(slot.image && generatingByImageId[slot.image.id])}
-                              quote={imageQuote.quote}
-                              quoteLoading={imageQuote.loading}
-                              quoteError={imageQuote.error}
-                              onClick={() => slot.image && void openGenerateConfirm(slot.image)}
-                            >
-                              生成
-                            </PointsCostButton>
-                            <Button
-                              size="small"
-                              icon={<EditOutlined />}
-                              disabled={!slot.image}
-                              onClick={() => slot.image && void openHistoryModal(slot.image)}
-                            >
-                              候选池
-                            </Button>
+              <div className="space-y-4">
+                <Row gutter={[16, 16]}>
+                  {slotItems.map((slot) => (
+                    <Col xs={24} sm={12} lg={8} xl={6} key={slot.angle}>
+                      <DisplayImageCard
+                        title={null}
+                        imageUrl={slot.imageUrl}
+                        imageAlt={slot.angle}
+                        placeholder="暂无图片"
+                        hoverable={false}
+                        imageHeightClassName="h-44"
+                        footer={
+                          <div className="flex flex-col gap-1">
+                            <div className="flex items-center gap-2">
+                              <PointsCostButton
+                                type="primary"
+                                size="small"
+                                disabled={!slot.image}
+                                loading={Boolean(slot.image && generatingByImageId[slot.image.id])}
+                                quote={imageQuote.quote}
+                                quoteLoading={imageQuote.loading}
+                                quoteError={imageQuote.error}
+                                onClick={() => slot.image && void openGenerateConfirm(slot.image)}
+                              >
+                                生成
+                              </PointsCostButton>
+                              <Button
+                                size="small"
+                                icon={<EditOutlined />}
+                                disabled={!slot.image}
+                                onClick={() => slot.image && void openHistoryModal(slot.image)}
+                              >
+                                候选池
+                              </Button>
+                            </div>
                           </div>
-                        </div>
-                      }
+                        }
+                      />
+                    </Col>
+                  ))}
+                </Row>
+
+                <Card
+                  size="small"
+                  title={
+                    <div className="flex items-center justify-between gap-3">
+                      <span>图片候选</span>
+                      <Typography.Text type="secondary" className="text-xs">
+                        {candidatePanelImage?.view_angle ? `当前视角：${candidatePanelImage.view_angle}` : '请选择一个视角'}
+                      </Typography.Text>
+                    </div>
+                  }
+                  extra={
+                    candidatePanelImage ? (
+                      <Button
+                        size="small"
+                        icon={<ReloadOutlined />}
+                        onClick={() => void refreshImageCandidates(candidatePanelImage, { showLoading: true })}
+                      >
+                        刷新
+                      </Button>
+                    ) : null
+                  }
+                >
+                  {!candidatePanelImage ? (
+                    <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="请选择上方视角后查看候选图片" />
+                  ) : historyLoading ? (
+                    <div className="py-8 text-center">
+                      <Spin />
+                    </div>
+                  ) : historyCandidates.length === 0 ? (
+                    <Empty description="暂无候选图片。生成图片后，所有结果会保留在这里供选择。" />
+                  ) : (
+                    <AssetImageCandidateGallery
+                      candidates={historyCandidates}
+                      adoptingId={adoptingImageId}
+                      deletingId={deletingCandidateId}
+                      resolveFileUrl={(fileId) => buildFileDownloadUrl(fileId) ?? ''}
+                      onAdopt={handleAdoptHistoryImage}
+                      onDelete={handleDeleteCandidate}
                     />
-                  </Col>
-                ))}
-              </Row>
+                  )}
+                </Card>
+              </div>
             ),
           },
         ]}

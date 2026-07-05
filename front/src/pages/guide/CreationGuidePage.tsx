@@ -62,7 +62,7 @@ const screenshots = [
   { src: '/guide/guide-shot-001.jpg', caption: '图 02 新建项目弹窗' },
   { src: '/guide/guide-shot-002.jpg', caption: '图 03 新建章节弹窗' },
   { src: '/guide/guide-shot-003.jpg', caption: '图 04 项目工作台 · 章节列表' },
-  { src: '/guide/guide-shot-004.jpg', caption: '图 05 项目工作台 · 仪表盘' },
+  { src: '/guide/guide-shot-004.jpg', caption: '图 05 项目工作台 · 章节列表顶部总览' },
   { src: '/guide/guide-shot-005.jpg', caption: '图 06 一键提取 · 积分确认弹窗' },
   { src: '/guide/guide-shot-006.jpg', caption: '图 07 分镜列表页' },
   { src: '/guide/guide-shot-007.jpg', caption: '图 08 镜头详情 · 基础信息' },
@@ -187,7 +187,7 @@ const CreationGuidePage: React.FC = () => {
             </GuideBlock>
 
             <GuideBlock id="chapter" number="3" title="录入章节剧本（项目工作台）">
-              <p>项目工作台顶部有「章节 / 演员 / 角色 / 场景 / 道具 / 服装 / 仪表盘」等标签。主线流程先使用「章节」。</p>
+              <p>项目工作台顶部有「章节 / 演员 / 角色 / 场景 / 道具 / 服装」等标签。主线流程先使用「章节」。</p>
               <Figure {...screenshots[2]} />
               <Figure {...screenshots[3]} />
               <div className="overflow-hidden rounded-md border border-slate-200">
@@ -202,8 +202,7 @@ const CreationGuidePage: React.FC = () => {
                   dataSource={chapterStates}
                 />
               </div>
-              <Figure {...screenshots[4]} />
-              <p>仪表盘可以总览未完成章节、待确认分镜、准备完成分镜和生成中分镜，也会把当前最该做的下一步放在动态摘要里。</p>
+              <p>章节列表顶部会总览未完成章节、待确认分镜、准备完成分镜、生成中分镜和资产健康快照，用户不需要再切换到单独总览页。</p>
             </GuideBlock>
 
             <GuideBlock id="extract" number="4" title="一键提取分镜并自动准备">

@@ -72,6 +72,7 @@ export function AssetReferencePickerDrawer({
   const [page, setPage] = useState(1)
   const [total, setTotal] = useState(0)
   const [fetching, setFetching] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const searchTimerRef = useRef<number | null>(null)
 
@@ -142,16 +143,43 @@ export function AssetReferencePickerDrawer({
 
   const hasMore = items.length < total
 
-  const handleConfirm = () => {
+  /**
+   * 解析选中资产可作为参考图的 file_id。
+   * 列表 thumbnail 有时只是展示 URL，无法稳定反解 file_id；新建资产生成图后尤其容易出现
+   * thumbnail 未同步但图片表已有 file_id 的情况，因此确认时兜底读取实体图片列表。
+   */
+  const resolveReferenceFileId = async (item: PickerItem): Promise<string | null> => {
+    const fromThumbnail = resolveFileId(item.thumbnail)
+    if (fromThumbnail) return fromThumbnail
+
+    const res = await StudioEntitiesService.listEntityImagesApiV1StudioEntitiesEntityTypeEntityIdImagesGet({
+      entityType: activeKind,
+      entityId: item.id,
+      order: 'updated_at',
+      isDesc: true,
+      page: 1,
+      pageSize: 20,
+    })
+    const imageItems = (res.data?.items ?? []) as Array<Record<string, unknown>>
+    const matched = imageItems.find((image) => typeof image.file_id === 'string' && image.file_id.trim())
+    return typeof matched?.file_id === 'string' ? matched.file_id.trim() : null
+  }
+
+  const handleConfirm = async () => {
     if (!selectedId) return
     const item = items.find((i) => i.id === selectedId)
     if (!item) return
-    const fileId = resolveFileId(item.thumbnail)
-    if (!fileId) {
-      message.warning('该资产暂无可用图片，无法作为参考图')
-      return
+    setConfirming(true)
+    try {
+      const fileId = await resolveReferenceFileId(item)
+      if (!fileId) {
+        message.warning('该资产暂无可用图片，无法作为参考图')
+        return
+      }
+      onSelect({ kind: activeKind, entityId: item.id, entityName: item.name, file_id: fileId })
+    } finally {
+      setConfirming(false)
     }
-    onSelect({ kind: activeKind, entityId: item.id, entityName: item.name, file_id: fileId })
   }
 
   return (
@@ -165,7 +193,7 @@ export function AssetReferencePickerDrawer({
       footer={
         <div className="flex justify-end gap-2">
           <Button onClick={onClose}>取消</Button>
-          <Button type="primary" disabled={!selectedId} onClick={handleConfirm}>
+          <Button type="primary" disabled={!selectedId} loading={confirming} onClick={() => void handleConfirm()}>
             确认添加
           </Button>
         </div>

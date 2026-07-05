@@ -10,13 +10,13 @@ import {
   SyncOutlined,
 } from '@ant-design/icons'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { StudioChaptersService } from '../../../../../services/generated'
+import { StudioChaptersService, StudioShotLinksService } from '../../../../../services/generated'
 import { chapterStatusMap } from '../constants'
 import { getChapterShotsPath } from '../routes'
 import { useChapters, newId, type Chapter } from '../hooks/useProjectData'
 import { ChapterRawTextEditorModal } from '../../../chapter/components/ChapterRawTextEditorModal'
 import { getChapterPreparationState } from '../chapterPreparation'
-import { loadChapterFlowStats, type ChapterFlowStats } from '../projectFlowStats'
+import { loadChapterFlowStats, type ChapterFlowStats, type ProjectFlowStats } from '../projectFlowStats'
 import { executeTaskCancel } from '../../../components/taskActionHelpers'
 import { TASK_COPY } from '../../../components/taskCopy'
 import { useTaskPageContext } from '../../../components/taskPageContext'
@@ -31,6 +31,158 @@ const { TextArea } = Input
 const CREATE_PARAM = 'create'
 const EDIT_PARAM = 'edit'
 
+const emptyProjectFlowStats: ProjectFlowStats = {
+  totalShots: 0,
+  pendingConfirmShots: 0,
+  preparedShots: 0,
+  readyShots: 0,
+  generatingShots: 0,
+  activeVideoTasks: 0,
+  videoCompletedShots: 0,
+}
+
+type AssetHealthMetric = {
+  total: number
+  generated: number
+}
+
+type AssetHealthCounts = {
+  roles: AssetHealthMetric
+  scenes: AssetHealthMetric
+  props: AssetHealthMetric
+}
+
+const emptyAssetHealthCounts: AssetHealthCounts = {
+  roles: { total: 0, generated: 0 },
+  scenes: { total: 0, generated: 0 },
+  props: { total: 0, generated: 0 },
+}
+
+/**
+ * 汇总每章分镜流转数据，避免章节表格和顶部总览分别请求同一批接口。
+ * 返回结构与项目总览统计一致，方便后续继续复用展示口径。
+ */
+function sumChapterFlowStats(rows: ChapterFlowStats[]): ProjectFlowStats {
+  return rows.reduce<ProjectFlowStats>(
+    (acc, item) => ({
+      totalShots: acc.totalShots + item.totalShots,
+      pendingConfirmShots: acc.pendingConfirmShots + item.pendingConfirmShots,
+      preparedShots: acc.preparedShots + item.preparedShots,
+      readyShots: acc.readyShots + item.readyShots,
+      generatingShots: acc.generatingShots + item.generatingShots,
+      activeVideoTasks: acc.activeVideoTasks + item.activeVideoTasks,
+      videoCompletedShots: acc.videoCompletedShots + item.videoCompletedShots,
+    }),
+    emptyProjectFlowStats,
+  )
+}
+
+/**
+ * 读取单类项目资产的图片完成度，用于章节列表顶部的资产健康快照。
+ * 这里直接复用资产 Tab 的项目级关联接口，避免引入额外手写 service。
+ */
+async function loadProjectAssetHealthMetric(projectId: string, entityType: 'character' | 'scene' | 'prop'): Promise<AssetHealthMetric> {
+  const pageSize = 100
+  let page = 1
+  let total = 0
+  let generated = 0
+  let maxPage = 1
+
+  do {
+    const res = await StudioShotLinksService.listProjectEntityLinksApiV1StudioShotLinksEntityTypeGet({
+      entityType,
+      projectId,
+      chapterId: null,
+      shotId: null,
+      assetId: null,
+      order: null,
+      isDesc: false,
+      page,
+      pageSize,
+    })
+    const data = res.data
+    const items = data?.items ?? []
+    total = data?.pagination.total ?? total
+    maxPage = data?.pagination.max_page ?? maxPage
+    generated += items.filter((item) => typeof item?.thumbnail === 'string' && item.thumbnail.trim().length > 0).length
+    page += 1
+  } while (page <= maxPage)
+
+  return { total, generated }
+}
+
+/**
+ * 并发汇总角色、场景、道具三类资产健康数据。
+ * 章节列表只展示轻量快照，详细管理仍跳转到资产管理页处理。
+ */
+async function loadProjectAssetHealthCounts(projectId: string): Promise<AssetHealthCounts> {
+  const [roles, scenes, props] = await Promise.all(
+    (['character', 'scene', 'prop'] as const).map((entityType) => loadProjectAssetHealthMetric(projectId, entityType)),
+  )
+  return { roles, scenes, props }
+}
+
+/**
+ * 章节列表标题行内的轻量摘要，承接项目工作台原有关键统计。
+ * 它只展示关键数字，避免用独立顶部区域抢占章节表格的主视觉。
+ */
+function ChapterTopSummary({
+  incompleteCount,
+  flowStats,
+  flowLoading,
+  assetCounts,
+  assetLoading,
+  onManageAssets,
+}: {
+  incompleteCount: number
+  flowStats: ProjectFlowStats
+  flowLoading: boolean
+  assetCounts: AssetHealthCounts
+  assetLoading: boolean
+  onManageAssets: () => void
+}) {
+  const chapterItems = [
+    flowLoading ? '未完成 ...' : `未完成 ${incompleteCount}`,
+    flowLoading ? '待确认 ...' : `待确认 ${flowStats.pendingConfirmShots}/${flowStats.totalShots}`,
+    flowLoading ? '准备完成 ...' : `准备完成 ${flowStats.readyShots}`,
+  ]
+  const assetItems = [
+    { label: '角色', metric: assetCounts.roles },
+    { label: '场景', metric: assetCounts.scenes },
+    { label: '道具', metric: assetCounts.props },
+  ]
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs">
+      <div className="inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded border border-gray-200 bg-white px-2.5 py-1 shadow-sm shadow-gray-100/50">
+        <span className="inline-flex items-center gap-1 font-medium text-gray-700">
+          <span className="h-3 w-0.5 rounded bg-blue-500" />
+          章节
+        </span>
+        {chapterItems.map((item) => (
+          <span key={item} className="text-gray-500">
+            {item}
+          </span>
+        ))}
+      </div>
+      <div className="inline-flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded border border-gray-200 bg-white px-2.5 py-1 shadow-sm shadow-gray-100/50">
+        <span className="inline-flex items-center gap-1 font-medium text-gray-700">
+          <span className="h-3 w-0.5 rounded bg-emerald-500" />
+          资产
+        </span>
+        {assetItems.map((item) => (
+          <span key={item.label} className="text-gray-500">
+            {assetLoading ? `${item.label} ...` : `${item.label} ${item.metric.generated}/${item.metric.total}`}
+          </span>
+        ))}
+        <Button type="link" size="small" className="h-auto p-0 text-xs leading-none" onClick={onManageAssets}>
+          管理
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export function ChaptersTab() {
   const taskCopy = TASK_COPY.chapterDivision
   const navigate = useNavigate()
@@ -44,6 +196,10 @@ export function ChaptersTab() {
   const [createTitle, setCreateTitle] = useState('')
   const [createContent, setCreateContent] = useState('')
   const [chapterFlowMap, setChapterFlowMap] = useState<Record<string, ChapterFlowStats>>({})
+  const [projectFlowStats, setProjectFlowStats] = useState<ProjectFlowStats>(emptyProjectFlowStats)
+  const [projectFlowStatsLoading, setProjectFlowStatsLoading] = useState(false)
+  const [assetHealthCounts, setAssetHealthCounts] = useState<AssetHealthCounts>(emptyAssetHealthCounts)
+  const [assetHealthLoading, setAssetHealthLoading] = useState(false)
   const [chapterDivisionActionId, setChapterDivisionActionId] = useState<string | null>(null)
   const taskUiUpsert = useTaskUiStore((state) => state.upsertTask)
   const taskUiRemove = useTaskUiStore((state) => state.removeTask)
@@ -97,19 +253,27 @@ export function ChaptersTab() {
     let cancelled = false
     if (!chapters.length) {
       setChapterFlowMap({})
+      setProjectFlowStats(emptyProjectFlowStats)
       return () => {
         cancelled = true
       }
     }
 
     const run = async () => {
+      setProjectFlowStatsLoading(true)
       try {
         const rows = await loadChapterFlowStats(chapters)
         if (!cancelled) {
           setChapterFlowMap(Object.fromEntries(rows.map((row) => [row.chapterId, row])))
+          setProjectFlowStats(sumChapterFlowStats(rows))
         }
       } catch {
-        if (!cancelled) setChapterFlowMap({})
+        if (!cancelled) {
+          setChapterFlowMap({})
+          setProjectFlowStats(emptyProjectFlowStats)
+        }
+      } finally {
+        if (!cancelled) setProjectFlowStatsLoading(false)
       }
     }
 
@@ -118,6 +282,38 @@ export function ChaptersTab() {
       cancelled = true
     }
   }, [chapters])
+
+  const incompleteChapterCount = useMemo(
+    () => chapters.filter((chapter) => chapter.status !== 'done').length,
+    [chapters],
+  )
+
+  useEffect(() => {
+    let cancelled = false
+    if (!projectId) {
+      setAssetHealthCounts(emptyAssetHealthCounts)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    const run = async () => {
+      setAssetHealthLoading(true)
+      try {
+        const counts = await loadProjectAssetHealthCounts(projectId)
+        if (!cancelled) setAssetHealthCounts(counts)
+      } catch {
+        if (!cancelled) setAssetHealthCounts(emptyAssetHealthCounts)
+      } finally {
+        if (!cancelled) setAssetHealthLoading(false)
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [projectId])
 
   const openEditModal = (chapter: Chapter) => {
     setEditingChapter(chapter)
@@ -368,7 +564,7 @@ export function ChaptersTab() {
         return (
           <div className="space-y-1">
             <Tag color={state.color}>{state.text}</Tag>
-            <div className="text-[11px] text-gray-500 leading-5">{state.hint}</div>
+            {state.hint ? <div className="text-[11px] text-gray-500 leading-5">{state.hint}</div> : null}
           </div>
         )
       },
@@ -462,7 +658,27 @@ export function ChaptersTab() {
   if (chapters.length === 0 && !loading) {
     return (
       <>
-        <Card>
+        <Card
+          title={
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <span>章节列表</span>
+              <ChapterTopSummary
+                incompleteCount={incompleteChapterCount}
+                flowStats={projectFlowStats}
+                flowLoading={projectFlowStatsLoading}
+                assetCounts={assetHealthCounts}
+                assetLoading={assetHealthLoading}
+                onManageAssets={() => navigate('/assets')}
+              />
+            </div>
+          }
+          bodyStyle={{ paddingTop: 12 }}
+          extra={
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              新建章节
+            </Button>
+          }
+        >
           <Empty description="还没有任何章节，立即创建第一章吧" image={Empty.PRESENTED_IMAGE_SIMPLE}>
           <Space>
             <Button type="primary" size="large" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
@@ -506,70 +722,85 @@ export function ChaptersTab() {
   }
 
   return (
-    <Card
-      title="章节列表"
-      extra={
-        <Space>
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
-            新建章节
-          </Button>
-        </Space>
-      }
-    >
-      <Table<Chapter>
-        rowKey="id"
-        loading={loading}
-        columns={columns}
-        dataSource={chapters}
-        pagination={{ pageSize: 10 }}
-        size="small"
-      />
-
-      <ChapterRawTextEditorModal
-        open={editOpen}
-        onClose={() => {
-          setEditOpen(false)
-          setEditingChapter(null)
-        }}
-        chapterId={editingChapter?.id}
-        onSaved={(next) => {
-          if (editingChapter?.id && typeof next.rawText === 'string') {
-            patchChapterLocal(editingChapter.id, { rawText: next.rawText })
-          }
-          void refresh()
-        }}
-      />
-
-      <Modal
-        title="新建章节"
-        open={createOpen}
-        onCancel={() => setCreateOpen(false)}
-        onOk={useMock ? handleCreateChapterMock : handleCreateChapter}
-        okText="创建"
-        width={560}
+    <>
+      <Card
+        title={
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span>章节列表</span>
+            <ChapterTopSummary
+              incompleteCount={incompleteChapterCount}
+              flowStats={projectFlowStats}
+              flowLoading={projectFlowStatsLoading}
+              assetCounts={assetHealthCounts}
+              assetLoading={assetHealthLoading}
+              onManageAssets={() => navigate('/assets')}
+            />
+          </div>
+        }
+        bodyStyle={{ paddingTop: 12 }}
+        extra={
+          <Space>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
+              新建章节
+            </Button>
+          </Space>
+        }
       >
-        <div className="space-y-3">
-          <div>
-            <span className="text-gray-600 text-sm">章节标题</span>
-            <Input
-              placeholder="例如：第1集 出租屋里的争吵"
-              value={createTitle}
-              onChange={(e) => setCreateTitle(e.target.value)}
-              className="mt-1"
-            />
+        <Table<Chapter>
+          rowKey="id"
+          loading={loading}
+          columns={columns}
+          dataSource={chapters}
+          pagination={{ pageSize: 10 }}
+          size="small"
+        />
+
+        <ChapterRawTextEditorModal
+          open={editOpen}
+          onClose={() => {
+            setEditOpen(false)
+            setEditingChapter(null)
+          }}
+          chapterId={editingChapter?.id}
+          onSaved={(next) => {
+            if (editingChapter?.id && typeof next.rawText === 'string') {
+              patchChapterLocal(editingChapter.id, { rawText: next.rawText })
+            }
+            void refresh()
+          }}
+        />
+
+        <Modal
+          title="新建章节"
+          open={createOpen}
+          onCancel={() => setCreateOpen(false)}
+          onOk={useMock ? handleCreateChapterMock : handleCreateChapter}
+          okText="创建"
+          width={560}
+        >
+          <div className="space-y-3">
+            <div>
+              <span className="text-gray-600 text-sm">章节标题</span>
+              <Input
+                placeholder="例如：第1集 出租屋里的争吵"
+                value={createTitle}
+                onChange={(e) => setCreateTitle(e.target.value)}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <span className="text-gray-600 text-sm">章节内容（可粘贴剧本）</span>
+              <TextArea
+                rows={6}
+                placeholder="粘贴文学剧本..."
+                value={createContent}
+                onChange={(e) => setCreateContent(e.target.value)}
+                className="mt-1 font-mono text-sm"
+              />
+            </div>
           </div>
-          <div>
-            <span className="text-gray-600 text-sm">章节内容（可粘贴剧本）</span>
-            <TextArea
-              rows={6}
-              placeholder="粘贴文学剧本..."
-              value={createContent}
-              onChange={(e) => setCreateContent(e.target.value)}
-              className="mt-1 font-mono text-sm"
-            />
-          </div>
-        </div>
-      </Modal>
-    </Card>
+        </Modal>
+      </Card>
+    </>
   )
 }

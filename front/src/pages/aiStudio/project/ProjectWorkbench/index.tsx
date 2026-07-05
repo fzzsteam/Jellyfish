@@ -6,7 +6,6 @@ import {
 } from '@ant-design/icons'
 import { Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { TAB_CONFIG, type TabKey, isTabKey, DEFAULT_TAB } from './constants'
-import { DashboardTab } from './tabs/DashboardTab'
 import { ChaptersTab } from './tabs/ChaptersTab'
 import { ActorsTab } from './tabs/ActorsTab'
 import { RolesTab } from './tabs/RolesTab'
@@ -109,7 +108,7 @@ const ProjectWorkbench: React.FC = () => {
     if (state.key === 'prepare_shots') {
       return {
         label: `进入${chapterLabel}分镜`,
-        hint: `${chapterLabel}已有分镜，建议直接进入分镜详情继续处理待确认镜头`,
+        hint: '',
         icon: state.primaryIcon,
         onClick: () => navigate(getChapterShotsPath(projectId, recommendedChapter.id)),
       }
@@ -122,11 +121,12 @@ const ProjectWorkbench: React.FC = () => {
     }
   })()
 
-  // 与 URL 中的 tab 同步：URL 变化时更新 activeTab；初次或无效 tab 时写回 URL
+  // 与 URL 中的 tab 同步；旧总览等无效 tab 会回落到章节主入口。
   useEffect(() => {
     if (tabFromUrl !== null && isTabKey(tabFromUrl)) {
       setActiveTab(tabFromUrl)
-    } else if (tabFromUrl === null || tabFromUrl === '') {
+    } else {
+      setActiveTab(DEFAULT_TAB)
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev)
@@ -185,17 +185,13 @@ const ProjectWorkbench: React.FC = () => {
             }))}
           />
         </div>
-        <div className="mt-2 text-xs text-gray-500">
-          {primaryCta.hint}
-        </div>
+        {primaryCta.hint ? <div className="mt-2 text-xs text-gray-500">{primaryCta.hint}</div> : null}
       </div>
 
       <div
         className="pt-4 animate-fadeIn flex-1 min-h-0 overflow-hidden"
         style={{ animation: 'fadeIn 0.25s ease-out' }}
       >
-        {activeTab === 'dashboard' && <DashboardTab />}
-
         {activeTab === 'chapters' && <ChaptersTab />}
 
         {activeTab === 'actors' && <ActorsTab />}

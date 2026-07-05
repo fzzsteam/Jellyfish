@@ -1,6 +1,5 @@
 import React from 'react'
 import {
-  HomeOutlined,
   UnorderedListOutlined,
   UserOutlined,
   PictureOutlined,
@@ -9,7 +8,6 @@ import {
 import type { Chapter } from '../../../../mocks/data'
 
 export type TabKey =
-  | 'dashboard'
   | 'chapters'
   | 'actors'
   | 'roles'
@@ -21,7 +19,6 @@ export type TabKey =
   | 'settings'
 
 const TAB_KEYS: TabKey[] = [
-  'dashboard',
   'chapters',
   'actors',
   'roles',
@@ -41,7 +38,6 @@ export const DEFAULT_TAB: TabKey = 'chapters'
 
 export const TAB_CONFIG: { key: TabKey; label: string; icon: React.ReactNode }[] = [
   { key: 'chapters', label: '章节', icon: <UnorderedListOutlined /> },
-  { key: 'dashboard', label: '总览', icon: <HomeOutlined /> },
   { key: 'actors', label: '演员', icon: <UserOutlined /> },
   { key: 'roles', label: '角色', icon: <UserOutlined /> },
   { key: 'scenes', label: '场景', icon: <PictureOutlined /> },

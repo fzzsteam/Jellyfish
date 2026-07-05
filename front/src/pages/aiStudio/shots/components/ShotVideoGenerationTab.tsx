@@ -152,7 +152,7 @@ export function ShotVideoGenerationTab({
         <span>诊断 <span className="font-medium text-slate-900">{videoReadinessLabel}</span></span>
       </div>
 
-      <div className="mt-3 min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
+      <div className="mt-3 min-h-0 flex-1 space-y-5 overflow-y-auto pb-3 pr-1">
         <div className="grid grid-cols-1 gap-3">
           <label className="block min-w-0 space-y-1">
             <span className="text-xs font-medium text-slate-500">视频比例</span>
@@ -240,7 +240,7 @@ export function ShotVideoGenerationTab({
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-3">
+      <div className="sticky bottom-0 z-10 -mx-4 mt-3 flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 bg-white px-4 pt-3 pb-1 shadow-[0_-8px_16px_rgba(15,23,42,0.04)]">
         <Tooltip title={disabledReason || '预览提示词并确认积分'}>
           <span>
             <PointsCostButton

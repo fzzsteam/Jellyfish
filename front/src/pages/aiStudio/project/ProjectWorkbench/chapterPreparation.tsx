@@ -53,7 +53,7 @@ export function getChapterPreparationState(chapter: Chapter): ChapterPreparation
     key: 'prepare_shots',
     text: '待确认分镜',
     color: 'blue',
-    hint: '已有分镜，建议直接进入分镜详情处理待确认镜头',
+    hint: '',
     primaryAction: '进入分镜',
     primaryIcon: <FileSearchOutlined />,
   }
