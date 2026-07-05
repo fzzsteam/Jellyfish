@@ -378,3 +378,80 @@ def test_run_image_generation_task_persists_render_context(monkeypatch) -> None:
     assert calls["persist_user_id"] == "owner-1"
     assert calls["result_payload"]["render_context"]["selected_guidance_details"][0]["reason_tag"] == "导演主指令"
     assert calls["result_payload"]["render_context"]["dropped_guidance_details"][0]["reason_tag"] == "首帧降轴线"
+
+
+def test_render_asset_image_prompt_returns_success_envelope(client: TestClient, monkeypatch) -> None:
+    db = _DummyDB()
+
+    class _Submission:
+        prompt = "一把复古手枪，最终提示词"
+        images = ["file-3"]
+
+    captured: dict[str, object] = {}
+
+    async def _fake_build_submission(_db, *, asset_type, asset_id, image_id, prompt, images):
+        captured["asset_type"] = asset_type
+        captured["asset_id"] = asset_id
+        captured["image_id"] = image_id
+        captured["prompt"] = prompt
+        captured["images"] = images
+        return _Submission()
+
+    monkeypatch.setattr(route, "_build_asset_image_submission_payload_service", _fake_build_submission)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        response = client.post(
+            "/api/v1/studio/image-tasks/assets/prop/prop-1/render-prompt",
+            json={"image_id": 2, "prompt": "一把复古手枪", "images": ["file-3"]},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 200
+    assert body["message"] == "success"
+    assert body["data"]["prompt"] == "一把复古手枪，最终提示词"
+    assert body["data"]["images"] == ["file-3"]
+    assert captured["asset_type"] == "prop"
+    assert captured["asset_id"] == "prop-1"
+    assert captured["image_id"] == 2
+    assert captured["prompt"] == "一把复古手枪"
+    assert captured["images"] == ["file-3"]
+
+
+def test_render_character_image_prompt_returns_success_envelope(client: TestClient, monkeypatch) -> None:
+    db = _DummyDB()
+
+    class _Submission:
+        prompt = "小明的正面立绘，最终提示词"
+        images: list[str] = []
+
+    captured: dict[str, object] = {}
+
+    async def _fake_build_submission(_db, *, character_id, image_id, prompt, images):
+        captured["character_id"] = character_id
+        captured["image_id"] = image_id
+        captured["prompt"] = prompt
+        captured["images"] = images
+        return _Submission()
+
+    monkeypatch.setattr(route, "_build_character_image_submission_payload_service", _fake_build_submission)
+    app.dependency_overrides[get_db] = _override_db(db)
+    try:
+        response = client.post(
+            "/api/v1/studio/image-tasks/characters/character-1/render-prompt",
+            json={"image_id": 3, "prompt": "小明的正面立绘", "images": []},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["code"] == 200
+    assert body["message"] == "success"
+    assert body["data"]["prompt"] == "小明的正面立绘，最终提示词"
+    assert body["data"]["images"] == []
+    assert captured["character_id"] == "character-1"
+    assert captured["image_id"] == 3
+    assert captured["prompt"] == "小明的正面立绘"

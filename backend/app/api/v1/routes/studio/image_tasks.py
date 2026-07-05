@@ -330,16 +330,19 @@ async def render_asset_image_prompt(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> ApiResponse[RenderedPromptResponse]:
-    base = await _build_asset_image_base_draft_service(
+    """预览接口必须和真正提交生成时走同一条 submission 构建逻辑，
+    否则用户看到的预览会和实际生成结果不一致（历史上这里走的是另一条从数据库
+    描述拼模板的路径，完全忽略请求体里的 prompt/images，属于失真的预览）。
+    """
+    submission = await _build_asset_image_submission_payload_service(
         db,
-        user_id=current_user.id,
         asset_type=asset_type,
         asset_id=asset_id,
         image_id=body.image_id,
+        prompt=body.prompt or "",
+        images=body.images,
     )
-    context = _build_asset_image_context_service(base=base)
-    derived = _derive_asset_image_preview_service(base=base, context=context)
-    return success_response(RenderedPromptResponse(prompt=derived.prompt, images=derived.images))
+    return success_response(RenderedPromptResponse(prompt=submission.prompt, images=submission.images))
 
 
 @router.post(
