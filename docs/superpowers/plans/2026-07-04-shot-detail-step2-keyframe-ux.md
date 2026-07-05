@@ -1514,6 +1514,395 @@ git commit -m "feat: 单镜头生成/诊断链路接入可选参考模式"
 
 ---
 
+### Task 7（追加）：视频生成提示词预览弹窗补充镜头连续性上下文展示
+
+**背景**：用户看过已废弃的 `ChapterStudio.tsx` 里"视频生成提示词预览"弹窗后，要求把它展示的"镜头连续性上下文"（动作节拍、上一镜头摘要、下一镜头目标、连续性建议、构图锚点、朝向视线建议）和"关联图片（参考图）"缩略图搬到镜头详情页现在这个同名弹窗里。
+
+**关键发现**：`FilmService.previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost` 的响应类型 `VideoPromptPreviewResponse` 本来就包含 `images: string[]` 和 `pack: ShotVideoPromptPackRead | null` 两个字段——后端早就把这些数据算好返回了，`ChapterShotEditPage.tsx` 里 `openVideoPromptPreview` 只取了 `res.data?.prompt`，没有接住 `images`/`pack`。本任务纯前端补充接收+展示，不需要新增或修改任何后端接口。
+
+**Files:**
+- Modify: `front/src/pages/aiStudio/shots/ChapterShotEditPage.tsx`
+
+- [ ] **Step 1: antd 补充 import**
+
+在文件顶部找到：
+```tsx
+import { Badge, Button, Card, Checkbox, Divider, Dropdown, Empty, Form, Input, Layout, List, Modal, Popconfirm, Segmented, Spin, Tabs, Tooltip, Typography, message } from 'antd'
+```
+改为（补充 `Image`、`Tag`）：
+```tsx
+import { Badge, Button, Card, Checkbox, Divider, Dropdown, Empty, Form, Image, Input, Layout, List, Modal, Popconfirm, Segmented, Spin, Tabs, Tag, Tooltip, Typography, message } from 'antd'
+```
+
+在类型 import 区（`services/generated` 那一批 type-only import）补充 `ShotVideoPromptPackRead`。
+
+- [ ] **Step 2: 新增状态**
+
+在 `videoPromptPreviewShotId` 状态定义之后（约第 401 行）新增：
+```tsx
+  const [videoPromptPreviewPack, setVideoPromptPreviewPack] = useState<ShotVideoPromptPackRead | null>(null)
+  const [videoPromptPreviewImages, setVideoPromptPreviewImages] = useState<string[]>([])
+  const [videoPromptContextCollapsed, setVideoPromptContextCollapsed] = useState(true)
+```
+
+- [ ] **Step 3: `openVideoPromptPreview` 接住 `images`/`pack`，并在关闭时重置**
+
+找到 `openVideoPromptPreview` 里调用 `previewVideoGenerationPromptApiV1FilmTasksVideoPreviewPromptPost` 之后的：
+```tsx
+      if (requestSeq !== videoPromptPreviewRequestSeqRef.current || currentShotIdRef.current !== requestShotId) return
+      setVideoPromptPreviewDraft(res.data?.prompt ?? '')
+```
+改为：
+```tsx
+      if (requestSeq !== videoPromptPreviewRequestSeqRef.current || currentShotIdRef.current !== requestShotId) return
+      setVideoPromptPreviewDraft(res.data?.prompt ?? '')
+      setVideoPromptPreviewPack(res.data?.pack ?? null)
+      setVideoPromptPreviewImages(res.data?.images ?? [])
+```
+
+在同一个函数打开弹窗之初（`setVideoPromptPreviewDraft('')` 那一行附近）新增重置：
+```tsx
+    setVideoPromptPreviewDraft('')
+    setVideoPromptPreviewPack(null)
+    setVideoPromptPreviewImages([])
+    setVideoPromptContextCollapsed(true)
+```
+
+在 Modal 的两处关闭逻辑（`onCancel` 和取消按钮 `onClick`，都会重置 `videoPromptPreviewDraft`/`videoPromptPreviewShotId` 等）里同步补充：
+```tsx
+        setVideoPromptPreviewPack(null)
+        setVideoPromptPreviewImages([])
+```
+
+- [ ] **Step 4: 派生动作拍点展示数据**
+
+在组件函数体内（`videoPromptPreviewDraft` 状态附近即可，作为普通 `const` 而非 hook）新增：
+```tsx
+  const videoActionBeats = useMemo(() => {
+    const phases = videoPromptPreviewPack?.action_beat_phases ?? []
+    if (phases.length > 0) {
+      return phases.map((item) => ({ text: item.text, phase: item.phase as 'trigger' | 'peak' | 'aftermath' | null }))
+    }
+    return (videoPromptPreviewPack?.action_beats ?? []).map((text) => ({ text, phase: null as null }))
+  }, [videoPromptPreviewPack])
+  const videoVisibleActionBeats = videoPromptContextCollapsed ? videoActionBeats.slice(0, 2) : videoActionBeats
+  const hiddenVideoActionBeatCount = Math.max(0, videoActionBeats.length - videoVisibleActionBeats.length)
+```
+
+- [ ] **Step 5: 在弹窗里渲染连续性上下文与参考图**
+
+找到（约第 3576-3580 行）：
+```tsx
+          <div className="space-y-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              <div>参考模式：{VIDEO_REFERENCE_MODE_LABEL[videoReferenceMode]}</div>
+              <div>视频比例：{resolvedVideoRatio ?? '未设置'}</div>
+              <div>清晰度：{videoResolution}</div>
+            </div>
+            <TextArea
+              rows={14}
+              value={videoPromptPreviewDraft}
+              onChange={(event) => setVideoPromptPreviewDraft(event.target.value)}
+              placeholder="视频提示词"
+            />
+          </div>
+```
+
+改为（保留原有的参考模式/比例/清晰度小卡片，新增连续性上下文区块和参考图区块，插在它和提示词文本框之间）：
+```tsx
+          <div className="space-y-3">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+              <div>参考模式：{VIDEO_REFERENCE_MODE_LABEL[videoReferenceMode]}</div>
+              <div>视频比例：{resolvedVideoRatio ?? '未设置'}</div>
+              <div>清晰度：{videoResolution}</div>
+            </div>
+
+            <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-xs text-slate-600">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="font-medium text-slate-700">镜头连续性上下文</div>
+                  <div className="mt-1 text-[11px] leading-5 text-slate-500">
+                    这些上下文会参与视频模板渲染和最终提示词补强，默认先展示摘要，需要时再展开细节。
+                  </div>
+                </div>
+                <Button
+                  type="link"
+                  size="small"
+                  className="px-0"
+                  onClick={() => setVideoPromptContextCollapsed((prev) => !prev)}
+                >
+                  {videoPromptContextCollapsed ? '展开细节' : '收起细节'}
+                </Button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Tag color="blue">{`动作节拍 ${videoActionBeats.length}`}</Tag>
+                {videoPromptPreviewPack?.previous_shot_summary ? <Tag color="purple">上一镜头</Tag> : null}
+                {videoPromptPreviewPack?.next_shot_goal ? <Tag color="cyan">下一镜头</Tag> : null}
+                {videoPromptPreviewPack?.continuity_guidance ? <Tag color="gold">连续性</Tag> : null}
+              </div>
+              <div className="mt-3 space-y-3">
+                <div>
+                  <div className="text-slate-500">动作节拍</div>
+                  {videoVisibleActionBeats.length > 0 ? (
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {videoVisibleActionBeats.map((item, index) => (
+                        <Tag
+                          key={`${index}:${item.phase ?? 'raw'}:${item.text}`}
+                          color={
+                            item.phase === 'trigger' ? 'gold' : item.phase === 'peak' ? 'blue' : item.phase === 'aftermath' ? 'green' : 'default'
+                          }
+                        >
+                          {item.phase
+                            ? `${item.phase === 'trigger' ? '触发' : item.phase === 'peak' ? '峰值' : '收束'} · ${item.text}`
+                            : item.text}
+                        </Tag>
+                      ))}
+                      {videoPromptContextCollapsed && hiddenVideoActionBeatCount > 0 ? (
+                        <Tag>{`+${hiddenVideoActionBeatCount}`}</Tag>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="mt-1 text-gray-400">暂无动作节拍</div>
+                  )}
+                </div>
+                {!videoPromptContextCollapsed ? (
+                  <>
+                    <div>
+                      <div className="text-slate-500">上一镜头摘要</div>
+                      <div className="mt-1 whitespace-pre-wrap text-slate-700">{videoPromptPreviewPack?.previous_shot_summary || '无'}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">下一镜头目标</div>
+                      <div className="mt-1 whitespace-pre-wrap text-slate-700">{videoPromptPreviewPack?.next_shot_goal || '无'}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">连续性建议</div>
+                      <div className="mt-1 whitespace-pre-wrap text-slate-700">{videoPromptPreviewPack?.continuity_guidance || '无'}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">构图与空间锚点</div>
+                      <div className="mt-1 whitespace-pre-wrap text-slate-700">{videoPromptPreviewPack?.composition_anchor || '无'}</div>
+                    </div>
+                    <div>
+                      <div className="text-slate-500">朝向与视线建议</div>
+                      <div className="mt-1 whitespace-pre-wrap text-slate-700">{videoPromptPreviewPack?.screen_direction_guidance || '无'}</div>
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </div>
+
+            <div>
+              <div className="text-xs text-gray-500 mb-2">关联图片（参考图）</div>
+              {videoPromptPreviewImages.length === 0 ? (
+                <div className="text-xs text-gray-400">暂无关联图片</div>
+              ) : (
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  <Image.PreviewGroup>
+                    {videoPromptPreviewImages.map((fid) => (
+                      <Image key={fid} width={72} height={72} style={{ objectFit: 'cover', borderRadius: 8 }} src={buildFileDownloadUrl(fid)} />
+                    ))}
+                  </Image.PreviewGroup>
+                </div>
+              )}
+            </div>
+
+            <TextArea
+              rows={14}
+              value={videoPromptPreviewDraft}
+              onChange={(event) => setVideoPromptPreviewDraft(event.target.value)}
+              placeholder="视频提示词"
+            />
+          </div>
+```
+
+`buildFileDownloadUrl` 已经在文件顶部导入过，不需要重复导入。
+
+- [ ] **Step 6: 类型检查**
+
+Run: `cd front && pnpm exec tsc --noEmit`
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add front/src/pages/aiStudio/shots/ChapterShotEditPage.tsx
+git commit -m "feat: 视频提示词预览弹窗补充镜头连续性上下文与参考图展示"
+```
+
+---
+
+### Task 8（追加）：关键帧生成弹窗支持从项目资产库新增/替换临时参考图
+
+**背景**：`ShotKeyframeGenerateModal` 目前的参考图候选只能来自当前镜头"资产关联"步骤里已经关联好的资产（`unionAssets` 状态为 linked/generating 的项）。用户希望能在这个弹窗里直接从项目完整资产库（不限于已关联到本镜头的）挑选资产作为参考图——**只作为这一次生成的临时参考图，不写入镜头的资产关联关系**，也不允许在这里新建资产或跳转到资产创建页。
+
+**复用组件**：`front/src/pages/aiStudio/shots/components/AssetPickerDrawer.tsx`（现有的"替换已关联资产"/"添加关联资产"共用抽屉，支持按类型搜索项目资产库）。
+
+**Files:**
+- Modify: `front/src/pages/aiStudio/shots/components/ShotKeyframeGenerateModal.tsx`
+- Modify: `front/src/pages/aiStudio/shots/ChapterShotEditPage.tsx`
+
+- [ ] **Step 1: `ShotKeyframeGenerateModal.tsx` 每个资产类别分组标题旁加"新增"按钮，已选参考图列表每项加"替换"按钮**
+
+新增两个 props：
+```tsx
+  onAddReferenceFromLibrary: (kind: 'scene' | 'actor' | 'prop' | 'costume') => void
+  onReplaceReferenceFromLibrary: (fileId: string) => void
+```
+
+在按类别渲染分组标题处（`{kindLabel[kind]}` 那一行）加一个小号"新增"按钮，点击调用 `onAddReferenceFromLibrary(kind)`：
+```tsx
+                  <div className="flex items-center justify-between">
+                    <div className="text-[11px] font-medium text-slate-600">{kindLabel[kind]}</div>
+                    <Button size="small" type="link" className="!px-0 !h-auto !text-[11px]" onClick={() => onAddReferenceFromLibrary(kind)}>
+                      + 从资产库新增
+                    </Button>
+                  </div>
+```
+（原来这一行只有 `<div className="text-[11px] font-medium text-slate-600">{kindLabel[kind]}</div>`，替换成上面这个 flex 容器包住原 div + 新按钮。）
+
+在"已选参考图顺序"列表每一项的上移/下移按钮旁边加一个"替换"按钮：
+```tsx
+                      <div className="flex items-center gap-1">
+                        <Button size="small" type="text" onClick={() => onReplaceReferenceFromLibrary(fileId)}>
+                          替换
+                        </Button>
+                        <Button size="small" type="text" icon={<ArrowUpOutlined />} disabled={index === 0} onClick={() => moveFileId(index, -1)} />
+                        <Button size="small" type="text" icon={<ArrowDownOutlined />} disabled={index === selectedFileIds.length - 1} onClick={() => moveFileId(index, 1)} />
+                      </div>
+```
+
+- [ ] **Step 2: `ChapterShotEditPage.tsx` 新增"临时参考图"状态**
+
+在 `keyframeModalSelectedFileIds` 状态附近新增：
+```tsx
+  const [keyframeModalExtraOptions, setKeyframeModalExtraOptions] = useState<KeyframeReferenceOption[]>([])
+  const [assetPickerOpen, setAssetPickerOpen] = useState(false)
+  const [assetPickerKind, setAssetPickerKind] = useState<AssetKind>('scene')
+  const [assetPickerReplaceFileId, setAssetPickerReplaceFileId] = useState<string | null>(null)
+  const [assetPickerLoading, setAssetPickerLoading] = useState(false)
+```
+
+在 `openKeyframeGenerateModal` 里重置这个临时列表（打开弹窗时清空上一次残留）：
+```tsx
+      setKeyframeModalExtraOptions([])
+```
+（加在 `setKeyframeModalOpen(true)` 之前即可。）
+
+把渲染 `<ShotKeyframeGenerateModal` 时传入的 `referenceOptions={keyframeReferenceOptions}` 改为 `referenceOptions={[...keyframeReferenceOptions, ...keyframeModalExtraOptions]}`（合并已关联资产和本次弹窗里临时新增的资产）。
+
+- [ ] **Step 3: 新增从资产库选取资产的处理函数**
+
+```tsx
+  const openAssetPickerForKeyframe = useCallback((kind: AssetKind) => {
+    setAssetPickerKind(kind)
+    setAssetPickerReplaceFileId(null)
+    setAssetPickerOpen(true)
+  }, [])
+
+  const openAssetPickerToReplaceKeyframe = useCallback(
+    (fileId: string) => {
+      const matched = [...keyframeReferenceOptions, ...keyframeModalExtraOptions].find((option) => option.file_id === fileId)
+      setAssetPickerKind(matched?.kind ?? 'scene')
+      setAssetPickerReplaceFileId(fileId)
+      setAssetPickerOpen(true)
+    },
+    [keyframeReferenceOptions, keyframeModalExtraOptions],
+  )
+
+  /**
+   * 资产选择抽屉确认回调：只把选中的资产临时加入本次关键帧生成的参考图候选，
+   * 不调用任何镜头关联接口——用户明确要求这里只是"这次生成用一下"，不落库到镜头资产关联关系。
+   */
+  const handleKeyframeAssetPicked = useCallback(
+    async (entityId: string, entityName: string) => {
+      setAssetPickerLoading(true)
+      try {
+        const entityType = assetPickerKind === 'actor' ? 'character' : assetPickerKind
+        const res = await StudioEntitiesApi.get(entityType as any, entityId)
+        const data: any = res.data
+        const rawThumb = data?.thumbnail ?? data?.images?.[0]?.thumbnail ?? ''
+        const fileId = tryExtractFileIdFromUrl(rawThumb) ?? (rawThumb && !rawThumb.includes('/') && !rawThumb.includes(':') ? rawThumb : null)
+        if (!fileId) {
+          message.warning('该资产暂无可用图片，无法作为参考图')
+          return
+        }
+        const newOption: KeyframeReferenceOption = {
+          kind: assetPickerKind,
+          type: entityType as ShotLinkedAssetItem['type'],
+          id: entityId,
+          name: entityName,
+          file_id: fileId,
+        }
+        setKeyframeModalExtraOptions((prev) => {
+          const withoutDuplicate = prev.filter((option) => option.file_id !== fileId)
+          return [...withoutDuplicate, newOption]
+        })
+        if (assetPickerReplaceFileId) {
+          setKeyframeModalSelectedFileIds((prev) =>
+            prev.map((id) => (id === assetPickerReplaceFileId ? fileId : id)),
+          )
+        } else {
+          setKeyframeModalSelectedFileIds((prev) => (prev.includes(fileId) ? prev : [...prev, fileId]))
+        }
+        setAssetPickerOpen(false)
+      } catch {
+        message.error('获取资产信息失败')
+      } finally {
+        setAssetPickerLoading(false)
+      }
+    },
+    [assetPickerKind, assetPickerReplaceFileId],
+  )
+```
+
+- [ ] **Step 4: 导出并复用 `tryExtractFileIdFromUrl`**
+
+`front/src/pages/aiStudio/assets/utils.ts` 里已经有一个同名的私有函数 `tryExtractFileIdFromUrl`（未 export）。把它的定义前加上 `export`：
+```tsx
+export function tryExtractFileIdFromUrl(value: string): string | null {
+```
+在 `ChapterShotEditPage.tsx` 顶部 import 区补充：
+```tsx
+import { buildFileDownloadUrl, resolveAssetUrl, tryExtractFileIdFromUrl } from '../assets/utils'
+```
+（与已有的 `buildFileDownloadUrl, resolveAssetUrl` import 合并为一行，不要重复 import 同一模块。）
+
+- [ ] **Step 5: 接线到组件与渲染 `AssetPickerDrawer`**
+
+在 `<ShotKeyframeGenerateModal` 渲染处新增两个 prop：
+```tsx
+        onAddReferenceFromLibrary={openAssetPickerForKeyframe}
+        onReplaceReferenceFromLibrary={openAssetPickerToReplaceKeyframe}
+```
+
+在文件里已有的 `<AssetPickerDrawer` 渲染附近（"替换"/"添加关联资产"那两处）之后新增第三个实例：
+```tsx
+      <AssetPickerDrawer
+        mode="add"
+        open={assetPickerOpen}
+        kind={assetPickerKind}
+        currentEntityId={null}
+        projectId={projectId}
+        loading={assetPickerLoading}
+        onSelect={(entityId, entityName) => void handleKeyframeAssetPicked(entityId, entityName)}
+        onClose={() => setAssetPickerOpen(false)}
+      />
+```
+（`mode="add"` 恒定传 add——即使是"替换"场景，这里的抽屉本身只是"从资产库选一个"，是否替换由 `assetPickerReplaceFileId` 是否非空决定，不需要抽屉自己区分 replace/add 语义；`currentEntityId` 传 `null` 是因为这个临时参考图选择场景没有"当前已关联实体"概念，不需要高亮。）
+
+- [ ] **Step 6: 类型检查**
+
+Run: `cd front && pnpm exec tsc --noEmit`
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add front/src/pages/aiStudio/shots/components/ShotKeyframeGenerateModal.tsx front/src/pages/aiStudio/shots/ChapterShotEditPage.tsx front/src/pages/aiStudio/assets/utils.ts
+git commit -m "feat: 关键帧生成弹窗支持从资产库新增/替换临时参考图"
+```
+
+---
+
 ## 全部任务完成后的收尾检查
 
 - [ ] 再次运行 `cd front && pnpm exec tsc --noEmit`，确认全部改动累计无类型错误
