@@ -1269,6 +1269,11 @@ export function ChapterShotEditPage() {
           file_id: fileId,
         }
         setKeyframeModalExtraOptions((prev) => {
+          // 如果选中的资产本来就在第 2 步已关联资产（keyframeReferenceOptions）里，
+          // 不需要再加一份临时候选——否则合并渲染时会出现两条 file_id 相同的条目，
+          // 触发 React 重复 key 并在候选列表里显示两遍同一个资产。
+          const alreadyInBaseOptions = keyframeReferenceOptions.some((option) => option.file_id === fileId)
+          if (alreadyInBaseOptions) return prev
           const withoutDuplicate = prev.filter((option) => option.file_id !== fileId)
           return [...withoutDuplicate, newOption]
         })
@@ -1286,7 +1291,7 @@ export function ChapterShotEditPage() {
         setAssetPickerLoading(false)
       }
     },
-    [assetPickerKind, assetPickerReplaceFileId],
+    [assetPickerKind, assetPickerReplaceFileId, keyframeReferenceOptions],
   )
 
   useEffect(() => {
@@ -2175,8 +2180,12 @@ export function ChapterShotEditPage() {
     }
     setKeyframeModalSubmitting(true)
     try {
+      // 参考图候选可能来自第 2 步已关联资产（keyframeReferenceOptions），也可能是本次弹窗里
+      // 从资产库临时新增/替换的（keyframeModalExtraOptions）——两者都要参与查找，否则用户在
+      // 弹窗里新增的参考图会在提交时被静默丢弃，白选了却什么都没生效。
+      const allReferenceOptions = [...keyframeReferenceOptions, ...keyframeModalExtraOptions]
       const images: ShotLinkedAssetItem[] = keyframeModalSelectedFileIds
-        .map((fileId) => keyframeReferenceOptions.find((option) => option.file_id === fileId))
+        .map((fileId) => allReferenceOptions.find((option) => option.file_id === fileId))
         .filter((option): option is KeyframeReferenceOption => !!option)
         .map((option) => ({ type: option.type, id: option.id, name: option.name, file_id: option.file_id }))
 
@@ -2207,6 +2216,7 @@ export function ChapterShotEditPage() {
   }, [
     keyframeImageQuote.quoteToken,
     keyframeImageQuote.refresh,
+    keyframeModalExtraOptions,
     keyframeModalFrameType,
     keyframeModalPrompt,
     keyframeModalSelectedFileIds,
