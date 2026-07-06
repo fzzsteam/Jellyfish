@@ -1269,7 +1269,11 @@ export function ChapterShotEditPage() {
   }, [shotId])
 
   useEffect(() => {
-    if (!shotId || !preparationState?.ready_for_generation) {
+    // preparationState 是异步加载的，切换分镜时 shotId 会先于 preparationState 更新，
+    // 若不校验 preparationState.shot.id 是否已对齐当前 shotId，会先用上一个分镜的旧数据
+    // 误判 ready_for_generation 提前发出一次请求，等新 preparationState 到达后又会再发一次，
+    // 导致同一个分镜的生成条件在页面上闪烁切换两次。
+    if (!shotId || preparationState?.shot?.id !== shotId || !preparationState?.ready_for_generation) {
       firstFrameReadinessRequestSeqRef.current += 1
       setFirstFrameReadiness(null)
       setFirstFrameReadinessLoading(false)

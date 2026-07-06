@@ -1,5 +1,5 @@
 import type React from 'react'
-import { Alert, Table, Tag } from 'antd'
+import { Alert, Image, Table, Tag } from 'antd'
 
 type GuideSection = {
   id: string
@@ -63,17 +63,14 @@ const screenshots = [
   { src: '/guide/guide-shot-002.jpg', caption: '图 03 新建章节弹窗' },
   { src: '/guide/guide-shot-003.jpg', caption: '图 04 项目工作台 · 章节列表' },
   { src: '/guide/guide-shot-004.jpg', caption: '图 05 项目工作台 · 章节列表顶部总览' },
-  { src: '/guide/guide-shot-005.jpg', caption: '图 06 一键提取 · 积分确认弹窗' },
+  { src: '/guide/guide-shot-005.png', caption: '图 06 一键提取 · 积分确认弹窗' },
   { src: '/guide/guide-shot-006.jpg', caption: '图 07 分镜列表页' },
   { src: '/guide/guide-shot-007.jpg', caption: '图 08 镜头详情 · 基础信息' },
   { src: '/guide/guide-shot-008.jpg', caption: '图 09 镜头详情 · 资产与对白确认' },
-  { src: '/guide/guide-shot-009.jpg', caption: '图 10 镜头详情 · 生成视频' },
-  { src: '/guide/guide-shot-010.jpg', caption: '图 11 镜头详情 · 视频生成参数' },
-  { src: '/guide/guide-shot-011.jpg', caption: '图 12 镜头详情 · 生成视频' },
-  { src: '/guide/guide-shot-012.jpg', caption: '图 13 分镜列表 · 批量生成与下载' },
-  { src: '/guide/guide-shot-013.jpg', caption: '图 14 镜头详情 · 视频提示词预览' },
-  { src: '/guide/guide-shot-014.jpg', caption: '图 15 资产管理 · 资产库' },
-  { src: '/guide/guide-shot-015.jpg', caption: '图 16 资产编辑 · 图片编辑' },
+  { src: '/guide/guide-shot-009.png', caption: '图 10 镜头详情 · 生成视频（批量操作 / 视频参数 / 视频结果）' },
+  { src: '/guide/guide-shot-013.png', caption: '图 11 镜头详情 · 视频提示词预览' },
+  { src: '/guide/guide-shot-014.jpg', caption: '图 12 资产管理 · 资产库' },
+  { src: '/guide/guide-shot-015.jpg', caption: '图 13 资产编辑 · 图片编辑' },
 ]
 
 /**
@@ -230,19 +227,16 @@ const CreationGuidePage: React.FC = () => {
             <GuideBlock id="studio" number="6" title="镜头详情（生成画面与视频）">
               <p>当前单镜头生成入口位于镜头详情的第三个步骤「生成视频」，结果回看位于第四个步骤「视频结果」。旧 `/studio` 仅保留兼容跳转，不是主路径。</p>
               <Figure {...screenshots[9]} />
-              <Figure {...screenshots[10]} />
+              <p>切到「生成视频」步骤后，右侧参数区可设置视频比例、视频模型、清晰度和参考模式，确认镜头「可生成」后点「生成视频」发起任务；生成的视频会陆续出现在中间视频结果区，可将满意的一版标记为「当前使用」。左侧分镜列表支持勾选多个镜头后走「批量操作」菜单统一提取、诊断、生成视频或下载视频，不必逐个进入镜头详情。</p>
               <p>在「生成视频」步骤里查看 `video-readiness` 诊断，补齐关键帧、参考图、提示词和生成参数。镜头显示“准备完成”后，仍要通过这里的诊断才能真正发起视频生成。</p>
-              <Figure {...screenshots[11]} />
-              <Figure {...screenshots[12]} />
-              <p>章节级批量生成、批量下载和批量诊断位于分镜列表顶部工具栏。批量生成会先做视频准备度检查，未通过的镜头会自动跳过并给出诊断。</p>
-              <Figure {...screenshots[13]} />
+              <Figure {...screenshots[10]} />
               <p>视频提示词已经由 Agent 自动整理，包含镜头标题、剧本摘录、动作节拍、项目风格、资产设定和连续性上下文；生成完成后切到「视频结果」步骤选用满意版本并下载。</p>
             </GuideBlock>
 
             <GuideBlock id="assets" number="7" title="资产管理与图片编辑">
               <p>资产管理用于维护全局素材库，包含演员、角色、场景、道具、服装。它是保证一致性的常用辅助环节，不是主路径的硬性前置；分镜提取时 AI 自动准备并关联到的资产也会出现在这里。</p>
-              <Figure {...screenshots[14]} />
-              <Figure {...screenshots[15]} />
+              <Figure {...screenshots[11]} />
+              <Figure {...screenshots[12]} />
               <p>资产编辑页支持用文字描述改图，也支持在描述中输入「@」引用其他资产参与融合生图。主要角色和主场景越统一，后续视频越稳定。</p>
             </GuideBlock>
 
@@ -295,11 +289,16 @@ const GuideBlock: React.FC<{
 )
 
 /**
- * 产品截图展示块：复用 PDF 中提取的图片并提供稳定尺寸与说明。
+ * 产品截图展示块：复用截图并提供稳定尺寸、说明文字，点击图片可放大预览原图。
  */
 const Figure: React.FC<{ src: string; caption: string }> = ({ src, caption }) => (
   <figure className="rounded-md border border-slate-200 bg-slate-50 p-3">
-    <img src={src} alt={caption} className="max-h-[520px] w-full rounded border border-slate-100 bg-white object-contain" loading="lazy" />
+    <Image
+      src={src}
+      alt={caption}
+      className="!max-h-[520px] !w-full rounded border border-slate-100 bg-white object-contain"
+      loading="lazy"
+    />
     <figcaption className="mt-2 text-center text-xs text-slate-500">{caption}</figcaption>
   </figure>
 )
