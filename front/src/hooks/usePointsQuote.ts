@@ -46,6 +46,31 @@ export type UsePointsQuoteResult = {
 
 /** 防抖等待时长（毫秒）：文本试算便宜且稳定，取较短值避免感知卡顿。 */
 const DEBOUNCE_MS = 400
+/** quote_token 过期前提前续期，避免用户提交时刚好撞上后端过期校验。 */
+const QUOTE_REFRESH_AHEAD_MS = 30_000
+
+/** 解析 quote_token 的 JWT exp 字段，供前端做续期调度；签名有效性仍由后端负责。 */
+function getQuoteTokenExpiresAtMs(token: string | null | undefined): number | null {
+  if (!token) return null
+  const [, payload] = token.split('.')
+  if (!payload) return null
+  try {
+    const normalized = payload.replace(/-/g, '+').replace(/_/g, '/')
+    const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
+    const raw = globalThis.atob(padded)
+    const parsed = JSON.parse(raw) as { exp?: unknown }
+    return typeof parsed.exp === 'number' ? parsed.exp * 1000 : null
+  } catch {
+    return null
+  }
+}
+
+/** 判断当前 quote_token 是否已经进入续期窗口，用于 focus/visibility 恢复时补刷新。 */
+function shouldRefreshQuoteToken(token: string | null | undefined, nowMs = Date.now()): boolean {
+  const expiresAtMs = getQuoteTokenExpiresAtMs(token)
+  if (!expiresAtMs) return false
+  return expiresAtMs - nowMs <= QUOTE_REFRESH_AHEAD_MS
+}
 
 /**
  * 防抖积分试算 Hook。
@@ -183,6 +208,38 @@ export function usePointsQuote(params: UsePointsQuoteParams): UsePointsQuoteResu
     // manualTick 用于 refresh 触发重排；不直接读取其值。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [businessType, category, modelId, durationSeconds, resolution, resolutionProfile, enabled, manualTick])
+
+  // quote_token 进入过期窗口前自动续期，减少长时间停留页面后提交失败。
+  useEffect(() => {
+    if (!enabled || !quote?.quote_token) return
+    const expiresAtMs = getQuoteTokenExpiresAtMs(quote.quote_token)
+    if (!expiresAtMs) return
+    const delayMs = Math.max(0, expiresAtMs - Date.now() - QUOTE_REFRESH_AHEAD_MS)
+    const renewalTimer = setTimeout(() => {
+      void refreshNow()
+    }, delayMs)
+    return () => {
+      clearTimeout(renewalTimer)
+    }
+  }, [enabled, quote?.quote_token, refreshNow])
+
+  // 页面从后台回到前台时补检查，避免浏览器节流定时器导致续期错过窗口。
+  useEffect(() => {
+    if (!enabled || !quote?.quote_token) return
+    if (typeof window === 'undefined' || typeof document === 'undefined') return
+
+    const refreshIfNeeded = () => {
+      if (!document.hidden && shouldRefreshQuoteToken(quote.quote_token)) {
+        void refreshNow()
+      }
+    }
+    window.addEventListener('focus', refreshIfNeeded)
+    document.addEventListener('visibilitychange', refreshIfNeeded)
+    return () => {
+      window.removeEventListener('focus', refreshIfNeeded)
+      document.removeEventListener('visibilitychange', refreshIfNeeded)
+    }
+  }, [enabled, quote?.quote_token, refreshNow])
 
   // 组件卸载时废弃所有在途响应。
   useEffect(() => {

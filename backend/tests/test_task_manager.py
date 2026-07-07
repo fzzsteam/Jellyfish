@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import Any, AsyncIterator
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.core.db import Base
@@ -16,6 +18,7 @@ from app.core.task_manager import (
     TaskManager,
 )
 from app.core.task_manager.types import BaseTask, TaskStatus
+from app.models.task import GenerationTask
 from app.models.task_links import GenerationTaskLink, GenerationTaskLinkStatus
 
 
@@ -219,6 +222,49 @@ async def test_sqlalchemy_store_list_task_views_relation_filter_deduplicates_tas
         assert total == 2
         assert len(items) == 2
         assert {item.id for item in items} == {first.id, second.id}
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sqlalchemy_store_list_task_views_orders_by_created_at_desc() -> None:
+    """任务中心按创建时间倒序展示，旧任务后续补写 updated_at 不应插到新任务前面。"""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)
+    SessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    import app.models.task  # noqa: F401
+
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    async with SessionLocal() as db:
+        store = SqlAlchemyTaskStore(db)
+        old_task = await store.create(
+            payload={"run_args": {}},
+            mode=DeliveryMode.async_polling,
+            task_kind="image_generation",
+            user_id="test-user",
+        )
+        new_task = await store.create(
+            payload={"run_args": {}},
+            mode=DeliveryMode.async_polling,
+            task_kind="image_generation",
+            user_id="test-user",
+        )
+        old_row = await db.scalar(select(GenerationTask).where(GenerationTask.id == old_task.id))
+        new_row = await db.scalar(select(GenerationTask).where(GenerationTask.id == new_task.id))
+        assert old_row is not None
+        assert new_row is not None
+        old_row.created_at = datetime(2026, 7, 7, 9, 0, 0)
+        old_row.updated_at = datetime(2026, 7, 7, 13, 5, 0)
+        new_row.created_at = datetime(2026, 7, 7, 13, 4, 0)
+        new_row.updated_at = datetime(2026, 7, 7, 13, 4, 0)
+        await db.flush()
+
+        items, total = await store.list_task_views(user_id="test-user", page=1, page_size=20)
+
+        assert total == 2
+        assert [item.id for item in items] == [new_task.id, old_task.id]
 
     await engine.dispose()
 

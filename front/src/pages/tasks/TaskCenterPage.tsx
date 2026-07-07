@@ -1,7 +1,7 @@
 import { Button, Card, Collapse, Empty, Progress, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { CopyOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { FilmService } from '../../services/generated'
 import type { TaskListItemRead, TaskStatus } from '../../services/generated'
@@ -10,6 +10,8 @@ import { useResolvedTaskCenterTasks } from '../aiStudio/components/taskCenterMet
 import { resolveTaskSourceLabel, resolveTaskTitle } from '../aiStudio/components/taskCopy'
 
 const ACTIVE_STATUSES: TaskStatus[] = ['pending', 'running', 'streaming']
+/** 任务中心轮询间隔，保证停留在页面时任务状态持续更新。 */
+const TASK_CENTER_POLL_INTERVAL_MS = 5000
 
 /**
  * 格式化任务时间戳，统一任务中心内的时间展示口径。
@@ -38,7 +40,7 @@ function getStatusMeta(task: TaskListItemRead): { color: string; label: string; 
     return { color: 'orange', label: '取消中', detail: '已发送取消请求，等待任务在当前步骤结束后停止。' }
   }
   if (task.status === 'failed') {
-    return { color: 'red', label: '失败', detail: task.error?.trim() || '任务执行失败。' }
+    return { color: 'red', label: '失败', detail: '任务执行失败。' }
   }
   if (task.status === 'succeeded') {
     return { color: 'green', label: '已完成', detail: '任务已完成。' }
@@ -125,8 +127,10 @@ export default function TaskCenterPage() {
     [resolvedTasks],
   )
 
-  const loadTasks = async () => {
-    setLoading(true)
+  const loadTasks = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) {
+      setLoading(true)
+    }
     try {
       const response = await FilmService.listTasksApiV1FilmTasksGet({
         statuses: statusFilter.length > 0 ? statusFilter : undefined,
@@ -138,15 +142,28 @@ export default function TaskCenterPage() {
       setItems(response.data?.items ?? [])
       setTotal(response.data?.pagination?.total ?? 0)
     } catch {
-      message.error('加载任务中心失败')
+      if (!options?.silent) {
+        message.error('加载任务中心失败')
+      }
     } finally {
-      setLoading(false)
+      if (!options?.silent) {
+        setLoading(false)
+      }
     }
-  }
+  }, [page, pageSize, statusFilter, taskKindFilter])
 
   useEffect(() => {
     void loadTasks()
-  }, [page, pageSize, taskKindFilter, JSON.stringify(statusFilter)])
+  }, [loadTasks])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void loadTasks({ silent: true })
+    }, TASK_CENTER_POLL_INTERVAL_MS)
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [loadTasks])
 
   const taskKindOptions = useMemo(
     () =>
@@ -183,10 +200,26 @@ export default function TaskCenterPage() {
         width: 240,
         render: (_value, record) => {
           const meta = getStatusMeta(record)
+          const isActive = ACTIVE_STATUSES.includes(record.status)
           return (
             <div className="space-y-2">
-              <Tag color={meta.color}>{meta.label}</Tag>
-              <Progress percent={Math.max(0, Math.min(100, Math.round(record.progress)))} size="small" showInfo={false} />
+              <Tag color={meta.color}>
+                <span className="inline-flex items-center gap-1.5">
+                  {isActive ? (
+                    <span className="relative inline-flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-current opacity-50" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-current" />
+                    </span>
+                  ) : null}
+                  {meta.label}
+                </span>
+              </Tag>
+              <Progress
+                percent={Math.max(0, Math.min(100, Math.round(record.progress)))}
+                size="small"
+                showInfo={false}
+                status={isActive ? 'active' : undefined}
+              />
               <div className="text-xs text-gray-500 whitespace-pre-wrap break-words">{meta.detail}</div>
             </div>
           )
@@ -285,7 +318,7 @@ export default function TaskCenterPage() {
         ),
       },
     ],
-    [taskById],
+    [loadTasks, taskById],
   )
 
   return (

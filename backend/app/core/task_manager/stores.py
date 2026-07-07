@@ -544,14 +544,14 @@ class SqlAlchemyTaskStore(TaskStore):
         total_res = await self.db.execute(count_stmt)
         total = int(total_res.scalar() or 0)
 
-        id_stmt = select(GenerationTask.id, GenerationTask.updated_at)
+        id_stmt = select(GenerationTask.id, GenerationTask.created_at)
         if join_links:
             id_stmt = id_stmt.join(GenerationTaskLink, GenerationTaskLink.task_id == GenerationTask.id)
         if filters:
             id_stmt = id_stmt.where(*filters)
         if join_links:
-            id_stmt = id_stmt.group_by(GenerationTask.id, GenerationTask.updated_at)
-        id_stmt = id_stmt.order_by(GenerationTask.updated_at.desc(), GenerationTask.id.desc())
+            id_stmt = id_stmt.group_by(GenerationTask.id, GenerationTask.created_at)
+        id_stmt = id_stmt.order_by(GenerationTask.created_at.desc(), GenerationTask.id.desc())
 
         id_res = await self.db.execute(id_stmt.offset((page - 1) * page_size).limit(page_size))
         ordered_task_ids = [row.id for row in id_res.all()]

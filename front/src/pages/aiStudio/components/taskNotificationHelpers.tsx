@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { Button, notification } from 'antd'
+import { Button, Space, notification } from 'antd'
+import { useNavigate } from 'react-router-dom'
 import type { ReactNode } from 'react'
 import type { RelationTaskState } from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { useTaskUiStore } from './taskUiStore'
@@ -76,6 +77,7 @@ export function useRelationTaskNotification({
   onCancel,
   onNavigate,
 }: RelationTaskNotificationOptions) {
+  const navigate = useNavigate()
   const previousTaskIdRef = useRef<string | null>(null)
   const previousSettledKeyRef = useRef<string | null>(null)
   const dismissedTaskIdsRef = useRef<Set<string>>(new Set())
@@ -132,14 +134,20 @@ export function useRelationTaskNotification({
       onClose: () => {
         dismissedTaskIdsRef.current.add(task.taskId)
       },
-      btn:
-        onCancel && !task.cancelRequested ? (
-          <Button size="small" danger onClick={onCancel}>
-            取消任务
+      btn: (
+        <Space size={8}>
+          <Button size="small" onClick={() => navigate('/tasks')}>
+            查看任务中心
           </Button>
-        ) : undefined,
+          {onCancel && !task.cancelRequested ? (
+            <Button size="small" danger onClick={onCancel}>
+              取消任务
+            </Button>
+          ) : null}
+        </Space>
+      ),
     })
-  }, [description, onCancel, onNavigate, sourceLabel, task, title])
+  }, [description, navigate, onCancel, onNavigate, sourceLabel, task, title])
 
   useEffect(() => {
     if (!settledTask) return
