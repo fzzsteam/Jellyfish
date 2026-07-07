@@ -28,6 +28,19 @@ from app.services.studio.shot_extracted_candidates import list_by_shot
 
 
 _ACTIVE_TASK_STATUSES = (GenerationTaskStatus.pending.value, GenerationTaskStatus.running.value)
+_PREPARATION_PENDING_TYPES = {"character", "scene", "prop"}
+
+
+def _counts_as_preparation_pending(item: ShotAssetOverviewItem) -> bool:
+    """判断资产总览条目是否应计入分镜准备阶段的待确认数量。
+
+    服装候选只作为参考资产出现在总览里，不阻塞 shot.status ready，也不应让
+    分镜详情页出现“待确认关联”但没有可处理卡片的状态。
+    """
+    return (
+        item.type in _PREPARATION_PENDING_TYPES
+        and item.candidate_status == ShotCandidateStatus.pending.value
+    )
 
 
 async def _detect_generating_entity_keys(
@@ -290,7 +303,7 @@ async def get_shot_assets_overview(
     )
 
     linked_count = sum(1 for item in items if item.is_linked)
-    pending_count = sum(1 for item in items if item.candidate_status == ShotCandidateStatus.pending.value)
+    pending_count = sum(1 for item in items if _counts_as_preparation_pending(item))
     ignored_count = sum(1 for item in items if item.candidate_status == ShotCandidateStatus.ignored.value)
 
     return ShotAssetsOverviewRead(

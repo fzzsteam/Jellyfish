@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { NavigateFunction } from 'react-router-dom'
 import { StudioChaptersService, StudioShotsService } from '../../../services/generated'
 import { StudioEntitiesApi } from '../../../services/studioEntities'
-import { getChapterShotsPath, getChapterStudioPath } from '../project/ProjectWorkbench/routes'
+import { getChapterShotDetailPath, getChapterShotsPath } from '../project/ProjectWorkbench/routes'
 import type { TaskUiItem } from './taskUiStore'
 
 type ResolvedTaskMeta = {
@@ -85,7 +85,7 @@ async function resolveTaskMeta(task: TaskUiItem): Promise<ResolvedTaskMeta | nul
       sourceLabel: shot.title
         ? `镜头：${shot.title}（第 ${shot.index} 镜）`
         : `镜头：${relationEntityId}`,
-      navigateTo: getChapterStudioPath(chapter.project_id, chapter.id),
+      navigateTo: getChapterShotDetailPath(chapter.project_id, chapter.id, shot.id, 'generate'),
     }
   }
 

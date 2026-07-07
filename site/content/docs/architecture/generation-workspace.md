@@ -71,7 +71,7 @@ backend/app/services/studio/generation/
 当前 `preview-prompt` 与 `create video task` 已共享同一份 `reference_mode + images` 上下文。
 镜头详情“生成视频”步骤中，参考模式为空表示未手动选择首帧 / 尾帧 / 关键帧模式；前端会以 `text_only` 作为后端契约值，并把第二步“资产与对白确认”中已确认资产的图片 file_id 放入 `images`，供提示词预览与视频生成任务共用。
 视频任务提交给外部供应商时，若对象存储签出的“外部 URL”仍指向 `localhost`、回环地址或私网地址，后端会回退为 data URL，避免把供应商无法访问的本地 RustFS / MinIO 地址传给模型。
-其中工作室当前使用的 `film/tasks/video/preview-prompt` 也会返回完整 `pack`：
+其中镜头详情当前使用的 `film/tasks/video/preview-prompt` 也会返回完整 `pack`：
 
 - `previous_shot_summary`
 - `next_shot_goal`
@@ -81,7 +81,7 @@ backend/app/services/studio/generation/
 - `action_beats`
 - `action_beat_phases`
 
-因此工作室视频提示词预览与 studio 侧底层 pack 现在保持同源，不再出现“提示词有值但连续性上下文始终为空”的接口分叉。
+因此镜头详情视频提示词预览与 studio 侧底层 pack 现在保持同源，不再出现“提示词有值但连续性上下文始终为空”的接口分叉。
 
 当前视频参数已收口为以 `ratio` 为唯一业务主参数：
 
@@ -93,7 +93,7 @@ backend/app/services/studio/generation/
 - 前端比例枚举来自当前默认视频模型 capability 动态返回，不再使用静态常量
 - 关键帧图片若用于视频参考，提交时会显式携带 `target_ratio + resolution_profile`
 - 后端根据当前默认图片模型 capability 解析对应 `size`，保证关键帧画幅与目标视频保持一致
-- 工作室会展示当前关键帧规格预览：`ratio + resolution_profile -> size`
+- 镜头详情会展示当前关键帧规格预览：`ratio + resolution_profile -> size`
 - 视频提示词预览当前会额外暴露 `action_beats / previous_shot_summary / next_shot_goal / continuity_guidance`
 - 视频提示词预览当前会额外暴露 `composition_anchor`
 - 视频提示词预览当前会额外暴露 `screen_direction_guidance`
@@ -135,7 +135,7 @@ backend/app/services/studio/generation/
 - `extract / extract-async` 在同步资产候选与对白候选之外，会按镜头序号将上述默认建议回写到 `ShotDetail`
   - 因此 `camera_shot / angle / movement / duration` 不再只依赖分镜写库时的硬编码初始值
   - `action_beats` 也会作为镜头动作拍点真值回写到 `ShotDetail`
-  - 工作室中的镜头语言微调，修改的也是这同一份 `ShotDetail` 真值
+  - 镜头详情中的镜头语言微调，修改的也是这同一份 `ShotDetail` 真值
 - 分镜准备页聚合状态当前也会显式返回：
   - `basic_info_ready`
   - `semantic_defaults_ready`
@@ -202,19 +202,15 @@ front/src/pages/aiStudio/hooks/useGenerationDraft.ts
 
 ### 当前已接入页面
 
-#### 镜头详情与章节镜头队列
+#### 镜头详情
 
-当前单镜头生成入口已经位于镜头详情页的“生成视频”步骤；章节级批量动作位于分镜列表顶部工具栏。生成准备架构在前端的落点可分为两层：
+当前单镜头生成入口已经位于镜头详情页的“生成视频”步骤；章节镜头队列、批量动作与生成结果回看也已收口到分镜详情页内。生成准备架构在前端的主要落点是镜头详情“生成视频”：
 
-1. 镜头详情“生成视频”
-   - 单镜头 `video-readiness`
-   - 关键帧提示词预览
-   - 视频提示词预览
-   - 单镜头视频生成
-2. 分镜列表顶部工具栏
-   - 批量生成
-   - 批量下载
-   - 批量诊断
+- 单镜头 `video-readiness`
+- 关键帧提示词预览
+- 视频提示词预览
+- 单镜头视频生成
+- 批量生成、批量下载与批量诊断入口
 
 其中镜头详情“生成视频”步骤当前已开始将：
 
@@ -238,7 +234,7 @@ front/src/pages/aiStudio/hooks/useGenerationDraft.ts
 - 再使用最新的 `derived` 结果提交任务
 - 页面不再单独维护一套“提交前再手动 render”的旁路逻辑
 
-旧 `ChapterStudio` / `/studio` 入口当前仅保留兼容跳转说明：
+旧 `ChapterStudio` 页面已移除，`/studio` 路由当前仅保留兼容跳转说明：
 
 - 兼容旧链接和旧回跳路径。
 - 落点应回到当前镜头详情的相关生成步骤。

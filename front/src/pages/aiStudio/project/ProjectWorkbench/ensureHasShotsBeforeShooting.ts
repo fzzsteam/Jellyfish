@@ -1,7 +1,7 @@
 import { message } from 'antd'
 import type { NavigateFunction } from 'react-router-dom'
 
-import { getChapterShotsPath, getChapterStudioPath } from './routes'
+import { getChapterShotsPath } from './routes'
 
 export type EnsureHasShotsBeforeShootingArgs = {
   projectId: string | undefined
@@ -23,6 +23,5 @@ export function ensureHasShotsBeforeShooting(args: EnsureHasShotsBeforeShootingA
     return
   }
 
-  navigate(getChapterStudioPath(projectId, chapterId))
+  navigate(getChapterShotsPath(projectId, chapterId))
 }
-

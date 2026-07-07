@@ -30,6 +30,7 @@ from app.schemas.skills.script_processing import StudioScriptExtractionDraft, St
 from app.services.studio import (
     create_project_asset_link,
     delete_project_asset_link,
+    build_shot_preparation_state,
     get_shot_assets_overview,
     ignore_shot_extracted_candidate,
     link_shot_extracted_candidate,
@@ -166,12 +167,38 @@ async def test_costume_candidates_do_not_block_shot_ready() -> None:
         )
 
         status = await recompute_shot_status(db, shot_id=shot.id)
+        shot.status = ShotStatus.pending
+        await db.flush()
         refreshed = await build_shot_read(db, shot=shot)
 
         assert status == ShotStatus.ready
+        assert refreshed.status == ShotStatus.ready
+        assert shot.status == ShotStatus.ready
         assert refreshed.extraction.asset_candidate_total == 0
         assert refreshed.extraction.pending_asset_count == 0
         assert refreshed.extraction.state == "extracted_empty"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_costume_candidates_do_not_count_as_preparation_pending() -> None:
+    db, engine = await _build_session()
+    async with db:
+        shot = await _seed_graph(db)
+        db.add(ShotDetail(id=shot.id, camera_shot="MS", angle="EYE_LEVEL", movement="STATIC"))
+        await db.flush()
+        await replace_shot_extracted_candidates(
+            db,
+            shot_id=shot.id,
+            candidates=[{"candidate_type": "costume", "candidate_name": "青衫"}],
+        )
+
+        overview = await get_shot_assets_overview(db, shot_id=shot.id)
+        preparation = await build_shot_preparation_state(db, shot_id=shot.id)
+
+        assert overview.summary.pending_count == 0
+        assert preparation.pending_confirm_count == 0
+        assert preparation.shot.status == ShotStatus.ready
     await engine.dispose()
 
 

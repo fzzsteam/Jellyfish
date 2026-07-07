@@ -49,7 +49,7 @@ function requestVideoFullscreen(video: HTMLVideoElement | null): void {
 }
 
 /**
- * 展示当前镜头已生成的视频结果，改为小方块网格（参考分镜工作室主体展示）。
+ * 展示当前镜头已生成的视频结果，使用紧凑网格便于在分镜详情中快速选片。
  * 数据来自任务链接（视频 ↔ 镜头关联），并用 shot.generated_video_file_id 兜底，
  * 避免该字段指向的视频因链接数据缺失而在列表中消失。
  */

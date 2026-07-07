@@ -20,6 +20,7 @@ from app.models.studio import (
     ShotDialogueCandidateStatus,
     ShotExtractedCandidate,
     ShotExtractedDialogueCandidate,
+    ShotStatus,
     VFXType,
 )
 from app.schemas.common import ApiResponse, PaginatedData, paginated_response
@@ -136,6 +137,31 @@ async def _fetch_duration_map(
     return {str(shot_id): int(duration or 0) for shot_id, duration in (await db.execute(stmt)).all()}
 
 
+def _sync_status_from_extraction_counts(shot: Shot, extraction_counts: dict[str, int] | None) -> bool:
+    """按列表读取时的提取统计同步 shot.status，修复历史状态残留。
+
+    分镜列表和详情页都依赖 ShotRead；如果旧数据曾因非阻塞候选被写成 pending，
+    这里用与 extraction summary 相同的口径自愈，避免接口返回“无待处理项但
+    status 仍为 pending”的矛盾状态。
+    """
+    counts = extraction_counts or {}
+    pending_asset_count = int(counts.get("pending_asset_count", 0))
+    pending_dialogue_count = int(counts.get("pending_dialogue_count", 0))
+    if shot.skip_extraction:
+        next_status = ShotStatus.ready
+    elif shot.last_extracted_at is None:
+        next_status = ShotStatus.pending
+    elif pending_asset_count > 0 or pending_dialogue_count > 0:
+        next_status = ShotStatus.pending
+    else:
+        next_status = ShotStatus.ready
+
+    if shot.status == next_status:
+        return False
+    shot.status = next_status
+    return True
+
+
 def _build_shot_read(
     shot: Shot,
     *,
@@ -184,6 +210,8 @@ async def build_shot_read(
 ) -> ShotRead:
     counts_map = await _fetch_extraction_counts_map(db, shot_ids=[shot.id])
     duration_map = await _fetch_duration_map(db, shot_ids=[shot.id])
+    if _sync_status_from_extraction_counts(shot, counts_map.get(shot.id)):
+        await db.flush()
     return _build_shot_read(
         shot,
         extraction_counts=counts_map.get(shot.id),
@@ -199,6 +227,11 @@ async def build_shot_reads(
     shot_ids = [shot.id for shot in shots]
     counts_map = await _fetch_extraction_counts_map(db, shot_ids=shot_ids)
     duration_map = await _fetch_duration_map(db, shot_ids=shot_ids)
+    should_flush = False
+    for shot in shots:
+        should_flush = _sync_status_from_extraction_counts(shot, counts_map.get(shot.id)) or should_flush
+    if should_flush:
+        await db.flush()
     return [
         _build_shot_read(
             shot,

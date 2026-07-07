@@ -2,8 +2,8 @@ export function getProjectChaptersPath(projectId: string) {
   return `/projects/${projectId}/chapters`
 }
 
-export function getChapterStudioPath(projectId: string, chapterId: string) {
-  return `/projects/${projectId}/chapters/${chapterId}/studio`
+export function getProjectWorkbenchPath(projectId: string) {
+  return `/projects/${projectId}`
 }
 
 export function getChapterShotsPath(projectId: string, chapterId: string) {
