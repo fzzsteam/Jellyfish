@@ -39,6 +39,22 @@ const SHOT_RELATION_TYPES = new Set([
   'shot_key_frame_prompt',
 ])
 
+/**
+ * 根据任务关联类型与实体类型生成任务中心展示前缀。
+ */
+function resolveEntityLabelPrefix(task: TaskUiItem, entityType: 'actor' | 'scene' | 'prop' | 'costume' | 'character'): string {
+  if (task.relationType === 'actor_image') return '演员图片'
+  if (task.relationType === 'scene_image') return '场景图片'
+  if (task.relationType === 'prop_image') return '道具图片'
+  if (task.relationType === 'costume_image') return '服装图片'
+  if (task.relationType === 'character_image') return '角色图片'
+  if (entityType === 'actor') return '演员'
+  if (entityType === 'scene') return '场景'
+  if (entityType === 'prop') return '道具'
+  if (entityType === 'costume') return '服装'
+  return '角色'
+}
+
 function metaKeyForTask(task: TaskUiItem): string | null {
   if (task.navigateRelationType && task.navigateRelationEntityId) {
     return `${task.navigateRelationType}:${task.navigateRelationEntityId}`
@@ -96,16 +112,7 @@ async function resolveTaskMeta(task: TaskUiItem): Promise<ResolvedTaskMeta | nul
       const data = res.data as Record<string, unknown> | null
       const name = typeof data?.name === 'string' ? data.name.trim() : ''
       const projectId = typeof data?.project_id === 'string' ? data.project_id.trim() : ''
-      const labelPrefix =
-        entityType === 'actor'
-          ? '演员'
-          : entityType === 'scene'
-            ? '场景'
-            : entityType === 'prop'
-              ? '道具'
-              : entityType === 'costume'
-                ? '服装'
-                : '角色'
+      const labelPrefix = resolveEntityLabelPrefix(task, entityType)
       const navigateTo =
         entityType === 'character'
           ? projectId
@@ -123,6 +130,7 @@ async function resolveTaskMeta(task: TaskUiItem): Promise<ResolvedTaskMeta | nul
         navigateTo,
       }
     } catch {
+      const labelPrefix = resolveEntityLabelPrefix(task, entityType)
       const navigateTo =
         entityType === 'character'
           ? null
@@ -131,10 +139,10 @@ async function resolveTaskMeta(task: TaskUiItem): Promise<ResolvedTaskMeta | nul
             : entityType === 'scene'
               ? `/assets/scenes/${relationEntityId}/edit`
               : entityType === 'prop'
-                ? `/assets/props/${relationEntityId}/edit`
-                : `/assets/costumes/${relationEntityId}/edit`
+              ? `/assets/props/${relationEntityId}/edit`
+              : `/assets/costumes/${relationEntityId}/edit`
       return {
-        sourceLabel: `${relationType}：${relationEntityId}`,
+        sourceLabel: `${labelPrefix}：${relationEntityId}`,
         navigateTo,
       }
     }
@@ -150,21 +158,15 @@ async function resolveTaskMeta(task: TaskUiItem): Promise<ResolvedTaskMeta | nul
       const res = await StudioEntitiesApi.get(entityType, assetId)
       const data = res.data as Record<string, unknown> | null
       const name = typeof data?.name === 'string' ? data.name.trim() : ''
-      const labelPrefix =
-        entityType === 'actor'
-          ? '演员'
-          : entityType === 'scene'
-            ? '场景'
-            : entityType === 'prop'
-              ? '道具'
-              : '服装'
+      const labelPrefix = resolveEntityLabelPrefix(task, entityType)
       return {
         sourceLabel: name ? `${labelPrefix}：${name}` : `${labelPrefix}：${assetId}`,
         navigateTo: buildPath(assetId),
       }
     } catch {
+      const labelPrefix = resolveEntityLabelPrefix(task, entityType)
       return {
-        sourceLabel: `${assetRelationType}：${assetId}`,
+        sourceLabel: `${labelPrefix}：${assetId}`,
         navigateTo: buildPath(assetId),
       }
     }
@@ -217,7 +219,7 @@ export function useResolvedTaskCenterTasks(
         const meta = key ? metaMap[key] : undefined
         return {
           ...task,
-          sourceLabel: task.sourceLabel ?? meta?.sourceLabel ?? null,
+          sourceLabel: meta?.sourceLabel ?? task.sourceLabel ?? null,
           onNavigate:
             task.onNavigate ??
             (meta?.navigateTo

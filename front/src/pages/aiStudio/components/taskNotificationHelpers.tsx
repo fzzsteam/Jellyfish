@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react'
-import { Button, Space, notification } from 'antd'
+import { Button, notification } from 'antd'
 import type { ReactNode } from 'react'
 import type { RelationTaskState } from '../project/ProjectWorkbench/chapterDivisionTasks'
 import { useTaskUiStore } from './taskUiStore'
@@ -133,19 +133,10 @@ export function useRelationTaskNotification({
         dismissedTaskIdsRef.current.add(task.taskId)
       },
       btn:
-        onNavigate || (onCancel && !task.cancelRequested) ? (
-          <Space size={8}>
-            {onNavigate ? (
-              <Button size="small" onClick={onNavigate}>
-                查看
-              </Button>
-            ) : null}
-            {onCancel && !task.cancelRequested ? (
-              <Button size="small" danger onClick={onCancel}>
-                取消任务
-              </Button>
-            ) : null}
-          </Space>
+        onCancel && !task.cancelRequested ? (
+          <Button size="small" danger onClick={onCancel}>
+            取消任务
+          </Button>
         ) : undefined,
     })
   }, [description, onCancel, onNavigate, sourceLabel, task, title])
@@ -206,7 +197,7 @@ export function useRelationTaskNotification({
       ),
       duration: statusMeta.duration,
       placement: 'topRight',
-      btn: onNavigate ? <Button size="small" onClick={onNavigate}>查看</Button> : undefined,
+      btn: undefined,
     })
   }, [cancelledDescription, failedDescription, onNavigate, removeTask, settledTask, sourceLabel, successDescription, title, upsertTask])
 

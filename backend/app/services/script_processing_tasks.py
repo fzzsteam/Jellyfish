@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import traceback
 from dataclasses import dataclass
 
 from fastapi import HTTPException
@@ -871,7 +872,7 @@ async def run_merge_task(task_id: str) -> None:
         logger.exception("merge task failed: %s", task_id)
         async with async_session_maker() as db:
             store = SqlAlchemyTaskStore(db)
-            await store.set_error(task_id, str(exc))
+            await store.set_error(task_id, str(exc), error_trace=traceback.format_exc())
             await store.set_status(task_id, TaskStatus.failed)
             await db.commit()
         await _settle_billing(task_id)
@@ -958,7 +959,7 @@ async def run_variant_task(task_id: str) -> None:
         logger.exception("variant task failed: %s", task_id)
         async with async_session_maker() as db:
             store = SqlAlchemyTaskStore(db)
-            await store.set_error(task_id, str(exc))
+            await store.set_error(task_id, str(exc), error_trace=traceback.format_exc())
             await store.set_status(task_id, TaskStatus.failed)
             await db.commit()
         await _settle_billing(task_id)

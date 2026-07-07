@@ -9,10 +9,11 @@ from fastapi.testclient import TestClient
 
 from app.api.v1.routes.film import task_status as task_status_route
 from app.core.task_manager.types import DeliveryMode, TaskStatus
-from app.dependencies import get_db
+from app.dependencies import get_current_user, get_db
 from app.main import app
 from app.models.task import GenerationDeliveryMode, GenerationTask, GenerationTaskStatus
 from app.models.task_links import GenerationTaskLink, GenerationTaskLinkStatus
+from app.models.user import User
 
 
 class _FakeResult:
@@ -271,6 +272,8 @@ def test_list_tasks_returns_paginated_envelope(client: TestClient, monkeypatch) 
             "task_kind": "script_divide",
             "status": "running",
             "progress": 35,
+            "error": "",
+            "error_trace": None,
             "cancel_requested": False,
             "cancel_requested_at_ts": None,
             "started_at_ts": 100.0,
@@ -293,6 +296,52 @@ def test_list_tasks_returns_paginated_envelope(client: TestClient, monkeypatch) 
         "total": 1,
         "max_page": 1,
     }
+
+
+def test_list_tasks_exposes_error_trace_only_to_admin(client: TestClient, monkeypatch) -> None:
+    class _FakeStore:
+        def __init__(self, _db) -> None:
+            pass
+
+        async def list_task_views(self, **_kwargs):
+            from app.core.task_manager.types import TaskListItemView
+
+            return (
+                [
+                    TaskListItemView(
+                        id="task-failed",
+                        task_kind="image_generation",
+                        status=TaskStatus.failed,
+                        progress=20,
+                        error="RuntimeError: provider failed",
+                        error_trace="Traceback (most recent call last):\nRuntimeError: provider failed",
+                    )
+                ],
+                1,
+            )
+
+    async def _admin_user():
+        return User(id="admin-1", username="admin", hashed_password="x", is_admin=True, is_active=True)
+
+    async def _normal_user():
+        return User(id="user-1", username="user", hashed_password="x", is_admin=False, is_active=True)
+
+    monkeypatch.setattr(task_status_route, "SqlAlchemyTaskStore", _FakeStore)
+    db = _FakeTaskDB()
+    app.dependency_overrides[get_db] = _override_db(db)
+    app.dependency_overrides[get_current_user] = _normal_user
+    try:
+        normal_response = client.get("/api/v1/film/tasks")
+        app.dependency_overrides[get_current_user] = _admin_user
+        admin_response = client.get("/api/v1/film/tasks")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert normal_response.status_code == 200
+    assert normal_response.json()["data"]["items"][0]["error"] == "RuntimeError: provider failed"
+    assert normal_response.json()["data"]["items"][0]["error_trace"] is None
+    assert admin_response.status_code == 200
+    assert admin_response.json()["data"]["items"][0]["error_trace"].startswith("Traceback")
 
 
 def test_get_task_result_not_found_returns_api_response(client: TestClient) -> None:
@@ -443,6 +492,8 @@ def test_get_task_status_returns_timing_fields(client: TestClient, monkeypatch) 
         "task_id": "task-1",
         "status": "running",
         "progress": 35,
+        "error": "",
+        "error_trace": None,
         "cancel_requested": False,
         "cancel_requested_at_ts": None,
         "started_at_ts": 100.0,

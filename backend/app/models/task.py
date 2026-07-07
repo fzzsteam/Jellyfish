@@ -82,6 +82,12 @@ class GenerationTask(Base, UserOwnedMixin, TimestampMixin):
         default="",
         comment="失败原因（为空表示无错误）",
     )
+    error_trace: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="",
+        comment="失败异常链路，仅管理员可通过任务中心查看",
+    )
     cancel_requested: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

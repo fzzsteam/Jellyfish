@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import ipaddress
 import mimetypes
+import traceback
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException
@@ -505,7 +506,7 @@ async def run_video_generation_task(
             await session.rollback()
             async with async_session_maker() as s2:
                 store = SqlAlchemyTaskStore(s2)
-                await store.set_error(task_id, str(exc))
+                await store.set_error(task_id, str(exc), error_trace=traceback.format_exc())
                 await store.set_status(task_id, TaskStatus.failed)
                 shot_id = str(run_args.get("shot_id") or "")
                 if shot_id:

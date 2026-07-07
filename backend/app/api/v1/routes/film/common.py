@@ -79,6 +79,8 @@ class TaskStatusRead(BaseModel):
     task_id: str
     status: TaskStatus
     progress: int = Field(..., ge=0, le=100)
+    error: str = ""
+    error_trace: str | None = Field(None, description="完整异常链路，仅管理员返回")
     cancel_requested: bool = Field(False, description="是否已请求取消")
     cancel_requested_at_ts: float | None = Field(None, description="请求取消时间戳")
     started_at_ts: float | None = Field(None, description="任务开始执行时间戳")
@@ -91,6 +93,8 @@ class TaskListItemRead(BaseModel):
     task_kind: str = Field(..., description="业务任务类型")
     status: TaskStatus
     progress: int = Field(..., ge=0, le=100)
+    error: str = Field("", description="失败原因摘要")
+    error_trace: str | None = Field(None, description="完整异常链路，仅管理员返回")
     cancel_requested: bool = Field(False, description="是否已请求取消")
     cancel_requested_at_ts: float | None = Field(None, description="请求取消时间戳")
     started_at_ts: float | None = Field(None, description="任务开始执行时间戳")
@@ -113,6 +117,7 @@ class TaskResultRead(BaseModel):
     progress: int = Field(..., ge=0, le=100)
     result: dict | None = None
     error: str = ""
+    error_trace: str | None = Field(None, description="完整异常链路，仅管理员返回")
     cancel_requested: bool = Field(False, description="是否已请求取消")
     cancel_requested_at_ts: float | None = Field(None, description="请求取消时间戳")
     started_at_ts: float | None = Field(None, description="任务开始执行时间戳")

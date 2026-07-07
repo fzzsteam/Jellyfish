@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import traceback
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any, Optional
@@ -56,7 +57,7 @@ class StreamingDeliveryStrategy(DeliveryStrategy):
                 await self.store.set_progress(task.id, 100)
                 await self.store.set_status(task.id, TaskStatus.succeeded)
             except Exception as exc:  # noqa: BLE001
-                await self.store.set_error(task.id, str(exc))
+                await self.store.set_error(task.id, str(exc), error_trace=traceback.format_exc())
                 await self.store.set_status(task.id, TaskStatus.failed)
                 raise
 
@@ -91,9 +92,8 @@ class AsyncPollingDeliveryStrategy(DeliveryStrategy):
             try:
                 await self._worker_fn(task, self.store)
             except Exception as exc:  # noqa: BLE001
-                await self.store.set_error(task.id, str(exc))
+                await self.store.set_error(task.id, str(exc), error_trace=traceback.format_exc())
                 await self.store.set_status(task.id, TaskStatus.failed)
 
         self._background_runner(_run())
         return None
-

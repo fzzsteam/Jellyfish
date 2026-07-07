@@ -165,6 +165,7 @@ def _task_record_from_row(row: GenerationTask) -> TaskRecord:
         user_id=row.user_id,
         result=row.result,
         error=row.error or "",
+        error_trace=row.error_trace or "",
         cancel_requested=bool(row.cancel_requested),
         cancel_requested_at_ts=_datetime_ts(row.cancel_requested_at),
         cancel_reason=row.cancel_reason or "",
@@ -211,7 +212,7 @@ class TaskStore(Protocol):
     async def set_status(self, task_id: str, status: TaskStatus) -> None: ...
     async def set_progress(self, task_id: str, progress: int) -> None: ...
     async def set_result(self, task_id: str, result: dict[str, Any]) -> None: ...
-    async def set_error(self, task_id: str, error: str) -> None: ...
+    async def set_error(self, task_id: str, error: str, *, error_trace: str = "") -> None: ...
     async def set_executor(self, task_id: str, *, executor_type: str, executor_task_id: str | None = None) -> None: ...
     async def request_cancel(self, task_id: str, reason: str | None = None) -> Optional[TaskRecord]: ...
     async def mark_cancelled(self, task_id: str) -> Optional[TaskRecord]: ...
@@ -363,8 +364,8 @@ class InMemoryTaskStore(TaskStore):
     async def set_result(self, task_id: str, result: dict[str, Any]) -> None:
         await self._update(task_id, result=result)
 
-    async def set_error(self, task_id: str, error: str) -> None:
-        await self._update(task_id, error=error or "")
+    async def set_error(self, task_id: str, error: str, *, error_trace: str = "") -> None:
+        await self._update(task_id, error=error or "", error_trace=error_trace or "")
 
     async def set_executor(self, task_id: str, *, executor_type: str, executor_task_id: str | None = None) -> None:
         await self._update(task_id, executor_type=executor_type, executor_task_id=executor_task_id)
@@ -457,6 +458,7 @@ class SqlAlchemyTaskStore(TaskStore):
                 GenerationTask.progress,
                 GenerationTask.result,
                 GenerationTask.error,
+                GenerationTask.error_trace,
                 GenerationTask.cancel_requested,
                 GenerationTask.cancel_requested_at,
                 GenerationTask.started_at,
@@ -479,6 +481,7 @@ class SqlAlchemyTaskStore(TaskStore):
             progress=int(row.progress),
             result=row.result,
             error=row.error or "",
+            error_trace=row.error_trace or "",
             cancel_requested=bool(row.cancel_requested),
             cancel_requested_at_ts=_datetime_ts(row.cancel_requested_at),
             started_at_ts=_datetime_ts(row.started_at),
@@ -581,6 +584,8 @@ class SqlAlchemyTaskStore(TaskStore):
                 task_kind=task.task_kind,
                 status=_to_app_status(task.status),
                 progress=int(task.progress),
+                error=task.error or "",
+                error_trace=task.error_trace or "",
                 cancel_requested=bool(task.cancel_requested),
                 cancel_requested_at_ts=_datetime_ts(task.cancel_requested_at),
                 started_at_ts=_datetime_ts(task.started_at),
@@ -623,8 +628,8 @@ class SqlAlchemyTaskStore(TaskStore):
     async def set_result(self, task_id: str, result: dict[str, Any]) -> None:
         await self._update_columns(task_id, result=result)
 
-    async def set_error(self, task_id: str, error: str) -> None:
-        await self._update_columns(task_id, error=error or "")
+    async def set_error(self, task_id: str, error: str, *, error_trace: str = "") -> None:
+        await self._update_columns(task_id, error=error or "", error_trace=error_trace or "")
 
     async def set_executor(self, task_id: str, *, executor_type: str, executor_task_id: str | None = None) -> None:
         await self._update_columns(task_id, executor_type=executor_type, executor_task_id=executor_task_id)
@@ -710,11 +715,12 @@ class SyncSqlAlchemyTaskStore:
         row.result = result
         self.db.flush()
 
-    def set_error(self, task_id: str, error: str) -> None:
+    def set_error(self, task_id: str, error: str, *, error_trace: str = "") -> None:
         row = self.db.get(GenerationTask, task_id)
         if row is None:
             return
         row.error = error or ""
+        row.error_trace = error_trace or ""
         self.db.flush()
 
     def set_executor(self, task_id: str, *, executor_type: str, executor_task_id: str | None = None) -> None:

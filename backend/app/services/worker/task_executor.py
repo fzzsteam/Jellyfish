@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import traceback
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -80,11 +81,11 @@ class AbstractWorkerTaskExecutor(ABC):
             self._log_event("succeeded", task_id, elapsed_ms=self._elapsed_ms(started_at))
         except HTTPException as exc:
             error = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-            self._mark_failed(task_id, error)
+            self._mark_failed(task_id, error, error_trace=traceback.format_exc())
             self._log_event("failed", task_id, elapsed_ms=self._elapsed_ms(started_at), error=error)
         except Exception as exc:  # noqa: BLE001
             logger.exception("%s task failed: %s", self.task_kind, task_id)
-            self._mark_failed(task_id, str(exc))
+            self._mark_failed(task_id, str(exc), error_trace=traceback.format_exc())
             self._log_event("failed", task_id, elapsed_ms=self._elapsed_ms(started_at), error=str(exc))
 
     def _mark_running_and_load_run_args(self, task_id: str) -> dict[str, Any] | None:
@@ -132,12 +133,12 @@ class AbstractWorkerTaskExecutor(ABC):
     def after_apply_commit(self, task_id: str, run_args: dict[str, Any], result: Any) -> None:
         """Hook for subclasses that need work after the DB transaction commits."""
 
-    def _mark_failed(self, task_id: str, error: str) -> None:
+    def _mark_failed(self, task_id: str, error: str, *, error_trace: str = "") -> None:
         with self._session_maker() as db:
             ctx = self._load_context(db, task_id)
             if ctx is None:
                 return
-            ctx.store.set_error(task_id, error)
+            ctx.store.set_error(task_id, error, error_trace=error_trace)
             ctx.store.set_status(task_id, TaskStatus.failed)
             db.commit()
 
@@ -231,10 +232,10 @@ class AbstractAsyncDelegatingExecutor(AbstractWorkerTaskExecutor):
             self._log_event("succeeded", task_id, elapsed_ms=self._elapsed_ms(started_at))
         except TimeoutError as exc:
             error = str(exc)
-            self._mark_failed(task_id, error)
+            self._mark_failed(task_id, error, error_trace=traceback.format_exc())
             self._log_event("failed", task_id, elapsed_ms=self._elapsed_ms(started_at), error=error)
         except Exception as exc:  # noqa: BLE001
-            self._mark_failed(task_id, str(exc))
+            self._mark_failed(task_id, str(exc), error_trace=traceback.format_exc())
             self._log_event("failed", task_id, elapsed_ms=self._elapsed_ms(started_at), error=str(exc))
             raise
 

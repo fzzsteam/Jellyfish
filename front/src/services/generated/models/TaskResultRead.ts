@@ -10,6 +10,10 @@ export type TaskResultRead = {
     result?: (Record<string, any> | null);
     error?: string;
     /**
+     * 完整异常链路，仅管理员返回
+     */
+    error_trace?: (string | null);
+    /**
      * 是否已请求取消
      */
     cancel_requested?: boolean;

@@ -66,6 +66,7 @@ class TaskRecord:
     user_id: Optional[str] = None
     result: Optional[dict[str, Any]] = None
     error: str = ""
+    error_trace: str = ""
     cancel_requested: bool = False
     cancel_requested_at_ts: Optional[float] = None
     cancel_reason: str = ""
@@ -91,6 +92,7 @@ class TaskStatusView:
     progress: int  # 0-100
     result: Optional[dict[str, Any]] = None
     error: str = ""
+    error_trace: str = ""
     cancel_requested: bool = False
     cancel_requested_at_ts: Optional[float] = None
     started_at_ts: Optional[float] = None
@@ -107,6 +109,8 @@ class TaskListItemView:
     task_kind: str
     status: TaskStatus
     progress: int
+    error: str = ""
+    error_trace: str = ""
     cancel_requested: bool = False
     cancel_requested_at_ts: Optional[float] = None
     started_at_ts: Optional[float] = None

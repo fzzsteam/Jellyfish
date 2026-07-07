@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import traceback
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -865,7 +866,7 @@ async def run_shot_frame_prompt_task(
             await session.rollback()
             async with async_session_maker() as s2:
                 store = SqlAlchemyTaskStore(s2)
-                await store.set_error(task_id, str(exc))
+                await store.set_error(task_id, str(exc), error_trace=traceback.format_exc())
                 await store.set_status(task_id, TaskStatus.failed)
                 shot_id = str(run_args.get("shot_id") or "")
                 if shot_id:

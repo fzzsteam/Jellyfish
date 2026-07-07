@@ -245,3 +245,61 @@ async def test_run_image_generation_task_persists_provider_error_when_result_mis
             assert row.error == provider_error
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_run_image_generation_task_persists_error_trace_on_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    db, engine = await _build_session()
+    try:
+        task_id = "task-error-trace"
+        db.add(
+            GenerationTask(
+                id=task_id,
+                mode=GenerationDeliveryMode.async_polling,
+                task_kind="image_generation",
+                status=GenerationTaskStatus.pending,
+                progress=0,
+                payload={},
+                result=None,
+                error="",
+                error_trace="",
+                user_id="test-user",
+            )
+        )
+        await db.commit()
+        await db.close()
+
+        class ExplodingImageGenerationTask:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                pass
+
+            async def run(self) -> None:
+                raise RuntimeError("provider exploded")
+
+        async_session_local = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        monkeypatch.setattr("app.services.studio.image_task_runner.async_session_maker", async_session_local)
+        monkeypatch.setattr("app.services.studio.image_task_runner.ImageGenerationTask", ExplodingImageGenerationTask)
+
+        await run_image_generation_task(
+            task_id,
+            {
+                "provider": "aliyun_bailian",
+                "api_key": "test-key",
+                "base_url": None,
+                "relation_type": "scene_image",
+                "relation_entity_id": "1",
+                "input": {"prompt": "生成图片", "model": "wan2.7-image-pro"},
+            },
+        )
+
+        async with async_session_local() as verify_db:
+            row = await verify_db.get(GenerationTask, task_id)
+            assert row is not None
+            assert row.status == GenerationTaskStatus.failed
+            assert row.error == "provider exploded"
+            assert "Traceback (most recent call last)" in row.error_trace
+            assert "RuntimeError: provider exploded" in row.error_trace
+    finally:
+        await engine.dispose()

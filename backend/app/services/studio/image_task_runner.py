@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import traceback
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -524,7 +526,7 @@ async def run_image_generation_task(
             await session.rollback()
             async with async_session_maker() as s2:
                 store = SqlAlchemyTaskStore(s2)
-                await store.set_error(task_id, str(exc))
+                await store.set_error(task_id, str(exc), error_trace=traceback.format_exc())
                 await store.set_status(task_id, TaskStatus.failed)
                 related_shot_id = await _resolve_related_shot_id(
                     s2,

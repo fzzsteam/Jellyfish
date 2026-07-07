@@ -10,10 +10,16 @@ export type TaskUiItem = {
   sourceLabel?: string | null
   status: TaskStatus
   progress: number
+  error?: string | null
+  errorTrace?: string | null
   cancelRequested: boolean
+  createdAtTs?: number | null
+  updatedAtTs?: number | null
   startedAtTs?: number | null
   finishedAtTs?: number | null
   elapsedMs?: number | null
+  executorType?: string | null
+  executorTaskId?: string | null
   relationType?: string | null
   relationEntityId?: string | null
   resourceType?: string | null
@@ -59,10 +65,16 @@ export function mergeTaskUiItems(
         resolveTaskSourceLabel(server?.relation_type, server?.relation_entity_id),
       status: server?.status ?? optimistic?.status ?? 'pending',
       progress: server?.progress ?? optimistic?.progress ?? 0,
+      error: server?.error ?? optimistic?.error ?? '',
+      errorTrace: server?.error_trace ?? optimistic?.errorTrace ?? null,
       cancelRequested: !!(server?.cancel_requested ?? optimistic?.cancelRequested),
+      createdAtTs: server?.created_at_ts ?? optimistic?.createdAtTs,
+      updatedAtTs: server?.updated_at_ts ?? optimistic?.updatedAtTs,
       startedAtTs: server?.started_at_ts ?? optimistic?.startedAtTs,
       finishedAtTs: server?.finished_at_ts ?? optimistic?.finishedAtTs,
       elapsedMs: server?.elapsed_ms ?? optimistic?.elapsedMs,
+      executorType: server?.executor_type ?? optimistic?.executorType,
+      executorTaskId: server?.executor_task_id ?? optimistic?.executorTaskId,
       relationType: server?.relation_type ?? optimistic?.relationType,
       relationEntityId: server?.relation_entity_id ?? optimistic?.relationEntityId,
       resourceType: server?.resource_type ?? optimistic?.resourceType,

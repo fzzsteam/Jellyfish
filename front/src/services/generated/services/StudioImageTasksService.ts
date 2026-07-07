@@ -45,6 +45,9 @@ export class StudioImageTasksService {
     }
     /**
      * 演员图片提示词渲染
+     * 预览接口必须和真正提交生成时走同一条 submission 构建逻辑，
+     * 否则用户看到的预览会和实际生成结果不一致（历史上这里走的是另一条从数据库
+     * 描述拼模板的路径，完全忽略请求体里的 prompt/images，属于失真的预览）。
      * @returns ApiResponse_RenderedPromptResponse_ Successful Response
      * @throws ApiError
      */
@@ -113,6 +116,9 @@ export class StudioImageTasksService {
     }
     /**
      * 道具/场景/服装图片提示词渲染
+     * 预览接口必须和真正提交生成时走同一条 submission 构建逻辑，
+     * 否则用户看到的预览会和实际生成结果不一致（历史上这里走的是另一条从数据库
+     * 描述拼模板的路径，完全忽略请求体里的 prompt/images，属于失真的预览）。
      * @returns ApiResponse_RenderedPromptResponse_ Successful Response
      * @throws ApiError
      */
@@ -180,6 +186,7 @@ export class StudioImageTasksService {
     }
     /**
      * 角色图片提示词渲染
+     * 预览必须复用与提交生成相同的 submission 构建逻辑，原因同 render_actor_image_prompt。
      * @returns ApiResponse_RenderedPromptResponse_ Successful Response
      * @throws ApiError
      */

@@ -7,6 +7,11 @@ export type TaskStatusRead = {
     task_id: string;
     status: TaskStatus;
     progress: number;
+    error?: string;
+    /**
+     * 完整异常链路，仅管理员返回
+     */
+    error_trace?: (string | null);
     /**
      * 是否已请求取消
      */

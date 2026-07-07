@@ -111,7 +111,7 @@ export class FilmService {
         taskKind,
         relationType,
         relationEntityId,
-        recentSeconds = 300,
+        recentSeconds,
         page = 1,
         pageSize = 20,
         authorization,
@@ -133,9 +133,9 @@ export class FilmService {
          */
         relationEntityId?: (string | null),
         /**
-         * 默认返回最近结束任务的时间窗口（秒）
+         * 最近结束任务的时间窗口（秒）；不传表示不过滤
          */
-        recentSeconds?: number,
+        recentSeconds?: (number | null),
         /**
          * 页码
          */

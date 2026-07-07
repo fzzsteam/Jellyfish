@@ -10,14 +10,13 @@ import {
   WalletOutlined,
   LoadingOutlined,
   QuestionCircleOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons'
 import { PointsBadge } from '../components/points/PointsBadge'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 import { useTranslation } from 'react-i18next'
-import { TaskCenter } from '../pages/aiStudio/components/TaskCenter'
-import { TaskRuntimeProvider } from '../pages/aiStudio/components/TaskRuntimeProvider'
 import ChangePasswordModal from '../components/ChangePasswordModal'
 import { PointsService } from '../services/generated'
 import type { PointsSummaryRead } from '../services/generated'
@@ -46,6 +45,7 @@ const MainLayout: React.FC = () => {
     if (location.pathname.startsWith('/agents')) return ['agents']
     if (location.pathname.startsWith('/models')) return ['models']
     if (location.pathname.startsWith('/points')) return ['points']
+    if (location.pathname.startsWith('/tasks')) return ['tasks']
     if (location.pathname.startsWith('/admin')) return ['admin-users']
     return []
   }, [location.pathname])
@@ -117,6 +117,11 @@ const MainLayout: React.FC = () => {
       key: 'assets',
       icon: <PictureOutlined />,
       label: <Link to="/assets">资产管理</Link>,
+    },
+    {
+      key: 'tasks',
+      icon: <UnorderedListOutlined />,
+      label: <Link to="/tasks">任务中心</Link>,
     },
     {
       key: 'prompts',
@@ -339,25 +344,22 @@ const MainLayout: React.FC = () => {
           </Space>
         </Header>
 
-        <TaskRuntimeProvider>
-          <Content
-            style={{
-              margin: 0,
-              padding: 5,
-              background: token.colorBgLayout,
-              flex: 1,
-              minHeight: 0,
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-            }}
-          >
-            <div className="w-full h-full min-h-0 overflow-hidden flex flex-col">
-              <Outlet />
-            </div>
-          </Content>
-          <TaskCenter />
-        </TaskRuntimeProvider>
+        <Content
+          style={{
+            margin: 0,
+            padding: 5,
+            background: token.colorBgLayout,
+            flex: 1,
+            minHeight: 0,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <div className="w-full h-full min-h-0 overflow-hidden flex flex-col">
+            <Outlet />
+          </div>
+        </Content>
         <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
       </Layout>
     </Layout>
