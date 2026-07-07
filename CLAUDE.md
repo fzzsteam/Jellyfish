@@ -8,11 +8,10 @@ Jellyfish 是 AI 驱动的短剧生产工作台，覆盖完整制作流程：剧
 
 ## 架构
 
-仓库包含三个主要部分：
+仓库包含两个主要部分：
 
 - **`backend/`** — FastAPI + LangChain/LangGraph + SQLAlchemy 异步 API（Python，uv 管理）
 - **`front/`** — React + Vite + Ant Design + Tailwind SPA（TypeScript，pnpm 管理）
-- **`site/`** — Hugo 文档站（Go）
 
 ### 后端分层结构
 
@@ -115,20 +114,12 @@ docker compose --env-file deploy/compose/.env -f deploy/compose/docker-compose.y
 2. 前端统一走 OpenAPI 生成客户端，不新增手写 service 封装。
 3. 后端严格区分 `api`（收参/鉴权/响应）与 `service`（业务逻辑/状态/编排）。
 4. 新增或改动的函数、类必须添加注释，说明"做什么"与"为什么存在"，注释须与实现保持同步。
-5. `site/content/docs/` 目录职责：
-   - `architecture/` = 当前真实生效的实现
-   - `plans/` = 进行中或待推进的改造方案
-   - `guide/` = 操作说明 / 开发流程
-   - `reference/` = 稳定参考资料
-6. `site/content/blog/` = release note，已固化版本未经明确指定不得修改。
-7. 生成能力相关通用契约（输入/输出 DTO、供应商配置）统一放 `app/core/contracts/`；`tasks/` 仅负责任务封装与分派；`integrations/` 只依赖 `contracts/`，不依赖 `tasks/` 类型。
+5. 生成能力相关通用契约（输入/输出 DTO、供应商配置）统一放 `app/core/contracts/`；`tasks/` 仅负责任务封装与分派；`integrations/` 只依赖 `contracts/`，不依赖 `tasks/` 类型。
 
 ## 完成检查清单
 
 满足以下全部条件才算"完成"：
 - [ ] 代码实现完成，新增/改动的函数和类已补充必要注释
 - [ ] 若后端 API 有变化：已运行 `pnpm run openapi:update`，前端生成类型已同步，前端调用已切到生成客户端
-- [ ] 若影响当前系统行为：已更新 `site/content/docs/architecture/`
-- [ ] 若影响后续执行计划：已更新 `site/content/docs/plans/`
 - [ ] 前端改动通过 `pnpm exec tsc --noEmit`
 - [ ] 后端改动通过相关测试或最低限度的语法/导入校验

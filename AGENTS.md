@@ -9,22 +9,10 @@
    - `api` 层负责收参、鉴权、响应组织。
    - `service` 层负责业务逻辑、状态流转、数据编排。
 5. 函数、类等代码块必须添加注释：
-   - 至少包含功能介绍（说明“做什么”与“为什么存在”）。
+   - 至少包含功能介绍（说明”做什么”与”为什么存在”）。
    - 复杂函数需补充参数说明、返回值说明（如适用）与关键内部逻辑注释。
    - 注释应与实现保持同步，避免过时或空泛描述。
-6. `site` 文档目录中：
-   - `site/content/blog` 用于存放 release note。
-   - 已固化版本的 release note，在未被明确指定时不得修改。
-7. `site/content/docs` 的栏目职责必须严格区分：
-   - `guide` = 开发指南 / how-to，回答“怎么做”。
-   - `architecture` = 当前架构，回答“现在是什么”。
-   - `plans` = 任务计划，回答“接下来做什么”。
-   - `reference` = 稳定参考资料，回答“查什么”。
-8. 新增或调整文档时，必须先判断内容归属：
-   - 当前真实实现、当前边界、当前状态流转，放 `architecture`。
-   - 正在推进或待推进的改造方案、任务拆解、阶段计划，放 `plans`。
-   - 操作说明、开发流程、接入方式，放 `guide`。
-9. 生成能力相关的通用契约（输入/输出 DTO、供应商配置等）统一放在 `app/core/contracts`：
+6. 生成能力相关的通用契约（输入/输出 DTO、供应商配置等）统一放在 `app/core/contracts`：
    - `tasks` 仅保留任务封装、分派与执行编排，不定义跨层 DTO。
    - `integrations` 仅依赖 `contracts`，不依赖 `tasks` 类型模块。
 
@@ -89,56 +77,10 @@
 2. 涉及职责边界调整时，优先保持：
    - 分镜编辑页负责“准备”
    - 分镜工作室负责“生成”
-3. 未经明确要求，不修改已固化的历史 release note。
-4. 涉及系统结构、状态语义、页面职责边界调整时，必须同步更新 `site` 文档：
-   - 当前已生效的规则，更新到 `site/content/docs/architecture/`
-   - 尚在推进中的方案，更新到 `site/content/docs/plans/`
-5. `architecture` 与 `plans` 必须保持动态更新，不允许长期滞后于真实代码状态：
-   - 架构已落地但文档未更新，视为未完成
-   - 计划已变更但文档未更新，视为未完成
-6. 涉及任务系统 UI 调整时，优先保持：
+3. 涉及任务系统 UI 调整时，优先保持：
    - 任务中心只展示通用任务信息
    - 业务上下文与调试信息留在具体业务界面
    - 不把任务中心演化成新的业务详情页
-
-## 文档更新约定
-
-1. `architecture` 文档的更新原则：
-   - 只记录当前真实生效的实现
-   - 不混入“未来准备怎么改”的内容
-   - 当代码行为、状态语义、页面职责发生变化时，必须同步修订
-2. `plans` 文档的更新原则：
-   - 记录当前仍在推进中的计划、分阶段任务和方案
-   - 当计划范围、优先级、执行路径发生变化时，必须同步修订
-   - 某项计划稳定落地后，应沉淀到 `architecture` 或发布到 `blog`
-3. 若同一主题同时涉及“当前事实”和“未来计划”：
-   - 当前事实写入 `architecture`
-   - 未来执行写入 `plans`
-   - 不得混写在同一篇 how-to 中
-4. release note（`site/content/blog`）格式与风格规范：
-   - 必须采用稳定章节结构（按需裁剪，但顺序保持一致）：
-     - `Highlights`
-     - `Added` / `Changed` / `Fixed`
-     - `Breaking Changes`（如有行为或契约变化必须填写）
-     - `Deprecations`（如有弃用路径必须填写）
-     - `Security`
-     - `Known Issues`
-     - `Migration Guide`
-     - `Rollback Notes`
-     - `Compatibility Matrix`
-     - `Validation Commands`
-     - `Upgrade Checklist`
-     - `References`
-     - `Notes for Contributors`
-     - `Acknowledgements`
-   - 必须包含 frontmatter：`title`、`date`、`description`、`tags`、`authors`。
-   - 文风要求：
-     - 使用“维护者发布口径”，优先结论与可执行信息，避免冗长叙事。
-     - 术语必须稳定一致（如 `shot.status`、runtime task status、`video-readiness`）。
-     - 升级步骤、回滚步骤、验证命令必须可直接执行，避免模糊描述。
-   - 对外可读性要求：
-     - 优先短段落与清单化表达；避免重复解释同一事实。
-     - 明确区分“新增能力”“行为变化”“兼容风险”“已知问题”。
 
 ## 标准完成状态
 
@@ -153,18 +95,14 @@
    - 若后端 API 有变化，已运行 `pnpm run openapi:update`
    - 前端 generated types 已同步
    - 前端调用已切到 OpenAPI generated client
-3. 文档完成：
-   - 若影响当前系统行为，已更新 `architecture`
-   - 若影响后续执行计划，已更新 `plans`
-   - 若为发布说明，按需更新 `blog`
-4. 页面职责完成：
+3. 页面职责完成：
    - 分镜编辑页继续保持“准备”定位
    - 分镜工作室继续保持“生成”定位
    - 未引入新的职责混淆
-5. 验证完成：
+4. 验证完成：
    - 前端改动后，至少通过 `pnpm exec tsc --noEmit`
    - 后端改动后，至少通过相关测试或最低限度的语法/导入校验
-6. 结果汇报完成：
+5. 结果汇报完成：
    - 明确说明改了什么
    - 明确说明验证结果
    - 若有未完成项或后续建议，需单独说明
