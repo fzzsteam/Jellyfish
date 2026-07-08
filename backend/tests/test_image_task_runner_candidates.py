@@ -248,7 +248,7 @@ async def test_run_image_generation_task_persists_provider_error_when_result_mis
 
 
 @pytest.mark.asyncio
-async def test_run_image_generation_task_persists_error_trace_on_exception(
+async def test_run_image_generation_task_keeps_error_trace_empty_on_exception(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db, engine = await _build_session()
@@ -299,7 +299,6 @@ async def test_run_image_generation_task_persists_error_trace_on_exception(
             assert row is not None
             assert row.status == GenerationTaskStatus.failed
             assert row.error == "provider exploded"
-            assert "Traceback (most recent call last)" in row.error_trace
-            assert "RuntimeError: provider exploded" in row.error_trace
+            assert row.error_trace == ""
     finally:
         await engine.dispose()

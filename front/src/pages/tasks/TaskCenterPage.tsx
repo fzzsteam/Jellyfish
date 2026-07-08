@@ -1,8 +1,8 @@
-import { Badge, Button, Card, Collapse, Empty, Progress, Radio, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Badge, Button, Card, Empty, Progress, Radio, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { CopyOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { FilmService } from '../../services/generated'
 import type { TaskListItemRead, TaskStatus } from '../../services/generated'
 import type { TaskUiItem } from '../aiStudio/components/taskUiStore'
@@ -87,6 +87,7 @@ function buildTaskSentence(task: TaskUiItem): string {
  */
 export default function TaskCenterPage() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const [loading, setLoading] = useState(false)
   const [items, setItems] = useState<TaskListItemRead[]>([])
   const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all' | 'active'>('all')
@@ -95,6 +96,14 @@ export default function TaskCenterPage() {
   const [pageSize, setPageSize] = useState(20)
   const [total, setTotal] = useState(0)
   const [activeTaskTotal, setActiveTaskTotal] = useState(0)
+
+  useEffect(() => {
+    const status = searchParams.get('status')
+    if (status === 'active' && statusFilter !== 'active') {
+      setStatusFilter('active')
+      setPage(1)
+    }
+  }, [searchParams, statusFilter])
 
   const taskUiItems = useMemo<TaskUiItem[]>(
     () =>
@@ -257,34 +266,14 @@ export default function TaskCenterPage() {
         width: 320,
         render: (_value, record) => {
           const error = (record.error || '').trim()
-          const errorTrace = (record.error_trace || '').trim()
-          if (!error && !errorTrace) {
+          if (!error) {
             return <span className="text-gray-400">-</span>
           }
           return (
             <div className="max-w-[300px] space-y-2">
-              {error ? (
-                <pre className="max-h-[120px] overflow-auto whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs text-gray-700">
-                  {error}
-                </pre>
-              ) : null}
-              {errorTrace ? (
-                <Collapse
-                  ghost
-                  size="small"
-                  items={[
-                    {
-                      key: 'error-trace',
-                      label: '查看错误详情',
-                      children: (
-                        <pre className="max-h-[320px] overflow-auto whitespace-pre-wrap rounded bg-gray-950 p-3 text-xs text-gray-100">
-                          {errorTrace}
-                        </pre>
-                      ),
-                    },
-                  ]}
-                />
-              ) : null}
+              <pre className="max-h-[120px] overflow-auto whitespace-pre-wrap rounded bg-gray-50 p-2 text-xs text-gray-700">
+                {error}
+              </pre>
             </div>
           )
         },
@@ -351,7 +340,17 @@ export default function TaskCenterPage() {
           <Radio.Group
             value={statusFilter}
             onChange={(value) => {
-              setStatusFilter(value.target.value)
+              const nextStatus = value.target.value as TaskStatus | 'all' | 'active'
+              setStatusFilter(nextStatus)
+              setSearchParams((prev) => {
+                const next = new URLSearchParams(prev)
+                if (nextStatus === 'all') {
+                  next.delete('status')
+                } else {
+                  next.set('status', nextStatus)
+                }
+                return next
+              })
               setPage(1)
             }}
           >

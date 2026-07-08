@@ -136,7 +136,7 @@ export function useRelationTaskNotification({
       },
       btn: (
         <Space size={8}>
-          <Button size="small" onClick={() => navigate('/tasks')}>
+          <Button size="small" onClick={() => navigate('/tasks?status=active')}>
             查看任务中心
           </Button>
           {onCancel && !task.cancelRequested ? (

@@ -36,6 +36,13 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl supervisor \
   && rm -rf /var/lib/apt/lists/*
 
+# SAE 单容器内按进程分类保留日志；supervisord 仍会通过 log-tail 转发到 stdout。
+RUN mkdir -p \
+  /var/log/jellyfish/supervisor \
+  /var/log/jellyfish/web \
+  /var/log/jellyfish/worker \
+  /var/log/jellyfish/beat
+
 # 安装 uv（Python 包管理器）
 RUN pip install --no-cache-dir uv
 

@@ -298,7 +298,7 @@ def test_list_tasks_returns_paginated_envelope(client: TestClient, monkeypatch) 
     }
 
 
-def test_list_tasks_exposes_error_trace_only_to_admin(client: TestClient, monkeypatch) -> None:
+def test_list_tasks_does_not_expose_error_trace(client: TestClient, monkeypatch) -> None:
     class _FakeStore:
         def __init__(self, _db) -> None:
             pass
@@ -341,7 +341,7 @@ def test_list_tasks_exposes_error_trace_only_to_admin(client: TestClient, monkey
     assert normal_response.json()["data"]["items"][0]["error"] == "RuntimeError: provider failed"
     assert normal_response.json()["data"]["items"][0]["error_trace"] is None
     assert admin_response.status_code == 200
-    assert admin_response.json()["data"]["items"][0]["error_trace"].startswith("Traceback")
+    assert admin_response.json()["data"]["items"][0]["error_trace"] is None
 
 
 def test_get_task_result_not_found_returns_api_response(client: TestClient) -> None:

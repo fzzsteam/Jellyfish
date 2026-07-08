@@ -365,7 +365,8 @@ class InMemoryTaskStore(TaskStore):
         await self._update(task_id, result=result)
 
     async def set_error(self, task_id: str, error: str, *, error_trace: str = "") -> None:
-        await self._update(task_id, error=error or "", error_trace=error_trace or "")
+        _ = error_trace
+        await self._update(task_id, error=error or "", error_trace="")
 
     async def set_executor(self, task_id: str, *, executor_type: str, executor_task_id: str | None = None) -> None:
         await self._update(task_id, executor_type=executor_type, executor_task_id=executor_task_id)
@@ -629,7 +630,8 @@ class SqlAlchemyTaskStore(TaskStore):
         await self._update_columns(task_id, result=result)
 
     async def set_error(self, task_id: str, error: str, *, error_trace: str = "") -> None:
-        await self._update_columns(task_id, error=error or "", error_trace=error_trace or "")
+        _ = error_trace
+        await self._update_columns(task_id, error=error or "", error_trace="")
 
     async def set_executor(self, task_id: str, *, executor_type: str, executor_task_id: str | None = None) -> None:
         await self._update_columns(task_id, executor_type=executor_type, executor_task_id=executor_task_id)
@@ -719,8 +721,9 @@ class SyncSqlAlchemyTaskStore:
         row = self.db.get(GenerationTask, task_id)
         if row is None:
             return
+        _ = error_trace
         row.error = error or ""
-        row.error_trace = error_trace or ""
+        row.error_trace = ""
         self.db.flush()
 
     def set_executor(self, task_id: str, *, executor_type: str, executor_task_id: str | None = None) -> None:
