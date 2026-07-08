@@ -1,4 +1,4 @@
-import { Button, Card, Collapse, Empty, Progress, Select, Space, Table, Tag, Typography, message } from 'antd'
+import { Badge, Button, Card, Collapse, Empty, Progress, Radio, Select, Space, Table, Tag, Typography, message } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { CopyOutlined, ReloadOutlined, StopOutlined } from '@ant-design/icons'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -8,8 +8,8 @@ import type { TaskListItemRead, TaskStatus } from '../../services/generated'
 import type { TaskUiItem } from '../aiStudio/components/taskUiStore'
 import { useResolvedTaskCenterTasks } from '../aiStudio/components/taskCenterMeta'
 import { resolveTaskSourceLabel, resolveTaskTitle } from '../aiStudio/components/taskCopy'
+import { ACTIVE_TASK_STATUSES, TASK_STATUS_FILTER_OPTIONS } from './taskStatusConfig'
 
-const ACTIVE_STATUSES: TaskStatus[] = ['pending', 'running', 'streaming']
 /** 任务中心轮询间隔，保证停留在页面时任务状态持续更新。 */
 const TASK_CENTER_POLL_INTERVAL_MS = 5000
 
@@ -89,11 +89,12 @@ export default function TaskCenterPage() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [items, setItems] = useState<TaskListItemRead[]>([])
-  const [statusFilter, setStatusFilter] = useState<TaskStatus[]>([])
+  const [statusFilter, setStatusFilter] = useState<TaskStatus | 'all' | 'active'>('all')
   const [taskKindFilter, setTaskKindFilter] = useState<string | undefined>()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [total, setTotal] = useState(0)
+  const [activeTaskTotal, setActiveTaskTotal] = useState(0)
 
   const taskUiItems = useMemo<TaskUiItem[]>(
     () =>
@@ -126,21 +127,35 @@ export default function TaskCenterPage() {
     () => Object.fromEntries(resolvedTasks.map((item) => [item.taskId, item])),
     [resolvedTasks],
   )
-
   const loadTasks = useCallback(async (options?: { silent?: boolean }) => {
     if (!options?.silent) {
       setLoading(true)
     }
     try {
-      const response = await FilmService.listTasksApiV1FilmTasksGet({
-        statuses: statusFilter.length > 0 ? statusFilter : undefined,
-        taskKind: taskKindFilter,
-        recentSeconds: undefined,
-        page,
-        pageSize,
-      })
+      const statuses =
+        statusFilter === 'all'
+          ? undefined
+          : statusFilter === 'active'
+            ? ACTIVE_TASK_STATUSES
+            : [statusFilter]
+      const [response, activeResponse] = await Promise.all([
+        FilmService.listTasksApiV1FilmTasksGet({
+          statuses,
+          taskKind: taskKindFilter,
+          recentSeconds: undefined,
+          page,
+          pageSize,
+        }),
+        FilmService.listTasksApiV1FilmTasksGet({
+          statuses: ACTIVE_TASK_STATUSES,
+          recentSeconds: undefined,
+          page: 1,
+          pageSize: 1,
+        }),
+      ])
       setItems(response.data?.items ?? [])
       setTotal(response.data?.pagination?.total ?? 0)
+      setActiveTaskTotal(activeResponse.data?.pagination?.total ?? 0)
     } catch {
       if (!options?.silent) {
         message.error('加载任务中心失败')
@@ -157,13 +172,14 @@ export default function TaskCenterPage() {
   }, [loadTasks])
 
   useEffect(() => {
+    if (activeTaskTotal <= 0) return
     const timer = window.setInterval(() => {
       void loadTasks({ silent: true })
     }, TASK_CENTER_POLL_INTERVAL_MS)
     return () => {
       window.clearInterval(timer)
     }
-  }, [loadTasks])
+  }, [activeTaskTotal, loadTasks])
 
   const taskKindOptions = useMemo(
     () =>
@@ -200,7 +216,7 @@ export default function TaskCenterPage() {
         width: 240,
         render: (_value, record) => {
           const meta = getStatusMeta(record)
-          const isActive = ACTIVE_STATUSES.includes(record.status)
+          const isActive = ACTIVE_TASK_STATUSES.includes(record.status)
           return (
             <div className="space-y-2">
               <Tag color={meta.color}>
@@ -292,7 +308,7 @@ export default function TaskCenterPage() {
             >
               复制 ID
             </Button>
-            {ACTIVE_STATUSES.includes(record.status) ? (
+            {ACTIVE_TASK_STATUSES.includes(record.status) ? (
               <Button
                 size="small"
                 danger
@@ -331,26 +347,27 @@ export default function TaskCenterPage() {
           </Button>
         }
       >
-        <div className="mb-4 flex flex-wrap gap-3">
-          <Select
-            mode="multiple"
-            allowClear
-            placeholder="按状态筛选"
-            style={{ minWidth: 260 }}
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <Radio.Group
             value={statusFilter}
             onChange={(value) => {
-              setStatusFilter(value)
+              setStatusFilter(value.target.value)
               setPage(1)
             }}
-            options={[
-              { label: '等待中', value: 'pending' },
-              { label: '运行中', value: 'running' },
-              { label: '处理中', value: 'streaming' },
-              { label: '已完成', value: 'succeeded' },
-              { label: '失败', value: 'failed' },
-              { label: '已取消', value: 'cancelled' },
-            ]}
-          />
+          >
+            {TASK_STATUS_FILTER_OPTIONS.map((option) => (
+              <Radio.Button key={option.value} value={option.value}>
+                {option.value === 'active' ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    {option.label}
+                    <Badge count={activeTaskTotal} size="small" overflowCount={99} />
+                  </span>
+                ) : (
+                  option.label
+                )}
+              </Radio.Button>
+            ))}
+          </Radio.Group>
           <Select
             allowClear
             placeholder="按任务类型筛选"

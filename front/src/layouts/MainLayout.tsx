@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Layout, Menu, theme, Dropdown, Space, Avatar, Button } from 'antd'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Badge, Layout, Menu, theme, Dropdown, Space, Avatar, Button } from 'antd'
 import {
   UserOutlined,
   FolderOutlined,
@@ -18,10 +18,14 @@ import { useAppStore } from '../store/useAppStore'
 import { useAuthStore } from '../store/useAuthStore'
 import { useTranslation } from 'react-i18next'
 import ChangePasswordModal from '../components/ChangePasswordModal'
-import { PointsService } from '../services/generated'
+import { FilmService, PointsService } from '../services/generated'
 import type { PointsSummaryRead } from '../services/generated'
+import { useTaskUiStore } from '../pages/aiStudio/components/taskUiStore'
+import { ACTIVE_TASK_STATUSES } from '../pages/tasks/taskStatusConfig'
 
 const { Header, Sider, Content } = Layout
+/** 左侧菜单任务数量刷新间隔，仅在存在进行中任务时启用。 */
+const TASK_MENU_ACTIVE_COUNT_POLL_INTERVAL_MS = 5000
 
 const MainLayout: React.FC = () => {
   const { t } = useTranslation('layout')
@@ -36,6 +40,11 @@ const MainLayout: React.FC = () => {
   // 积分摘要：hover 头像下拉时实时拉取一次，避免常驻顶栏的数据陈旧问题。
   const [points, setPoints] = useState<PointsSummaryRead | null>(null)
   const [pointsLoading, setPointsLoading] = useState(false)
+  const [serverActiveTaskCount, setServerActiveTaskCount] = useState(0)
+  const optimisticActiveTaskCount = useTaskUiStore((state) =>
+    Object.values(state.optimisticItems).filter((task) => ACTIVE_TASK_STATUSES.includes(task.status)).length,
+  )
+  const activeTaskCount = Math.max(serverActiveTaskCount, optimisticActiveTaskCount)
 
   const selectedKeys = useMemo(() => {
     if (location.pathname === '/projects' || location.pathname.startsWith('/projects/')) return ['projects']
@@ -53,6 +62,38 @@ const MainLayout: React.FC = () => {
   useEffect(() => {
     if (!authUser) setPoints(null)
   }, [authUser])
+
+  const loadActiveTaskCount = useCallback(async () => {
+    if (!authUser) {
+      setServerActiveTaskCount(0)
+      return
+    }
+    try {
+      const response = await FilmService.listTasksApiV1FilmTasksGet({
+        statuses: ACTIVE_TASK_STATUSES,
+        recentSeconds: undefined,
+        page: 1,
+        pageSize: 1,
+      })
+      setServerActiveTaskCount(response.data?.pagination?.total ?? 0)
+    } catch {
+      setServerActiveTaskCount(0)
+    }
+  }, [authUser])
+
+  useEffect(() => {
+    void loadActiveTaskCount()
+  }, [loadActiveTaskCount, location.pathname, optimisticActiveTaskCount])
+
+  useEffect(() => {
+    if (!authUser || activeTaskCount <= 0) return
+    const timer = window.setInterval(() => {
+      void loadActiveTaskCount()
+    }, TASK_MENU_ACTIVE_COUNT_POLL_INTERVAL_MS)
+    return () => {
+      window.clearInterval(timer)
+    }
+  }, [activeTaskCount, authUser, loadActiveTaskCount])
 
   const handleUserDropdownOpenChange = (open: boolean) => {
     if (!open || !authUser) return
@@ -121,7 +162,12 @@ const MainLayout: React.FC = () => {
     {
       key: 'tasks',
       icon: <UnorderedListOutlined />,
-      label: <Link to="/tasks">任务中心</Link>,
+      label: (
+        <Link to="/tasks" className="flex items-center justify-between gap-2">
+          <span>任务中心</span>
+          {activeTaskCount > 0 ? <Badge count={activeTaskCount} size="small" overflowCount={99} /> : null}
+        </Link>
+      ),
     },
     {
       key: 'prompts',
