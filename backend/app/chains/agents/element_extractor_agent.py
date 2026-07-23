@@ -2,12 +2,72 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from langchain_core.prompts import PromptTemplate
 
 from app.chains.agents.base import AgentBase
 from app.schemas.skills.script_processing import StudioScriptExtractionDraft
+
+# 模型偶尔会把枚举字段写成中文近义词或漏掉下划线的变体（如 "旁白"/"VOICEOVER"），
+# 与 schema 要求的字面量（"VOICE_OVER"）不完全一致时 pydantic 会直接报错，导致
+# 整份原本提取正确的草稿（场景/角色/对白都有内容）被当作校验失败整体丢弃。
+# 这里在写入 pydantic 模型前做一次宽松归一化，只影响格式，不改变模型判断的语义。
+_LINE_MODE_ALIASES: dict[str, str] = {
+    "旁白": "VOICE_OVER",
+    "旁白音": "VOICE_OVER",
+    "VO": "VOICE_OVER",
+    "V.O.": "VOICE_OVER",
+    "画外音": "OFF_SCREEN",
+    "OS": "OFF_SCREEN",
+    "O.S.": "OFF_SCREEN",
+    "OC": "OFF_SCREEN",
+    "O.C.": "OFF_SCREEN",
+    "电话": "PHONE",
+    "电话音": "PHONE",
+    "对白": "DIALOGUE",
+    "台词": "DIALOGUE",
+}
+_VALID_LINE_MODES = ("DIALOGUE", "VOICE_OVER", "OFF_SCREEN", "PHONE")
+_VALID_CAMERA_SHOTS = ("ECU", "CU", "MCU", "MS", "MLS", "LS", "ELS")
+_VALID_ANGLES = ("EYE_LEVEL", "HIGH_ANGLE", "LOW_ANGLE", "BIRD_EYE", "DUTCH", "OVER_SHOULDER")
+_VALID_MOVEMENTS = (
+    "STATIC", "PAN", "TILT", "DOLLY_IN", "DOLLY_OUT", "TRACK",
+    "CRANE", "HANDHELD", "STEADICAM", "ZOOM_IN", "ZOOM_OUT",
+)
+
+
+def _collapse(text: str) -> str:
+    """去掉空格/下划线/连字符/点号后转大写，用于宽松比对（"V.O." / "VO" / "v_o" 视为同一个值）。"""
+    return re.sub(r"[\s_.\-]", "", text).upper()
+
+
+def _coerce_enum_value(
+    value: Any,
+    *,
+    valid_values: tuple[str, ...],
+    aliases: dict[str, str] | None = None,
+) -> Any:
+    """把近似枚举值（中文同义词/缩写/缺下划线/大小写不一致）纠正为合法字面量。
+
+    无法识别时原样返回，交给 pydantic 校验按原有行为报错，不吞掉真正异常的输入。
+    """
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if stripped in valid_values:
+        return stripped
+    collapsed = _collapse(stripped)
+    for candidate in valid_values:
+        if _collapse(candidate) == collapsed:
+            return candidate
+    if aliases:
+        for alias, target in aliases.items():
+            if _collapse(alias) == collapsed:
+                return target
+    return value
+
 
 _SCRIPT_EXTRACTOR_SYSTEM_PROMPT = """\
 你是\"Studio 信息提取员\"。你的任务是：基于章节原文、分镜结果（以及可选的一致性检查输出），输出可直接导入 Studio 的草稿结构 StudioScriptExtractionDraft（注意：ID 由导入 API 生成，因此这里全部使用 name 做引用键）。
@@ -104,6 +164,38 @@ class ElementExtractorAgent(AgentBase[StudioScriptExtractionDraft]):
         for key in ("character_names", "prop_names", "costume_names", "dialogue_lines", "actions"):
             if not isinstance(normalized.get(key), list):
                 normalized[key] = []
+        normalized["dialogue_lines"] = [
+            self._normalize_dialogue_line(line) for line in normalized["dialogue_lines"]
+        ]
+        suggestion = normalized.get("semantic_suggestion")
+        if isinstance(suggestion, dict):
+            normalized["semantic_suggestion"] = self._normalize_semantic_suggestion(suggestion)
+        return normalized
+
+    def _normalize_dialogue_line(self, line: Any) -> Any:
+        """纠正对白行的 `line_mode`（常见漂移：中文同义词 / 漏下划线）。"""
+
+        if not isinstance(line, dict):
+            return line
+        normalized = dict(line)
+        if "line_mode" in normalized:
+            normalized["line_mode"] = _coerce_enum_value(
+                normalized["line_mode"],
+                valid_values=_VALID_LINE_MODES,
+                aliases=_LINE_MODE_ALIASES,
+            )
+        return normalized
+
+    def _normalize_semantic_suggestion(self, suggestion: dict[str, Any]) -> dict[str, Any]:
+        """纠正镜头语义建议里的景别/机位/运镜枚举值格式漂移。"""
+
+        normalized = dict(suggestion)
+        if "camera_shot" in normalized:
+            normalized["camera_shot"] = _coerce_enum_value(normalized["camera_shot"], valid_values=_VALID_CAMERA_SHOTS)
+        if "angle" in normalized:
+            normalized["angle"] = _coerce_enum_value(normalized["angle"], valid_values=_VALID_ANGLES)
+        if "movement" in normalized:
+            normalized["movement"] = _coerce_enum_value(normalized["movement"], valid_values=_VALID_MOVEMENTS)
         return normalized
 
     def _normalize(self, data: dict[str, Any]) -> dict[str, Any]:
