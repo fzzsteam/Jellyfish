@@ -26,6 +26,17 @@ celery_app.conf.update(
     task_ignore_result=True,
     timezone="Asia/Shanghai",
     enable_utc=False,
+    # 全局超时兜底：所有已注册 executor 里最长的显式超时是 video_generation 的 3600s
+    # （见 task_registry.py），这里留出余量设到 3900/4200s，正常任务不会触碰到。
+    # 背景：script_divide 曾经在积分冻结阶段卡进一次没有 socket 超时的 Redis 调用，
+    # 应用层的 DivideTaskExecutor.timeout_seconds 只在阶段之间做协作式检查、不会打断
+    # 正在阻塞的单次调用，导致一个任务实打实挂了 11+ 小时，只能人工在 UI 里取消。
+    # task_soft_time_limit 到点后在 worker 内抛 SoftTimeLimitExceeded（可被现有的
+    # except Exception 捕获，走正常的失败结算+解冻流程）；task_time_limit 是最后一道
+    # 硬限制，SoftTimeLimitExceeded 未能让任务及时退出时由 Celery 直接 SIGKILL 子进程，
+    # 保证 worker 槽位最终一定能被释放。
+    task_soft_time_limit=3900,
+    task_time_limit=4200,
 )
 
 # Celery Beat 定时调度表。

@@ -73,8 +73,18 @@ def _default_redis_factory() -> aioredis.Redis:
 
     放在模块级而非配置里，便于测试用 monkeypatch 替换为共享的 fakeredis 客户端，
     从而让账户变更在测试中真正互斥。
+
+    必须显式传 socket_connect_timeout/socket_timeout：Redis 连接一旦半开（网络静默丢包等），
+    裸的 aioredis 客户端会无限期等待响应，而 RedisUserLock 的 wait_ms/退避预算全都建立在
+    单次 SET 调用能正常返回的前提上——曾经因为这里没配超时，一次卡死的 SET 调用把整个
+    Celery worker 任务挂起了 11+ 小时，只能靠人工在 UI 里取消。超时值远小于
+    settings.points_lock_wait_ms，保证单次调用卡住时还有机会走退避重试。
     """
-    return aioredis.Redis.from_url(settings.celery_broker_url)
+    return aioredis.Redis.from_url(
+        settings.celery_broker_url,
+        socket_connect_timeout=2,
+        socket_timeout=2,
+    )
 
 
 # 测试通过 monkeypatch 替换此符号即可注入 fakeredis。
