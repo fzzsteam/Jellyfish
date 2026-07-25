@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     redis_password: str | None = None
     celery_broker_url: str | None = None
 
+    # Celery worker 全局并发上限：所有任务类型/供应商共享同一个池子，超出的任务
+    # 留在队列里排队（Celery 拉取式消费的默认行为），不需要额外的限流/排队代码。
+    # 背景：阿里百炼图片生成接口有严格的并发配额，一键提取后批量触发的配图任务曾
+    # 因为无限制并发把配额打爆（429 Throttling.RateQuota），此前该值未设置，
+    # Celery 默认按 CPU 核数跑 prefork 进程池。
+    celery_worker_concurrency: int = 4
+
     # CORS：环境变量中建议使用逗号分隔（更贴近 docker-compose 用法）
     # 也兼容 JSON 数组：'["http://a","http://b"]'
     cors_origins: str = "http://localhost:7788,http://127.0.0.1:7788"

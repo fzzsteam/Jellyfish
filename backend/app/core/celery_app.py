@@ -37,6 +37,11 @@ celery_app.conf.update(
     # 保证 worker 槽位最终一定能被释放。
     task_soft_time_limit=3900,
     task_time_limit=4200,
+    # 全局并发上限：所有任务类型/供应商共享同一个 worker 进程池，超出的任务留在
+    # 队列里排队（Celery 拉取式消费的默认行为），不需要额外的限流/排队代码。
+    # 等价于 CLI 的 --concurrency，写在这里而不是部署命令行里，方便只改环境变量
+    # （CELERY_WORKER_CONCURRENCY）调整、不用碰 docker-compose.yml/supervisord.conf。
+    worker_concurrency=settings.celery_worker_concurrency,
 )
 
 # Celery Beat 定时调度表。
