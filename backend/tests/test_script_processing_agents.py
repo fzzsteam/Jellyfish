@@ -112,3 +112,81 @@ def test_element_extractor_unwraps_model_named_payload() -> None:
     assert result.shots[0].scene_name == "室内茶席"
     assert result.shots[0].dialogue_lines[0].text == "辛苦你了。"
 
+
+def test_element_extractor_coerces_speech_line_mode_alias() -> None:
+    """deepseek 系模型习惯把普通对白标成 "SPEECH"（不在 schema 字面量里），
+
+    实测对该模型的真实输出 100% 复现：一旦命中就导致校验失败、草稿被整体丢弃，
+    表现为"一键分镜拆分完成但没有提取出任何资产"。这里回归验证 "SPEECH" 会被
+    归一化为合法的 "DIALOGUE"，不再触发 pydantic 校验错误。
+    """
+    raw = """
+    {
+      "project_id": "project-1",
+      "chapter_id": "chapter-1",
+      "characters": [{"name": "苏东坡", "description": "文人", "tags": []}],
+      "scenes": [{"name": "合江楼", "description": "居所", "tags": [], "view_count": 1}],
+      "props": [],
+      "costumes": [],
+      "shots": [
+        {
+          "index": 1,
+          "title": "苏东坡感叹",
+          "script_excerpt": "苏东坡说：方有空寓岭海之叹啊……",
+          "scene_name": "合江楼",
+          "character_names": ["苏东坡"],
+          "prop_names": [],
+          "costume_names": [],
+          "dialogue_lines": [
+            {"index": 1, "text": "方有空寓岭海之叹啊……", "line_mode": "SPEECH", "speaker_name": "苏东坡"}
+          ],
+          "actions": ["苏东坡感叹"]
+        }
+      ]
+    }
+    """
+
+    result = _element_extractor(raw).format_output(raw)
+
+    assert isinstance(result, StudioScriptExtractionDraft)
+    assert result.shots[0].dialogue_lines[0].line_mode == "DIALOGUE"
+
+
+def test_element_extractor_defaults_unknown_line_mode_to_dialogue() -> None:
+    """deepseek 系模型的 line_mode 漂移不是固定几个别名能穷举完的——同一条 pipeline
+
+    先后见过 "SPEECH"、"NORMAL" 等不同写法。这里回归验证：即便遇到一个完全没有
+    收录进别名表的新值（如 "NORMAL"），也会兜底成 DIALOGUE 而不是让 pydantic
+    校验失败、把整份原本正确的草稿（角色/场景/道具都提取到了）整体丢弃。
+    """
+    raw = """
+    {
+      "project_id": "project-1",
+      "chapter_id": "chapter-1",
+      "characters": [{"name": "苏东坡", "description": "文人", "tags": []}],
+      "scenes": [{"name": "合江楼", "description": "居所", "tags": [], "view_count": 1}],
+      "props": [],
+      "costumes": [],
+      "shots": [
+        {
+          "index": 1,
+          "title": "苏东坡感叹",
+          "script_excerpt": "苏东坡说：方有空寓岭海之叹啊……",
+          "scene_name": "合江楼",
+          "character_names": ["苏东坡"],
+          "prop_names": [],
+          "costume_names": [],
+          "dialogue_lines": [
+            {"index": 1, "text": "方有空寓岭海之叹啊……", "line_mode": "NORMAL", "speaker_name": "苏东坡"}
+          ],
+          "actions": ["苏东坡感叹"]
+        }
+      ]
+    }
+    """
+
+    result = _element_extractor(raw).format_output(raw)
+
+    assert isinstance(result, StudioScriptExtractionDraft)
+    assert result.shots[0].dialogue_lines[0].line_mode == "DIALOGUE"
+

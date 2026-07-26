@@ -2,12 +2,29 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from langchain_core.prompts import PromptTemplate
 
 from app.chains.agents.base import AgentBase
 from app.schemas.skills.script_processing import ScriptConsistencyCheckResult
+
+
+def _normalize_affected_lines(value: Any) -> Optional[dict[str, int]]:
+    """将 LLM 可能输出的多种 affected_lines 形态归一化为单个 {start_line, end_line} dict。
+
+    LLM 偶尔会把行号范围输出成列表（例如 [{"start_line": 1, "end_line": 2}]），
+    而非 schema 要求的单个对象，此处合并为覆盖全部范围的最小-最大区间，避免校验失败。
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, list):
+        starts = [it.get("start_line") for it in value if isinstance(it, dict) and isinstance(it.get("start_line"), int)]
+        ends = [it.get("end_line") for it in value if isinstance(it, dict) and isinstance(it.get("end_line"), int)]
+        if starts and ends:
+            return {"start_line": min(starts), "end_line": max(ends)}
+        return None
+    return None
 
 _CONSISTENCY_CHECKER_SYSTEM_PROMPT = """\
 你是\"一致性检查员\"。只做一件事：检测原文中是否把“同一个角色”在不同段落/镜头中赋予了不同的身份或行为主体，导致角色混淆（例如：同名不同人、代词指代混乱、行为归属错位）。
@@ -49,7 +66,7 @@ class ConsistencyCheckerAgent(AgentBase[ScriptConsistencyCheckResult]):
             if isinstance(it, dict):
                 it.setdefault("issue_type", "character_confusion")
                 it.setdefault("character_candidates", [])
-                it.setdefault("affected_lines", None)
+                it["affected_lines"] = _normalize_affected_lines(it.get("affected_lines"))
                 it.setdefault("evidence", [])
         if "has_issues" not in data:
             data["has_issues"] = len(data["issues"]) > 0

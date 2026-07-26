@@ -2,6 +2,8 @@
 
 当前职责：
 - `reconcile_stale_freezes`：由 Celery Beat 每 5 分钟调度，补偿逃逸的冻结积分流水。
+  依赖任务终态判断如何结算，因此需要 tasks.reconcile_stale_generation_tasks
+  先把僵死任务标记为 failed，否则冻结会一直保持"任务仍在跑"而不会被处理。
 
 设计说明：
     Celery 任务本身是同步函数（在 prefork 子进程运行），通过 `asyncio.run` 驱动

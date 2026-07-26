@@ -352,19 +352,47 @@ def generate_extraction_result(
     if result is None:
         llm = build_default_text_llm_sync(db, user_id=user_id, thinking=False)
         agent = ElementExtractorAgent(llm)
-        result = agent.extract(
+        extract_kwargs = dict(
             project_id=project_id,
             chapter_id=chapter_id,
             script_text=resolved_script_text,
             script_division_json=json.dumps(script_division, ensure_ascii=False),
             consistency_json=json.dumps(consistency or {}, ensure_ascii=False),
         )
+        result = agent.extract(**extract_kwargs)
+        # deepseek 系模型偶发会在这类长上下文结构化抽取里"跑偏"：把整段原文
+        # 原样复读进一个 schema 没要求的字段，而 characters/scenes/props/shots
+        # 全部留空——不是解析失败（pydantic 校验通过），是这次生成本身没做抽取
+        # 工作。实测同样的输入换一次调用大概率能拿到正常结果，所以这里做一次
+        # 有界重试（只重试一次，不无限重试），把这种模型抖动对用户屏蔽掉，而不是
+        # 直接静默丢弃整份候选、让"一键分镜拆分"看似成功实则没有任何资产。
+        if not _draft_has_extractable_candidates(result):
+            logger.warning(
+                "script_extract: 首次提取草稿为空，重试一次 chapter_id=%s script_text_len=%d",
+                chapter_id,
+                len(resolved_script_text),
+            )
+            result = agent.extract(**extract_kwargs)
+
         if _draft_has_extractable_candidates(result):
             set_cached_script_extract(cache_key, result)
         else:
+            # 记录草稿的整体形状而非仅一句"为空"：区分"LLM 连 shots 骨架都没输出"
+            # （通常是这次调用本身出了问题，如超时重试后拿到降级/截断响应）与
+            # "shots 骨架在、但没识别出任何角色/场景/道具"（更像模型对这段原文
+            # 真判断没有可提取实体）。没有这层信息时，排查空草稿只能靠离线重放
+            # 复现整条链路，成本很高。
+            shots = list(getattr(result, "shots", []) or [])
             logger.warning(
-                "script_extract: 本次提取草稿为空，不写入缓存 chapter_id=%s",
+                "script_extract: 重试后草稿仍为空，不写入缓存 chapter_id=%s "
+                "script_text_len=%d shots_len=%d characters=%d scenes=%d props=%d costumes=%d",
                 chapter_id,
+                len(resolved_script_text),
+                len(shots),
+                len(getattr(result, "characters", []) or []),
+                len(getattr(result, "scenes", []) or []),
+                len(getattr(result, "props", []) or []),
+                len(getattr(result, "costumes", []) or []),
             )
 
     return result, from_cache

@@ -16,7 +16,7 @@ from app.core.db import reset_db_runtime
 celery_app = Celery(
     "jellyfish",
     broker=settings.celery_broker_url,
-    include=["app.tasks.execute_task", "app.tasks.points"],
+    include=["app.tasks.execute_task", "app.tasks.points", "app.tasks.task_reconciliation"],
 )
 
 celery_app.conf.update(
@@ -50,6 +50,13 @@ celery_app.conf.update(
 celery_app.conf.beat_schedule = {
     "reconcile-stale-point-freezes": {
         "task": "points.reconcile_stale_freezes",
+        "schedule": 300.0,
+    },
+    # 必须先于/与 reconcile-stale-point-freezes 配合运行：GenerationTask 被硬杀死后
+    # 永远停在 running，freeze 对账会因为"任务仍在跑"而永远跳过，见
+    # app/services/worker/task_reconciliation.py 的设计说明。
+    "reconcile-stale-generation-tasks": {
+        "task": "tasks.reconcile_stale_generation_tasks",
         "schedule": 300.0,
     },
 }

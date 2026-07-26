@@ -28,6 +28,10 @@ _LINE_MODE_ALIASES: dict[str, str] = {
     "电话音": "PHONE",
     "对白": "DIALOGUE",
     "台词": "DIALOGUE",
+    # deepseek 系模型（经百炼）习惯把普通对白标成 "SPEECH"，不在 schema 字面量里，
+    # 实测对该模型 100% 复现：一旦命中就导致该镜头/乃至整份草稿校验失败被丢弃。
+    "SPEECH": "DIALOGUE",
+    "SPEAK": "DIALOGUE",
 }
 _VALID_LINE_MODES = ("DIALOGUE", "VOICE_OVER", "OFF_SCREEN", "PHONE")
 _VALID_CAMERA_SHOTS = ("ECU", "CU", "MCU", "MS", "MLS", "LS", "ELS")
@@ -173,17 +177,27 @@ class ElementExtractorAgent(AgentBase[StudioScriptExtractionDraft]):
         return normalized
 
     def _normalize_dialogue_line(self, line: Any) -> Any:
-        """纠正对白行的 `line_mode`（常见漂移：中文同义词 / 漏下划线）。"""
+        """纠正对白行的 `line_mode`（常见漂移：中文同义词 / 漏下划线）。
+
+        deepseek 系模型对这个字段的漂移不是固定的几个别名能穷举完的——实测同一条
+        pipeline 先后见过 "SPEECH"、"NORMAL" 等不同写法。line_mode 只是"对白行"
+        这条数据里权重最低的一个标注字段（远不如角色名/场景名/道具名重要），
+        但一旦漂移不在别名表里就会导致 pydantic 直接拒绝整份草稿——25 个镜头、
+        十几个角色场景道具全部作废。这里把"归一化后仍不认识的值"兜底为最常见的
+        DIALOGUE，而不是任由 pydantic 报错吞掉整份原本正确的草稿；这是唯一一个
+        做兜底默认值的枚举字段，camera_shot/angle/movement 语义更重要，保持严格。
+        """
 
         if not isinstance(line, dict):
             return line
         normalized = dict(line)
         if "line_mode" in normalized:
-            normalized["line_mode"] = _coerce_enum_value(
+            coerced = _coerce_enum_value(
                 normalized["line_mode"],
                 valid_values=_VALID_LINE_MODES,
                 aliases=_LINE_MODE_ALIASES,
             )
+            normalized["line_mode"] = coerced if coerced in _VALID_LINE_MODES else "DIALOGUE"
         return normalized
 
     def _normalize_semantic_suggestion(self, suggestion: dict[str, Any]) -> dict[str, Any]:

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
 import re
+import time
 from abc import ABC, abstractmethod
 from typing import Any, Generic, TypeVar, cast
 
@@ -16,6 +18,29 @@ from pydantic import BaseModel
 STRUCTURED_OUTPUT_METHOD = "function_calling"
 
 T = TypeVar("T", bound=BaseModel)
+
+logger = logging.getLogger(__name__)
+
+_RESPONSE_LOG_PREVIEW_CHARS = 4000
+
+
+def _preview_for_log(value: Any) -> str:
+    """把 LLM 原始/结构化返回值截断成可打日志的预览串。
+
+    诊断"任务成功但内容为空/漂移"这类问题时，只有耗时没有内容是不够的——
+    之前排查空草稿就是因为看不到模型实际返回了什么，只能靠离线复现（成本高，
+    还不一定能命中同一次模型抖动）。这里统一截断到固定长度，避免大段 JSON
+    （几十 KB）把日志刷爆，但保留足够上下文判断"真空" vs "结构漂移"。
+    """
+    if isinstance(value, BaseModel):
+        text = json.dumps(value.model_dump(), ensure_ascii=False, default=str)
+    elif isinstance(value, (dict, list)):
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    else:
+        text = str(value)
+    if len(text) > _RESPONSE_LOG_PREVIEW_CHARS:
+        return text[:_RESPONSE_LOG_PREVIEW_CHARS] + f"...(truncated, total {len(text)} chars)"
+    return text
 
 
 def _extract_json_from_text(raw: str) -> str:
@@ -292,14 +317,30 @@ class AgentBase(ABC, Generic[T]):
     def run(self, **kwargs: Any) -> str:
         """调用 agent，返回原始字符串（通常为 JSON）。"""
         chain: Runnable = self.create_agent()
+        started_at = time.monotonic()
         result = chain.invoke(kwargs)
-        return self._last_message_content(result)
+        raw = self._last_message_content(result)
+        logger.info(
+            "%s.run: LLM 调用耗时 %.1fs, raw=%s",
+            type(self).__name__,
+            time.monotonic() - started_at,
+            _preview_for_log(raw),
+        )
+        return raw
 
     async def arun(self, **kwargs: Any) -> str:
         """异步调用 agent。"""
         chain: Runnable = self.create_agent()
+        started_at = time.monotonic()
         result = await chain.ainvoke(kwargs)
-        return self._last_message_content(result)
+        raw = self._last_message_content(result)
+        logger.info(
+            "%s.arun: LLM 调用耗时 %.1fs, raw=%s",
+            type(self).__name__,
+            time.monotonic() - started_at,
+            _preview_for_log(raw),
+        )
+        return raw
 
     def format_output(self, raw: str) -> T:
         """将 agent 原始输出解析为结构化结果（JSON → 规范化 → Pydantic）。"""
@@ -314,30 +355,57 @@ class AgentBase(ABC, Generic[T]):
         """执行：优先 with_structured_output，否则 run + format_output。"""
         chain = self._get_structured_chain()
         if chain is not None:
+            started_at = time.monotonic()
             try:
                 state = chain.invoke(kwargs)
+                logger.info(
+                    "%s.extract: structured-output LLM 调用耗时 %.1fs",
+                    type(self).__name__,
+                    time.monotonic() - started_at,
+                )
                 result = self._extract_structured_response(state)
+                logger.info("%s.extract: structured-output 返回内容 result=%s", type(self).__name__, _preview_for_log(result))
                 if isinstance(result, self.output_model):
                     return cast(T, result)
                 if isinstance(result, dict):
                     data = self._normalize(result)
                     return self.output_model.model_validate(data)
             except Exception:
-                pass
+                # structured-output 路径失败会静默降级到 run+format_output 重新发起一次
+                # 独立 LLM 调用；这里只记日志、不改变降级行为，否则排查空结果/漂移字段
+                # 只能靠离线复现（成本高、还不一定能命中同样的模型抖动）。
+                logger.warning(
+                    "%s: structured-output 解析失败（耗时 %.1fs 后），降级为 run+format_output 重试",
+                    type(self).__name__,
+                    time.monotonic() - started_at,
+                    exc_info=True,
+                )
         return self.format_output(self.run(**kwargs))
 
     async def aextract(self, **kwargs: Any) -> T:
         """异步执行。"""
         chain = self._get_structured_chain()
         if chain is not None:
+            started_at = time.monotonic()
             try:
                 state = await chain.ainvoke(kwargs)
+                logger.info(
+                    "%s.aextract: structured-output LLM 调用耗时 %.1fs",
+                    type(self).__name__,
+                    time.monotonic() - started_at,
+                )
                 result = self._extract_structured_response(state)
+                logger.info("%s.aextract: structured-output 返回内容 result=%s", type(self).__name__, _preview_for_log(result))
                 if isinstance(result, self.output_model):
                     return cast(T, result)
                 if isinstance(result, dict):
                     data = self._normalize(result)
                     return self.output_model.model_validate(data)
             except Exception:
-                pass
+                logger.warning(
+                    "%s: structured-output 解析失败（耗时 %.1fs 后），降级为 run+format_output 重试",
+                    type(self).__name__,
+                    time.monotonic() - started_at,
+                    exc_info=True,
+                )
         return self.format_output(await self.arun(**kwargs))

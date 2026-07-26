@@ -528,6 +528,68 @@ def test_sync_executor_marks_failed_on_boundary_timeout(tmp_path) -> None:
     sync_engine.dispose()
 
 
+def test_sync_executor_does_not_overwrite_success_when_apply_phase_crosses_timeout(tmp_path) -> None:
+    """回归验证：_apply_and_finish 一旦正常返回（未抛异常），其内部事务已经把
+
+    status=succeeded 连同 apply_result 的产出一起 commit 完毕。此前 run() 在
+    _apply_and_finish 之后还会再做一次 _ensure_not_timed_out；如果 apply 阶段本身
+    耗时较长、总耗时压线超过 timeout_seconds，这次多余检查会把已经成功提交的
+    结果覆盖回 failed——制造"任务显示失败但产出（如分镜/资产候选）确实存在"的
+    假象。这里模拟慢的是 apply_result（对应真实场景里的自动资产提取），而不是
+    execute()：execute() 很快完成，超时压线发生在 apply 阶段之后。
+    """
+    db_path = tmp_path / "sync-executor-apply-timeout.db"
+    sync_engine = create_engine(f"sqlite:///{db_path}", future=True)
+    sync_session_local = sessionmaker(sync_engine, class_=Session, expire_on_commit=False)
+
+    import app.models.task  # noqa: F401
+
+    Base.metadata.create_all(sync_engine)
+    with sync_session_local() as db:
+        db.add(
+            GenerationTask(
+                id="task-apply-timeout",
+                user_id="test-user",
+                mode="async_polling",
+                task_kind="script_divide",
+                status="pending",
+                progress=0,
+                payload={"task_kind": "script_divide", "run_args": {}},
+                result=None,
+                error="",
+            )
+        )
+        db.commit()
+
+    class _SlowApplyExecutor(AbstractWorkerTaskExecutor):
+        task_kind = "script_divide"
+        timeout_seconds = 0.02
+
+        def __init__(self) -> None:
+            super().__init__(session_maker=sync_session_local)
+
+        def execute(self, ctx: WorkerTaskContext, run_args: dict[str, object]) -> dict[str, object]:  # noqa: ARG002
+            return {"ok": True}
+
+        def should_apply(self, ctx: WorkerTaskContext, run_args: dict[str, object], result: object) -> bool:  # noqa: ARG002
+            return True
+
+        def apply_result(self, ctx: WorkerTaskContext, run_args: dict[str, object], result: object) -> None:  # noqa: ARG002
+            import time
+
+            time.sleep(0.05)
+
+    _SlowApplyExecutor().run("task-apply-timeout")
+
+    with sync_session_local() as db:
+        row = db.get(GenerationTask, "task-apply-timeout")
+        assert row is not None
+        assert row.status == "succeeded"
+        assert row.progress == 100
+
+    sync_engine.dispose()
+
+
 def test_task_executor_registry_resolves_sync_and_async_executor_types() -> None:
     divide_executor = task_executor_registry.resolve("script_divide")
     video_executor = task_executor_registry.resolve("video_generation")

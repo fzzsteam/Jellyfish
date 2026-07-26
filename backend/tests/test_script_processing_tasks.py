@@ -369,6 +369,103 @@ def test_generate_extraction_result_ignores_empty_cached_draft(monkeypatch) -> N
         engine.dispose()
 
 
+def test_generate_extraction_result_retries_once_when_fresh_draft_is_empty(monkeypatch) -> None:
+    """deepseek 等模型偶发在一次调用里"跑偏"（例如把原文复读进多余字段、
+
+    characters/scenes/props/shots 全部留空），但同样的输入换一次调用大概率
+    能拿到正常结果。回归验证：generate_extraction_result 在首次结果为空草稿时
+    会自动重试一次；重试成功则采用重试结果并写入缓存，不再需要用户自己重新
+    发起一次"一键分镜拆分"才能拿到资产。
+    """
+    engine = create_engine("sqlite:///:memory:", future=True)
+    SessionLocal = sessionmaker(engine, class_=Session, expire_on_commit=False)
+
+    import app.models.studio  # noqa: F401
+
+    Base.metadata.create_all(engine)
+    clear_script_extract_cache()
+    db = SessionLocal()
+    try:
+        db.add(
+            Project(
+                id="project-1",
+                name="测试项目",
+                description="",
+                style="真人古装",
+                seed=0,
+                user_id="test-user",
+            )
+        )
+        db.add(
+            Chapter(
+                id="chapter-1",
+                project_id="project-1",
+                index=1,
+                title="第一章",
+                summary="",
+                raw_text="朝云端茶入室，苏东坡颔首。",
+                condensed_text="",
+            )
+        )
+        db.flush()
+
+        script_division = {"shots": [{"index": 1, "script_excerpt": "朝云端茶入室。"}], "total_shots": 1}
+
+        calls = {"extract": 0}
+
+        class _FakeAgent:
+            def __init__(self, _llm) -> None:
+                pass
+
+            def extract(self, **_kwargs):
+                calls["extract"] += 1
+                if calls["extract"] == 1:
+                    # 首次调用"跑偏"：shots 骨架都没有，模拟模型没做抽取工作。
+                    return StudioScriptExtractionDraft(
+                        project_id="project-1",
+                        chapter_id="chapter-1",
+                        script_text="朝云端茶入室，苏东坡颔首。",
+                        shots=[],
+                    )
+                return StudioScriptExtractionDraft(
+                    project_id="project-1",
+                    chapter_id="chapter-1",
+                    script_text="朝云端茶入室，苏东坡颔首。",
+                    shots=[
+                        StudioShotDraft(
+                            index=1,
+                            title="朝云端茶",
+                            script_excerpt="朝云端茶入室。",
+                            character_names=["朝云"],
+                        )
+                    ],
+                )
+
+        monkeypatch.setattr("app.services.script_processing_worker.ElementExtractorAgent", _FakeAgent)
+        monkeypatch.setattr("app.services.script_processing_worker.build_default_text_llm_sync", lambda *_a, **_kw: object())
+
+        from app.services.script_processing_worker import generate_extraction_result
+
+        draft, from_cache = generate_extraction_result(
+            db=db,
+            user_id="test-user",
+            project_id="project-1",
+            chapter_id="chapter-1",
+            script_text="",
+            script_division=script_division,
+            consistency=None,
+            refresh_cache=False,
+        )
+
+        assert from_cache is False
+        assert calls["extract"] == 2
+        assert draft.shots[0].character_names == ["朝云"]
+    finally:
+        clear_script_extract_cache()
+        db.close()
+        engine.dispose()
+
+
 @pytest.mark.asyncio
 async def test_create_extract_task_reuses_existing_active_task() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:", future=True)

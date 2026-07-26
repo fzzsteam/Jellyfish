@@ -54,6 +54,22 @@ class Settings(BaseSettings):
     points_reconcile_min_age_seconds: int = 1800
     points_reconcile_batch_size: int = 100
 
+    # 僵死任务对账：兜底处理被 worker 硬杀死（Celery task_time_limit=4200s，见
+    # app/core/celery_app.py）后永久停留在 pending/running/streaming 的 GenerationTask。
+    # - stale_task_reconcile_min_age_seconds：默认 4500s，覆盖硬超时并留出宽限期，
+    #   正常任务（含各 executor 自身的 timeout_seconds）不会触碰到。
+    # - stale_task_reconcile_batch_size：单批扫描上限，控制单次 Beat tick 的 DB 负载。
+    stale_task_reconcile_min_age_seconds: int = 4500
+    stale_task_reconcile_batch_size: int = 100
+
+    # 文本 LLM 请求超时兜底（秒）。langchain_openai.ChatOpenAI 未显式配置 timeout 时
+    # 默认值是 None，而 openai SDK 把显式传入的 None 视为"用户主动要求不设超时"
+    # （区别于完全不传参时才套用的 600s 内置默认值），导致底层 httpx 请求在供应商
+    # 卡住/无响应时可以真正无限期挂起——直到触发 Celery 的硬超时（4200s）才会被
+    # SIGKILL，期间任务在前端表现为"一直卡住不返回"。这里显式兜底为 600s，
+    # 单个模型仍可通过 models.params 里的 "timeout" 覆盖。
+    llm_request_timeout_seconds: float = 600.0
+
     # 初始管理员账号（仅在 users 表为空时用于播种）
     initial_admin_username: str = "admin"
     initial_admin_password: str | None = None

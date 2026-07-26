@@ -9,6 +9,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models.llm import Model, ModelCategoryKey, ModelSettings, Provider
 from app.services.llm.provider_resolver import resolve_effective_base_url
 
@@ -69,6 +70,9 @@ def _build_text_llm_from_model_sync(
     kwargs["model"] = model.name
     kwargs["api_key"] = api_key
     kwargs.setdefault("temperature", 0)
+    # 显式兜底请求超时：ChatOpenAI 默认 timeout=None 会让 openai SDK 关闭内置的
+    # 600s 默认超时，供应商卡住时请求可无限期挂起（见 config.py 中的说明）。
+    kwargs.setdefault("timeout", settings.llm_request_timeout_seconds)
 
     base_url = resolve_effective_base_url(provider=provider, category=ModelCategoryKey.text)
     if base_url:

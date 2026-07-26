@@ -77,7 +77,15 @@ class AbstractWorkerTaskExecutor(ABC):
                 return
             self._ensure_not_timed_out(task_id, started_at)
             self._apply_and_finish(task_id, run_args, result)
-            self._ensure_not_timed_out(task_id, started_at)
+            # 注意：这里故意不再调用 _ensure_not_timed_out。_apply_and_finish 内部一旦
+            # 正常返回（未抛异常），就已经在它自己的事务里把 status=succeeded 连同
+            # apply_result 的产出（如分镜/资产候选）一起 commit 完毕——真实工作已经
+            # 落库成功。此前在这里再做一次超时检查，只会在总耗时刚好压线超过
+            # timeout_seconds 时抛 TimeoutError，被下面的 except 捕获后用 _mark_failed
+            # 把已经成功提交的结果覆盖回 failed，制造"任务显示失败但产出确实存在"的
+            # 假象（实测：分镜拆分+资产提取全部成功落库，仅因整体耗时压线超过
+            # DivideTaskExecutor.timeout_seconds=1800s，就被这次多余检查判定超时失败）。
+            # 到这一行时已经没有"及时终止"的意义，只有误伤已成功任务的风险。
             self._log_event("succeeded", task_id, elapsed_ms=self._elapsed_ms(started_at))
         except HTTPException as exc:
             error = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
